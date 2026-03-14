@@ -1,0 +1,46 @@
+# OS Junk
+.DS_Store
+Thumb.db
+
+# Xcode / MacOS
+app/DerivedData/
+app/build/
+*.xcuserdata
+*.xcuserstate
+*.xcworkspace
+!default.xcworkspace
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.swp
+*.lock
+profile
+*.orig
+*~
+EOF
+
+# Node.js / Web
+node_modules/
+.next/
+dist/
+build/
+.env*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.vercel
+
+# AI Agent Specific (Private Context)
+.agents/
+.gemini/
+.brain/
+build_log.txt
+app/build_log.txt
+*.py
+
+# Internal Development Docs (Move to private repo or remove from here if they should be public)
+design_brief.md
+kalam_gtm.md
+prompt_editorial_art_book.md
+app/agents.md

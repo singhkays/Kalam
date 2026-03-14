@@ -1,0 +1,80 @@
+[
+    {
+        "name": "Nested Backtrack and Filler",
+        "input": "um I think we should scratch that we must ship one logs two bugs",
+        "expected": "we must ship:\n1. logs\n2. bugs",
+        "description": "Tests combination of filler removal, backtrack (scratch that), and list formatting."
+    },
+    {
+        "name": "False Positive List Marker with Backtrack",
+        "input": "the budget is five billion dollars and actually no the budget is seven billion dollars",
+        "expected": "the budget is 7 billion dollars",
+        "description": "Tests false positive marker '5 billion' and '7 billion' handled by ITN + backtrack."
+    },
+    {
+        "name": "Continuous Dictation with Multiple Backtracks",
+        "input": "send it now no wait actually scratch that delete that send it on Monday morning",
+        "expected": "send it on Monday morning",
+        "description": "Tests multiple backtrack cues in sequence."
+    },
+    {
+        "name": "Mixed ITN and Sentence Normalization",
+        "input": "i have twenty one apples and five hundred oranges period also we need three bananas",
+        "expected": "I have 21 apples and 500 oranges. Also we need 3 bananas.",
+        "description": "Tests ITN for numbers and punctuation, plus sentence capitalization."
+    },
+    {
+        "name": "Complex List with Prepositions",
+        "input": "we have 5 billion users and at 1 we start the server 2 we deploy the code",
+        "expected": "we have 5 billion users and at\n1. we start the server\n2. we deploy the code",
+        "description": "Tests list markers when prepositions are present before the number."
+    },
+    {
+        "name": "Morphological Suffix Match",
+        "input": "I have one apple and two Apples and even three apple's",
+        "expected": "I have 1 apple and 2 Apples and even 3 apple's",
+        "description": "Tests that word rules handle 's and plural suffixes (if configured in dictionary)."
+    },
+    {
+        "name": "Mixed Currency and Dates",
+        "input": "on january fifth the price was fifty dollars and twenty cents",
+        "expected": "On January 5, the price was $50.20",
+        "description": "Tests ITN normalization of dates and currency."
+    },
+    {
+        "name": "Branded Term Case Preservation",
+        "input": "i am using my IPAD to write and EBAY to sell",
+        "expected": "I am using my iPad to write and eBay to sell",
+        "description": "Tests that branded/mixed-case dictionary terms (iPad, eBay) are preserved even if input is differently cased."
+    },
+    {
+        "name": "Smart Casing - TITLE CASE",
+        "input": "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG",
+        "expected": "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG",
+        "description": "Tests that ALL CAPS input is preserved or handled according to configuration."
+    },
+    {
+        "name": "Aggressive Punctuation and Spacing Handling",
+        "input": "   the     quick   brown ,fox ! ! jumped over  ; the lazy dog .  ",
+        "expected": "the quick brown, fox! jumped over; the lazy dog.",
+        "description": "Tests repeated punctuation collapse, leading/trailing space removal, and comma/semicolon spacing corrections."
+    },
+    {
+        "name": "Lengthy Prefix Before List Marker Abort",
+        "input": "this is an intentionally very long sentence that establishes a lot of context and backstory before deciding to start listing things out like 1 the first item 2 the second item",
+        "expected": "this is an intentionally very long sentence that establishes a lot of context and backstory before deciding to start listing things out like 1 the first item 2 the second item",
+        "description": "Tests that list formatting correctly aborts if the prefix text leading up to the markers exceeds the maximum character threshold."
+    },
+    {
+        "name": "Out of Sequence List Fallback",
+        "input": "our requirements are 1 fast rendering 3 low latency 4 offline support",
+        "expected": "our requirements are 1 fast rendering 3 low latency 4 offline support",
+        "description": "Tests that list parsing is strictly sequential and abandons formatting if a numbered item (e.g., 2) is entirely missing."
+    },
+    {
+        "name": "Backtrack within a Numbered List",
+        "input": "plan is one get the logs two check the scratch that two investigate the crash three ship the fix",
+        "expected": "plan is\n1. get the logs\n2. investigate the crash\n3. ship the fix",
+        "description": "Tests a backtrack cue occurring inside a numbered list sequence."
+    }
+]
