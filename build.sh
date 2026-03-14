@@ -68,25 +68,28 @@ hdiutil create -volname "$DMG_VOL_NAME" -srcfolder "$DMG_TEMP_DIR" -ov -format U
 echo "🔌 Mounting intermediate DMG..."
 # -noautoopen prevents Finder from popping up locally
 DEVICE=$(hdiutil attach -readwrite -noverify -noautoopen "$MASTER_DMG" | egrep '^/dev/' | sed 1q | awk '{print $1}')
-sleep 5 # Give Finder more time to see the volume
+sleep 10 # More time for CI to register the disk
 
 # Apply AppleScript for layout
 echo "✍️ Applying AppleScript layout..."
 APPLESCRIPT="
 tell application \"Finder\"
   set diskName to \"$DMG_VOL_NAME\"
-  repeat 15 times
+  
+  # Wait for disk to be available
+  repeat 30 times
     if exists disk diskName then exit repeat
     delay 1
   end repeat
   
   tell disk diskName
-    set theView to container window
-    # Try to open only if not already open
+    # Open window and wait for it to be ready
     try
         open
     end try
-    delay 2
+    delay 5
+    
+    set theView to container window
     set current view of theView to icon view
     set toolbar visible of theView to false
     set statusbar visible of theView to false
@@ -95,17 +98,32 @@ tell application \"Finder\"
     
     set viewOptions to the icon view options of theView
     set icon size of viewOptions to 120
-    set background picture of viewOptions to file (diskName & \":.background:background.png\")
     set arrangement of viewOptions to not arranged
     
-    delay 2
+    # Robust background image assignment
+    set bgPath to diskName & \":.background:background.png\"
+    set bgFile to bgPath as alias
+    
+    repeat 5 times
+        try
+            set background picture of viewOptions to bgFile
+            exit repeat
+        on error
+            delay 2
+        end try
+    end repeat
+    
+    delay 3
     # Icons centered vertically at Y=180
     set position of item \"$APP_NAME.app\" of theView to {150, 180}
     set position of item \"Applications\" of theView to {450, 180}
     
     update every item with registering applications
-    delay 2
-    close
+    delay 5
+    
+    try
+        close
+    end try
   end tell
 end tell
 "
