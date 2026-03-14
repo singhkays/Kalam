@@ -41,6 +41,8 @@ export default function App() {
 
       {/* All content sections on solid warm off-white */}
       <main>
+        <InstallationGuide />
+        <Hairline />
         <DictationEngine />
         <Hairline />
         <CleanupDemo />
@@ -54,7 +56,6 @@ export default function App() {
         <FAQ />
         <Hairline />
         <Privacy />
-        <InstallationGuide />
         <FinalCTA />
       </main>
     </div>

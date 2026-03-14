@@ -5,11 +5,10 @@ export function InstallationGuide() {
       id="installation"
       style={{
         backgroundColor: "#FAFAF7",
-        paddingTop: "clamp(4rem, 8vw, 6rem)",
-        paddingBottom: "clamp(4rem, 8vw, 6rem)",
+        paddingTop: "clamp(3rem, 6vw, 4rem)",
+        paddingBottom: "clamp(2rem, 4vw, 3rem)",
         paddingLeft: "clamp(1.5rem, 8vw, 10rem)",
         paddingRight: "clamp(1.5rem, 8vw, 10rem)",
-        borderTop: "0.5px solid #D4D4D0",
       }}
     >
       <div style={{ maxWidth: "50rem", margin: "0 auto" }}>
