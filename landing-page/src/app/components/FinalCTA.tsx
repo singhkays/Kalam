@@ -6,7 +6,7 @@ export function FinalCTA() {
       <section
         style={{
           backgroundColor: "#FAFAF7",
-          paddingTop: "clamp(6rem, 12vw, 11rem)",
+          paddingTop: "clamp(2rem, 5vw, 4rem)",
           paddingBottom: "clamp(5rem, 10vw, 9rem)",
           paddingLeft: "clamp(1.5rem, 5vw, 5rem)",
           paddingRight: "clamp(1.5rem, 5vw, 5rem)",

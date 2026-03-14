@@ -77,7 +77,7 @@ export function Privacy() {
       style={{
         backgroundColor: "#FAFAF7",
         paddingTop: "clamp(6rem, 12vw, 11rem)",
-        paddingBottom: "clamp(6rem, 12vw, 11rem)",
+        paddingBottom: "clamp(3rem, 6vw, 4rem)",
         paddingLeft: "clamp(1.5rem, 8vw, 10rem)",
         paddingRight: "clamp(1.5rem, 8vw, 10rem)",
       }}
