@@ -167,6 +167,33 @@ export function Hero() {
               View on GitHub
             </button>
           </div>
+
+          {/* Installation Note for Unsigned App */}
+          <div
+            style={{
+              marginTop: "1.5rem",
+              padding: "0.85rem 1rem",
+              backgroundColor: "rgba(26, 92, 58, 0.04)",
+              border: "1px solid rgba(26, 92, 58, 0.1)",
+              borderRadius: "7px",
+              maxWidth: "30rem",
+            }}
+          >
+            <p
+              style={{
+                fontFamily: "'Plus Jakarta Sans', sans-serif",
+                fontSize: "0.8rem",
+                color: "#1A5C3A",
+                margin: 0,
+                lineHeight: 1.5,
+              }}
+            >
+              <strong style={{ fontWeight: 600 }}>Note for macOS:</strong> As
+              Kalam is an independent release, please{" "}
+              <strong style={{ fontWeight: 600 }}>Right-click &gt; Open</strong>{" "}
+              after installation to bypass Gatekeeper.
+            </p>
+          </div>
         </div>
 
         {/* Right: Vector Quill Pen */}
