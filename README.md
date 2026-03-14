@@ -15,10 +15,12 @@ Kalam is a high-performance, premium dictation and audio processing engine for m
 Kalam is a high-performance system utility. To ensure a premium experience, it features a **4-step guided onboarding flow** that helps you configure the app correctly.
 
 ### 1. Security & Gatekeeper
-Kalam is signed with an "ad-hoc" signature. When running it for the first time:
+Kalam is an independent, non-commercial project and is not distributed through the Mac App Store. Because of this, macOS will show a security warning when you first open it. This is normal behavior for independent software.
+
+To start Kalam:
 - **Right-click** (or Control-click) the Kalam app and select **Open**.
 - Click **Open** again in the confirmation dialog.
-- If you see a warning that it's from an "unidentified developer," you can also go to **System Settings > Privacy & Security** and click **"Open Anyway"** at the bottom.
+- You only need to do this once. After the first launch, you can open Kalam normally.
 
 ### 2. Guided Setup (4 Steps)
 The app will automatically guide you through these essential steps:

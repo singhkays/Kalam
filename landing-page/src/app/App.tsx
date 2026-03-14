@@ -7,6 +7,7 @@ import { SpeedAdvantage } from "./components/SpeedAdvantage";
 import { TheDetails } from "./components/TheDetails";
 import { FAQ } from "./components/FAQ";
 import { Privacy } from "./components/Privacy";
+import { InstallationGuide } from "./components/InstallationGuide";
 import { FinalCTA } from "./components/FinalCTA";
 
 const Hairline = () => (
@@ -53,7 +54,7 @@ export default function App() {
         <FAQ />
         <Hairline />
         <Privacy />
-        <Hairline />
+        <InstallationGuide />
         <FinalCTA />
       </main>
     </div>
