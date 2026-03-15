@@ -25,6 +25,17 @@ jobs:
         with:
           xcode-version: '16.0'
 
+      - name: Cache SwiftPM & DerivedData
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Developer/Xcode/DerivedData
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm
+          key: macos-xcode-16.0-spm-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            macos-xcode-16.0-spm-
+
       - name: Build & Package
         env:
           CI: true

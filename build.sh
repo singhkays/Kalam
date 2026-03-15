@@ -29,14 +29,26 @@ echo "📦 Archiving the application..."
 # If SIGNING_IDENTITY is not provided, we use '-' for ad-hoc signing (local only, no notarization possible)
 SIGNING_ID="${SIGNING_IDENTITY:--}"
 
+BUILD_SETTINGS=(
+    "CODE_SIGN_IDENTITY=$SIGNING_ID"
+    "CODE_SIGN_STYLE=Manual"
+)
+
+# CI builds are arm64-only to avoid universal binaries and keep artifacts smaller.
+if [ "$CI" = "true" ]; then
+    BUILD_SETTINGS+=(
+        "ARCHS=arm64"
+        "ONLY_ACTIVE_ARCH=YES"
+    )
+fi
+
 xcodebuild archive \
     -project "$APP_DIR/Kalam.xcodeproj" \
     -scheme "$APP_NAME" \
     -configuration Release \
     -archivePath "$ARCHIVE_PATH" \
     -destination "platform=macOS" \
-    CODE_SIGN_IDENTITY="$SIGNING_ID" \
-    CODE_SIGN_STYLE="Manual"
+    "${BUILD_SETTINGS[@]}"
 
 # App path inside the archive
 APP_PATH="$ARCHIVE_PATH/Products/Applications/$APP_NAME.app"
@@ -137,7 +149,7 @@ sleep 5
 
 DMG_PATH="$BUILD_DIR/$DMG_NAME"
 rm -f "$DMG_PATH"
-hdiutil convert "$MASTER_DMG" -format UDZO -o "$DMG_PATH"
+hdiutil convert "$MASTER_DMG" -format UDZO -imagekey zlib-level=9 -o "$DMG_PATH"
 rm -f "$MASTER_DMG"
 
 echo "✅ Stylized DMG created: $DMG_PATH"
