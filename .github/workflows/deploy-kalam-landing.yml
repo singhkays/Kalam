@@ -1,0 +1,52 @@
+name: Deploy Kalam landing page to singhkays.github.io
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'landing-page/**'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: landing-page/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: landing-page
+
+      - name: Build landing page
+        run: npm run build
+        working-directory: landing-page
+
+      - name: Deploy to singhkays.github.io
+        env:
+          PAGES_PAT: ${{ secrets.PAGES_PAT }}
+        run: |
+          set -e
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git clone https://x-access-token:${PAGES_PAT}@github.com/singhkays/singhkays.github.io.git out
+          cd out
+          rm -rf kalam
+          mkdir -p kalam
+          cp -R ../landing-page/dist/* kalam/
+          git add kalam
+          if ! git diff --cached --quiet; then
+            git commit -m "Deploy Kalam landing page"
+            git push
+          else
+            echo "No changes to deploy"
+          fi
