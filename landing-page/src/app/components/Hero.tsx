@@ -194,7 +194,7 @@ export function Hero() {
         {/* Right: Vector Quill Pen */}
         <div className="quill-wrapper">
           <img
-            src="/vector-quill.png"
+            src={`${import.meta.env.BASE_URL}vector-quill.png`}
             alt="Vector Quill Pen"
             className="hero-quill"
           />

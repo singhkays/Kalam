@@ -26,7 +26,7 @@ export function FinalCTA() {
           }}
         >
           <img
-            src="/vector-quill.png"
+            src={`${import.meta.env.BASE_URL}vector-quill.png`}
             alt="Vector Quill Pen"
             style={{
               height: "clamp(380px, 55vw, 850px)",
