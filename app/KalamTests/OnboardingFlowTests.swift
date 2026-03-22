@@ -25,15 +25,17 @@ final class OnboardingFlowTests: XCTestCase {
         var config = OnboardingConfiguration.defaults
         config.hasCompletedRequiredSetup = true
         config.hasAttemptedAccessibilitySetup = true
+        config.hasConfirmedHFCLIInstall = true
         config.save(to: defaults)
 
         let loaded = OnboardingConfiguration.load(from: defaults)
         XCTAssertTrue(loaded.hasCompletedRequiredSetup)
         XCTAssertTrue(loaded.hasAttemptedAccessibilitySetup)
+        XCTAssertTrue(loaded.hasConfirmedHFCLIInstall)
     }
 
     func testEvaluateReturnsFirstRunWhenNeverCompleted() {
-        let snapshot = OnboardingStatusSnapshot.evaluate(
+        let snapshot = makeSnapshot(
             microphoneAuthorization: .notDetermined,
             accessibilityTrusted: false,
             hasAttemptedAccessibilitySetup: false,
@@ -53,7 +55,7 @@ final class OnboardingFlowTests: XCTestCase {
     }
 
     func testEvaluateReturnsRepairWhenCompletedUserRegresses() {
-        let snapshot = OnboardingStatusSnapshot.evaluate(
+        let snapshot = makeSnapshot(
             microphoneAuthorization: .authorized,
             accessibilityTrusted: false,
             hasAttemptedAccessibilitySetup: false,
@@ -63,7 +65,8 @@ final class OnboardingFlowTests: XCTestCase {
             installedModelVersions: [.v2],
             hasCompletedRequiredSetup: true,
             isAudioReady: true,
-            isASRReady: true
+            isASRReady: true,
+            hasPickedHotkey: true
         )
 
         XCTAssertEqual(snapshot.mode, .repair)
@@ -73,7 +76,7 @@ final class OnboardingFlowTests: XCTestCase {
     }
 
     func testEvaluateAllowsStartOnlyAfterRuntimePrep() {
-        let baseSnapshot = OnboardingStatusSnapshot.evaluate(
+        let baseSnapshot = makeSnapshot(
             microphoneAuthorization: .authorized,
             accessibilityTrusted: true,
             hasAttemptedAccessibilitySetup: false,
@@ -83,14 +86,15 @@ final class OnboardingFlowTests: XCTestCase {
             installedModelVersions: [.v2],
             hasCompletedRequiredSetup: false,
             isAudioReady: false,
-            isASRReady: false
+            isASRReady: false,
+            hasPickedHotkey: true
         )
 
-        XCTAssertEqual(baseSnapshot.completedRequirements, 3)
+        XCTAssertEqual(baseSnapshot.completedRequirements, 4)
         XCTAssertFalse(baseSnapshot.canStartDictating)
         XCTAssertEqual(baseSnapshot.runtimePreparationMessage, "Preparing microphone…")
 
-        let readySnapshot = OnboardingStatusSnapshot.evaluate(
+        let readySnapshot = makeSnapshot(
             microphoneAuthorization: .authorized,
             accessibilityTrusted: true,
             hasAttemptedAccessibilitySetup: false,
@@ -100,7 +104,8 @@ final class OnboardingFlowTests: XCTestCase {
             installedModelVersions: [.v2],
             hasCompletedRequiredSetup: false,
             isAudioReady: true,
-            isASRReady: true
+            isASRReady: true,
+            hasPickedHotkey: true
         )
 
         XCTAssertTrue(readySnapshot.canStartDictating)
@@ -108,7 +113,7 @@ final class OnboardingFlowTests: XCTestCase {
     }
 
     func testEvaluateMarksInvalidModelFolderAsBrokenRequirement() {
-        let snapshot = OnboardingStatusSnapshot.evaluate(
+        let snapshot = makeSnapshot(
             microphoneAuthorization: .authorized,
             accessibilityTrusted: true,
             hasAttemptedAccessibilitySetup: false,
@@ -118,7 +123,8 @@ final class OnboardingFlowTests: XCTestCase {
             installedModelVersions: [],
             hasCompletedRequiredSetup: true,
             isAudioReady: true,
-            isASRReady: false
+            isASRReady: false,
+            hasPickedHotkey: true
         )
 
         XCTAssertEqual(snapshot.mode, .repair)
@@ -159,9 +165,63 @@ final class OnboardingFlowTests: XCTestCase {
     }
 
     @MainActor
-    private func makeController(accessibilityTrustCheck: @escaping () -> Bool) -> OnboardingFlowController {
+    func testConfirmHFCLIInstalledPersistsFlag() {
+        var savedConfiguration = OnboardingConfiguration.defaults
+        let controller = makeController(
+            loadOnboardingConfiguration: { savedConfiguration },
+            saveOnboardingConfiguration: { savedConfiguration = $0 }
+        )
+
+        controller.confirmHFCLIInstalled()
+
+        XCTAssertTrue(savedConfiguration.hasConfirmedHFCLIInstall)
+    }
+
+    @MainActor
+    func testModelSetupWizardStateUnlocksWithManualCLIConfirmation() {
+        var onboardingConfiguration = OnboardingConfiguration.defaults
+        onboardingConfiguration.hasConfirmedHFCLIInstall = true
+
+        let controller = makeController(
+            snapshot: folderReadySnapshot(),
+            loadOnboardingConfiguration: { onboardingConfiguration }
+        )
+
+        XCTAssertTrue(controller.modelSetupWizardState.isCLIComplete)
+        XCTAssertTrue(controller.modelSetupWizardState.isCLIManuallyConfirmed)
+        XCTAssertEqual(controller.modelSetupWizardState.currentStep, .download)
+    }
+
+    @MainActor
+    func testModelSetupWizardStateRequiresManualConfirmationWhenModelMissing() {
+        let controller = makeController(snapshot: folderReadySnapshot())
+
+        XCTAssertFalse(controller.modelSetupWizardState.isCLIComplete)
+        XCTAssertFalse(controller.modelSetupWizardState.isCLIManuallyConfirmed)
+        XCTAssertEqual(controller.modelSetupWizardState.currentStep, .cli)
+    }
+
+    @MainActor
+    func testChangingSelectedDownloadVersionClearsCopiedDownloadState() {
+        let controller = makeController(snapshot: folderReadySnapshot())
+
+        controller.copyDownloadCommand()
+        XCTAssertTrue(controller.downloadCommandCopied)
+
+        controller.selectedDownloadVersion = .v3
+
+        XCTAssertFalse(controller.downloadCommandCopied)
+    }
+
+    @MainActor
+    private func makeController(
+        snapshot: OnboardingStatusSnapshot? = nil,
+        accessibilityTrustCheck: @escaping () -> Bool = { false },
+        loadOnboardingConfiguration: @escaping () -> OnboardingConfiguration = { .defaults },
+        saveOnboardingConfiguration: @escaping (OnboardingConfiguration) -> Void = { _ in }
+    ) -> OnboardingFlowController {
         OnboardingFlowController(
-            snapshot: baseSnapshot(),
+            snapshot: snapshot ?? baseSnapshot(),
             requestMicrophoneAccessAction: {},
             refreshAction: {},
             openSettingsAction: {},
@@ -169,13 +229,14 @@ final class OnboardingFlowTests: XCTestCase {
             openAccessibilitySettingsAction: {},
             accessibilityTrustCheck: accessibilityTrustCheck,
             relaunchAppAction: {},
-            saveOnboardingConfiguration: { _ in },
+            loadOnboardingConfiguration: loadOnboardingConfiguration,
+            saveOnboardingConfiguration: saveOnboardingConfiguration,
             startDictationAction: {}
         )
     }
 
     private func baseSnapshot() -> OnboardingStatusSnapshot {
-        OnboardingStatusSnapshot.evaluate(
+        makeSnapshot(
             microphoneAuthorization: .authorized,
             accessibilityTrusted: false,
             hasAttemptedAccessibilitySetup: false,
@@ -190,7 +251,7 @@ final class OnboardingFlowTests: XCTestCase {
     }
 
     private func readySnapshot() -> OnboardingStatusSnapshot {
-        OnboardingStatusSnapshot.evaluate(
+        makeSnapshot(
             microphoneAuthorization: .authorized,
             accessibilityTrusted: true,
             hasAttemptedAccessibilitySetup: false,
@@ -200,12 +261,60 @@ final class OnboardingFlowTests: XCTestCase {
             installedModelVersions: [.v2],
             hasCompletedRequiredSetup: false,
             isAudioReady: true,
-            isASRReady: true
+            isASRReady: true,
+            hasPickedHotkey: true
+        )
+    }
+
+    private func folderReadySnapshot() -> OnboardingStatusSnapshot {
+        makeSnapshot(
+            microphoneAuthorization: .authorized,
+            accessibilityTrusted: true,
+            hasAttemptedAccessibilitySetup: false,
+            selectedModelVersion: .v2,
+            modelLibraryURL: URL(fileURLWithPath: "/tmp/models", isDirectory: true),
+            selectedModelAvailability: .missingModelFolder(expectedPath: "/tmp/models/parakeet-tdt-0.6b-v2-coreml"),
+            installedModelVersions: [],
+            hasCompletedRequiredSetup: false,
+            isAudioReady: true,
+            isASRReady: false
+        )
+    }
+
+    private func makeSnapshot(
+        microphoneAuthorization: AVAuthorizationStatus,
+        accessibilityTrusted: Bool,
+        hasAttemptedAccessibilitySetup: Bool,
+        selectedModelVersion: ASRModelVersion,
+        modelLibraryURL: URL?,
+        selectedModelAvailability: ASRModelAvailability,
+        installedModelVersions: [ASRModelVersion],
+        hasCompletedRequiredSetup: Bool,
+        isAudioReady: Bool,
+        isASRReady: Bool,
+        selectedMicrophoneName: String? = nil,
+        hotkeyConfig: PTTHotkeyConfiguration = .defaults,
+        hasPickedHotkey: Bool = false
+    ) -> OnboardingStatusSnapshot {
+        OnboardingStatusSnapshot.evaluate(
+            microphoneAuthorization: microphoneAuthorization,
+            selectedMicrophoneName: selectedMicrophoneName,
+            accessibilityTrusted: accessibilityTrusted,
+            hasAttemptedAccessibilitySetup: hasAttemptedAccessibilitySetup,
+            hotkeyConfig: hotkeyConfig,
+            hasPickedHotkey: hasPickedHotkey,
+            selectedModelVersion: selectedModelVersion,
+            modelLibraryURL: modelLibraryURL,
+            selectedModelAvailability: selectedModelAvailability,
+            installedModelVersions: installedModelVersions,
+            hasCompletedRequiredSetup: hasCompletedRequiredSetup,
+            isAudioReady: isAudioReady,
+            isASRReady: isASRReady
         )
     }
 
     func testEvaluatePreservesAccessibilityRecoveryStateAfterAttempt() {
-        let snapshot = OnboardingStatusSnapshot.evaluate(
+        let snapshot = makeSnapshot(
             microphoneAuthorization: .authorized,
             accessibilityTrusted: false,
             hasAttemptedAccessibilitySetup: true,

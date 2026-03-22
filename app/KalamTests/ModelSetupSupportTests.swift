@@ -2,35 +2,66 @@ import XCTest
 @testable import Kalam_test
 
 final class ModelSetupSupportTests: XCTestCase {
-    private func makeTemporaryExecutable(named name: String) throws -> URL {
-        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        let fileURL = tempDir.appendingPathComponent(name)
-        let contents = "#!/bin/sh\necho hello\n"
-        try contents.write(to: fileURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fileURL.path)
-        return fileURL
+    private var defaults: UserDefaults!
+    private var suiteName: String!
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "ModelSetupSupportTests.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)!
     }
 
     override func tearDown() {
+        if let suiteName {
+            defaults?.removePersistentDomain(forName: suiteName)
+        }
+        defaults = nil
+        suiteName = nil
         super.tearDown()
-        ModelSetupSupport.clearCustomHuggingFaceCLIPath()
     }
 
-    func testCustomCLIPathIsRespected() throws {
-        let cliURL = try makeTemporaryExecutable(named: "hf-test-cli")
+    func testDownloadCommandTargetsSelectedFolder() throws {
+        let folderURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
 
-        ModelSetupSupport.huggingFaceCLICustomURL = cliURL
-        XCTAssertEqual(ModelSetupSupport.huggingFaceCLICustomURL, cliURL)
-        XCTAssertEqual(ModelSetupSupport.findHuggingFaceCLIPath(), cliURL)
-        XCTAssertTrue(ModelSetupSupport.isHuggingFaceCLIAvailable())
+        var config = ModelsConfiguration.defaults
+        try config.setModelLibraryURL(folderURL)
+
+        let command = ModelSetupSupport.downloadCommand(for: .v2, config: config)
+
+        XCTAssertTrue(command.contains("hf download FluidInference/parakeet-tdt-0.6b-v2-coreml"))
+        XCTAssertTrue(command.contains("--local-dir \(folderURL.path)/parakeet-tdt-0.6b-v2-coreml"))
     }
 
-    func testClearCustomCLIPathRemovesOverride() throws {
-        let cliURL = try makeTemporaryExecutable(named: "hf-test-cli-2")
-        ModelSetupSupport.huggingFaceCLICustomURL = cliURL
-        XCTAssertNotNil(ModelSetupSupport.huggingFaceCLICustomURL)
+    func testSelectedModelRepoFolderVersionDetectsKnownRepoFolder() {
+        let repoURL = URL(fileURLWithPath: "/tmp/parakeet-tdt-0.6b-v3-coreml", isDirectory: true)
 
-        ModelSetupSupport.clearCustomHuggingFaceCLIPath()
-        XCTAssertNil(ModelSetupSupport.huggingFaceCLICustomURL)
+        XCTAssertEqual(ModelSetupSupport.selectedModelRepoFolderVersion(for: repoURL), .v3)
+    }
+
+    func testLoadPersistedNormalizedSelectedModelPromotesInstalledVersion() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelSetupSupportTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let modelURL = rootURL.appendingPathComponent(ASRModelVersion.v3.repositoryFolderName, isDirectory: true)
+        try FileManager.default.createDirectory(at: modelURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: modelURL.appendingPathComponent("Preprocessor.mlmodelc", isDirectory: true), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: modelURL.appendingPathComponent("Encoder.mlmodelc", isDirectory: true), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: modelURL.appendingPathComponent("Decoder.mlmodelc", isDirectory: true), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: modelURL.appendingPathComponent("JointDecision.mlmodelc", isDirectory: true), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: modelURL.appendingPathComponent("parakeet_vocab.json").path, contents: Data("{}".utf8))
+
+        var config = ModelsConfiguration.defaults
+        config.asrVersion = .v2
+        try config.setModelLibraryURL(rootURL)
+        config.save(to: defaults)
+
+        let normalized = ModelSetupSupport.loadPersistedNormalizedSelectedModel(from: defaults)
+
+        XCTAssertEqual(normalized.asrVersion, .v3)
+        XCTAssertEqual(ModelsConfiguration.load(from: defaults).asrVersion, .v3)
     }
 }

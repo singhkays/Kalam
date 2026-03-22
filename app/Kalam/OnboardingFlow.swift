@@ -8,16 +8,19 @@ struct OnboardingConfiguration: Equatable {
     static let defaults = OnboardingConfiguration(
         hasCompletedRequiredSetup: false,
         hasAttemptedAccessibilitySetup: false,
-        hasPickedHotkey: false
+        hasPickedHotkey: false,
+        hasConfirmedHFCLIInstall: false
     )
 
     var hasCompletedRequiredSetup: Bool
     var hasAttemptedAccessibilitySetup: Bool
     var hasPickedHotkey: Bool
+    var hasConfirmedHFCLIInstall: Bool
 
     private static let hasCompletedRequiredSetupKey = "internal.hasCompletedRequiredSetup"
     private static let hasAttemptedAccessibilitySetupKey = "internal.hasAttemptedAccessibilitySetup"
     private static let hasPickedHotkeyKey = "internal.hasPickedHotkey"
+    private static let hasConfirmedHFCLIInstallKey = "internal.hasConfirmedHFCLIInstall"
 
     static func load(from defaults: UserDefaults = .standard) -> OnboardingConfiguration {
         OnboardingConfiguration(
@@ -35,6 +38,11 @@ struct OnboardingConfiguration: Equatable {
                 forKey: hasPickedHotkeyKey,
                 defaults: defaults,
                 fallback: false
+            ),
+            hasConfirmedHFCLIInstall: bool(
+                forKey: hasConfirmedHFCLIInstallKey,
+                defaults: defaults,
+                fallback: Self.defaults.hasConfirmedHFCLIInstall
             )
         )
     }
@@ -43,12 +51,14 @@ struct OnboardingConfiguration: Equatable {
         defaults.set(hasCompletedRequiredSetup, forKey: Self.hasCompletedRequiredSetupKey)
         defaults.set(hasAttemptedAccessibilitySetup, forKey: Self.hasAttemptedAccessibilitySetupKey)
         defaults.set(hasPickedHotkey, forKey: Self.hasPickedHotkeyKey)
+        defaults.set(hasConfirmedHFCLIInstall, forKey: Self.hasConfirmedHFCLIInstallKey)
     }
 
     static func reset(from defaults: UserDefaults = .standard) {
         defaults.removeObject(forKey: hasCompletedRequiredSetupKey)
         defaults.removeObject(forKey: hasAttemptedAccessibilitySetupKey)
         defaults.removeObject(forKey: hasPickedHotkeyKey)
+        defaults.removeObject(forKey: hasConfirmedHFCLIInstallKey)
         
         // Thorough reset: also clear model and audio persistence
         defaults.removeObject(forKey: "audio.selectedInputDeviceUID")
@@ -267,7 +277,13 @@ struct OnboardingStatusSnapshot: Equatable {
 @MainActor
 final class OnboardingFlowController: ObservableObject {
     @Published private(set) var snapshot: OnboardingStatusSnapshot
-    @Published var selectedDownloadVersion: ASRModelVersion
+    @Published var selectedDownloadVersion: ASRModelVersion {
+        didSet {
+            if oldValue != selectedDownloadVersion {
+                downloadCommandCopied = false
+            }
+        }
+    }
     @Published private(set) var accessibilitySetupState: AccessibilitySetupState = .idle
     @Published private(set) var installCommandCopied = false
     @Published private(set) var downloadCommandCopied = false
@@ -280,6 +296,7 @@ final class OnboardingFlowController: ObservableObject {
     private let accessibilityTrustCheck: () -> Bool
     private let relaunchAppAction: () -> Void
     private let startDictationAction: () -> Void
+    let loadOnboardingConfiguration: () -> OnboardingConfiguration
     private let saveOnboardingConfiguration: (OnboardingConfiguration) -> Void
 
     init(
@@ -297,6 +314,9 @@ final class OnboardingFlowController: ObservableObject {
             AccessibilityHelper.isTrusted
         },
         relaunchAppAction: @escaping () -> Void,
+        loadOnboardingConfiguration: @escaping () -> OnboardingConfiguration = {
+            OnboardingConfiguration.load()
+        },
         saveOnboardingConfiguration: @escaping (OnboardingConfiguration) -> Void = { config in
             config.save()
         },
@@ -311,6 +331,7 @@ final class OnboardingFlowController: ObservableObject {
         self.openAccessibilitySettingsAction = openAccessibilitySettingsAction
         self.accessibilityTrustCheck = accessibilityTrustCheck
         self.relaunchAppAction = relaunchAppAction
+        self.loadOnboardingConfiguration = loadOnboardingConfiguration
         self.saveOnboardingConfiguration = saveOnboardingConfiguration
         self.startDictationAction = startDictationAction
     }
@@ -331,7 +352,7 @@ final class OnboardingFlowController: ObservableObject {
 
     func requestAccessibilityAccess() {
         accessibilitySetupState = .needsExternalEnable
-        var config = OnboardingConfiguration.load()
+        var config = loadOnboardingConfiguration()
         config.hasAttemptedAccessibilitySetup = true
         saveOnboardingConfiguration(config)
         requestAccessibilityAccessAction()
@@ -410,8 +431,15 @@ final class OnboardingFlowController: ObservableObject {
     }
 
     func confirmHotkey() {
-        var config = OnboardingConfiguration.load()
+        var config = loadOnboardingConfiguration()
         config.hasPickedHotkey = true
+        saveOnboardingConfiguration(config)
+        refreshAction()
+    }
+
+    func confirmHFCLIInstalled() {
+        var config = loadOnboardingConfiguration()
+        config.hasConfirmedHFCLIInstall = true
         saveOnboardingConfiguration(config)
         refreshAction()
     }
@@ -468,6 +496,7 @@ final class OnboardingFlowController: ObservableObject {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
     }
+
 }
 
 struct OnboardingView: View {
@@ -482,30 +511,45 @@ struct OnboardingView: View {
     @State private var isMicrophoneListExpanded: Bool = true
     @State private var isModelCardExpanded: Bool = false
 
-    var body: some View {
-        ZStack {
-            // Modern Background with Translucency and Noise
-            Rectangle()
-                .fill(.thickMaterial)
-            
-            NoiseView()
-                .blendMode(.overlay)
+    init(controller: OnboardingFlowController, onClose: @escaping () -> Void) {
+        self.controller = controller
+        self.onClose = onClose
+        _isMicrophoneListExpanded = State(initialValue: !controller.snapshot.microphoneStatus.isReady)
+    }
 
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                    .padding(.top, 12)
-                
-                setupWell
-                    .padding(.vertical, 8)
-                
-                footer
-                    .padding(.top, 4)
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Rectangle()
+                    .fill(.thickMaterial)
+
+                NoiseView()
+                    .blendMode(.overlay)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    header
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 12)
+
+                    setupWell
+                        .frame(
+                            maxWidth: .infinity,
+                            minHeight: max(260, geometry.size.height * 0.45),
+                            maxHeight: .infinity
+                        )
+                        .padding(.vertical, 8)
+
+                    footer
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 4)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 16)
+                .padding(.top, 32)
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 16)
-            .padding(.top, 32) // Reduced since traffic lights are hidden
         }
-        .frame(width: 600, height: 800)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 24))
     }
 
@@ -515,6 +559,7 @@ struct OnboardingView: View {
                 checklist
                     .padding(.vertical, 20)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 20)
                     .fill(Color(nsColor: .controlBackgroundColor))
@@ -584,13 +629,6 @@ struct OnboardingView: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
-            .onAppear {
-                // Initial state
-                if controller.snapshot.microphoneStatus.isReady {
-                    isMicrophoneListExpanded = false
-                }
-            }
-            // Removed automatic onChange collapse - now handled by manual "Confirm"
 
             requirementRow(
                 icon: "hand.raised.fill",
@@ -993,7 +1031,7 @@ struct OnboardingView: View {
                     onChangeFolder: controller.chooseModelFolder,
                     onOpenInFinder: controller.openModelFolderInFinder,
                     onClearFolder: controller.clearModelFolder,
-                    onRecheckCLI: controller.recheck,
+                    onConfirmCLIInstalled: controller.confirmHFCLIInstalled,
                     onCopyDownloadCommand: controller.copyDownloadCommand,
                     onCopyInstallCommand: controller.copyInstallCommand
                 )
@@ -1011,7 +1049,7 @@ struct OnboardingView: View {
                     onChangeFolder: controller.chooseModelFolder,
                     onOpenInFinder: controller.openModelFolderInFinder,
                     onClearFolder: controller.clearModelFolder,
-                    onRecheckCLI: controller.recheck,
+                    onConfirmCLIInstalled: controller.confirmHFCLIInstalled,
                     onCopyDownloadCommand: controller.copyDownloadCommand,
                     onCopyInstallCommand: controller.copyInstallCommand
                 )
@@ -1031,7 +1069,7 @@ struct OnboardingView: View {
                     onClearFolder: controller.clearModelFolder,
                     selectedRepo: selectedRepo,
                     onUseParentFolder: controller.useParentFolderForSelectedRepo,
-                    onRecheckCLI: controller.recheck,
+                    onConfirmCLIInstalled: controller.confirmHFCLIInstalled,
                     onCopyDownloadCommand: controller.copyDownloadCommand,
                     onCopyInstallCommand: controller.copyInstallCommand
                 )

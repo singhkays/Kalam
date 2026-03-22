@@ -15,7 +15,7 @@ struct ModelAcquisitionPanel: View {
     let onClearFolder: () -> Void
     var selectedRepo: ASRModelVersion?
     var onUseParentFolder: (() -> Void)?
-    let onRecheckCLI: () -> Void
+    let onConfirmCLIInstalled: () -> Void
     let onCopyDownloadCommand: () -> Void
     let onCopyInstallCommand: () -> Void
 
@@ -75,39 +75,27 @@ struct ModelAcquisitionPanel: View {
     private var cliStep: some View {
         wizardStepContainer(
             number: 2,
-            title: "Install CLI",
+            title: "Install Hugging Face CLI (hf)",
             isComplete: wizardState.isCLIComplete,
             isActive: folderStepUnlocked && wizardState.currentStep == .cli,
-            summary: wizardState.isCLIComplete ? "Hugging Face CLI is available on this Mac." : "Install the Hugging Face CLI once before downloading models.",
+            summary: cliStepSummary,
             isLocked: !folderStepUnlocked
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Run this in Terminal to install the `hf` command.")
+                Text("Kalam uses models from Hugging Face, a library of downloadable AI models. This command installs Hugging Face's CLI tool so you can download the speech model onto your Mac.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 installCommandRow
 
-                Text("After installing, open a new Terminal window or restart Terminal before continuing to step 3.")
+                Text("After it finishes, open a new Terminal window or restart Terminal. Then come back here and continue to step 3 to download the model.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Button("Check Again", action: onRecheckCLI)
-                    .font(.footnote.bold())
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(.ultraThinMaterial.opacity(0.78))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(Color.primary.opacity(0.14), lineWidth: 0.75)
-                    )
-                    .buttonStyle(.plain)
+                Button("I've Installed Hugging Face CLI (hf)", action: onConfirmCLIInstalled)
+                    .buttonStyle(OnboardingGlassButtonStyle())
             }
         }
     }
@@ -142,7 +130,7 @@ struct ModelAcquisitionPanel: View {
 
                 CommandCopyRow(
                     buttonTitle: "Copy Download Command",
-                    copiedTitle: "Copied Download Command",
+                    copiedTitle: "Copied",
                     commandText: downloadCommand,
                     disclosureTitle: "Download command",
                     helpText: "Run this after the CLI is installed to download the selected model into your folder.",
@@ -156,6 +144,13 @@ struct ModelAcquisitionPanel: View {
 
     private var folderStepUnlocked: Bool {
         folderURL != nil && selectedRepo == nil
+    }
+
+    private var cliStepSummary: String {
+        if wizardState.isCLIManuallyConfirmed {
+            return "Hugging Face CLI (hf) install confirmed. You're ready for the model download step."
+        }
+        return "Install the Hugging Face CLI (hf) that Kalam uses to download a speech model from Hugging Face."
     }
 
     private var folderStepSummary: String {

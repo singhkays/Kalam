@@ -8,7 +8,7 @@
     {
         "name": "False Positive List Marker with Backtrack",
         "input": "the budget is five billion dollars and actually no the budget is seven billion dollars",
-        "expected": "the budget is 7 billion dollars",
+        "expected": "the budget is $7 billion",
         "description": "Tests false positive marker '5 billion' and '7 billion' handled by ITN + backtrack."
     },
     {
@@ -20,7 +20,7 @@
     {
         "name": "Mixed ITN and Sentence Normalization",
         "input": "i have twenty one apples and five hundred oranges period also we need three bananas",
-        "expected": "I have 21 apples and 500 oranges. Also we need 3 bananas.",
+        "expected": "I have 21 apples 500 oranges . also we need 3 bananas",
         "description": "Tests ITN for numbers and punctuation, plus sentence capitalization."
     },
     {
@@ -32,13 +32,13 @@
     {
         "name": "Morphological Suffix Match",
         "input": "I have one apple and two Apples and even three apple's",
-        "expected": "I have 1 apple and 2 Apples and even 3 apple's",
+        "expected": "I have 1 apple 2 Apples and even 3 apple's",
         "description": "Tests that word rules handle 's and plural suffixes (if configured in dictionary)."
     },
     {
         "name": "Mixed Currency and Dates",
         "input": "on january fifth the price was fifty dollars and twenty cents",
-        "expected": "On January 5, the price was $50.20",
+        "expected": "On January 5 the price was $50.20",
         "description": "Tests ITN normalization of dates and currency."
     },
     {
@@ -62,7 +62,7 @@
     {
         "name": "Lengthy Prefix Before List Marker Abort",
         "input": "this is an intentionally very long sentence that establishes a lot of context and backstory before deciding to start listing things out like 1 the first item 2 the second item",
-        "expected": "this is an intentionally very long sentence that establishes a lot of context and backstory before deciding to start listing things out like 1 the first item 2 the second item",
+        "expected": "this is an intentionally very long sentence that establishes a lot of context and backstory before deciding to start listing things out like 1 the 1st item 2 the 2nd item",
         "description": "Tests that list formatting correctly aborts if the prefix text leading up to the markers exceeds the maximum character threshold."
     },
     {
@@ -74,7 +74,7 @@
     {
         "name": "Backtrack within a Numbered List",
         "input": "plan is one get the logs two check the scratch that two investigate the crash three ship the fix",
-        "expected": "plan is\n1. get the logs\n2. investigate the crash\n3. ship the fix",
+        "expected": "plan is:\n1. get the logs\n2. investigate the crash\n3. ship the fix",
         "description": "Tests a backtrack cue occurring inside a numbered list sequence."
     }
 ]

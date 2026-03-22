@@ -8,7 +8,7 @@ enum ModelSetupWizardStep: Int, Equatable {
     var title: String {
         switch self {
         case .folder: "Model folder"
-        case .cli: "Install CLI"
+        case .cli: "Install Hugging Face Download Tool"
         case .download: "Download model"
         }
     }
@@ -18,6 +18,7 @@ struct ModelSetupWizardState: Equatable {
     let currentStep: ModelSetupWizardStep
     let isFolderComplete: Bool
     let isCLIComplete: Bool
+    let isCLIManuallyConfirmed: Bool
     let isDownloadComplete: Bool
 
     var completedStepCount: Int {
@@ -33,11 +34,15 @@ enum ModelSetupPresentationState: Equatable {
 }
 
 extension OnboardingFlowController {
-    var isModelCLIAvailable: Bool {
+    var isModelCLIManuallyConfirmed: Bool {
         if snapshot.modelStatus.isReady {
             return true
         }
-        return ModelSetupSupport.isHuggingFaceCLIAvailable()
+        return loadOnboardingConfiguration().hasConfirmedHFCLIInstall
+    }
+
+    var isModelCLIAvailable: Bool {
+        isModelCLIManuallyConfirmed
     }
 
     var modelSetupWizardState: ModelSetupWizardState {
@@ -58,6 +63,7 @@ extension OnboardingFlowController {
             currentStep: currentStep,
             isFolderComplete: isFolderComplete,
             isCLIComplete: isCLIComplete,
+            isCLIManuallyConfirmed: isModelCLIManuallyConfirmed,
             isDownloadComplete: isDownloadComplete
         )
     }

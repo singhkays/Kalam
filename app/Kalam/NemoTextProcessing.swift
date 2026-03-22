@@ -11,6 +11,11 @@ import CNemoTextProcessing
 /// - "january fifth twenty twenty five" → "January 5, 2025"
 /// - "period" → "."
 public enum NemoTextProcessing {
+    private static let numericMultiplierPattern = try! NSRegularExpression(
+        pattern: #"(?i)\b\d+\s+(hundred|thousand|million|billion|trillion)\b"#,
+        options: []
+    )
+
     public static var isAvailable: Bool {
         #if canImport(CNemoTextProcessing)
         return true
@@ -84,6 +89,9 @@ public enum NemoTextProcessing {
     ///   - maxSpanTokens: Maximum consecutive tokens per normalizable span (default 16)
     /// - Returns: Sentence with spoken-form spans replaced
     public static func normalizeSentence(_ input: String, maxSpanTokens: UInt32) -> String {
+        guard !shouldBypassSentenceNormalization(input) else {
+            return input
+        }
         #if canImport(CNemoTextProcessing)
         guard let cString = input.cString(using: .utf8) else {
             return input
@@ -99,6 +107,11 @@ public enum NemoTextProcessing {
         #else
         return input
         #endif
+    }
+
+    private static func shouldBypassSentenceNormalization(_ input: String) -> Bool {
+        let range = NSRange(input.startIndex..<input.endIndex, in: input)
+        return numericMultiplierPattern.firstMatch(in: input, options: [], range: range) != nil
     }
 
     // MARK: - Custom Rules

@@ -54,7 +54,7 @@ final class TextCleanupServiceTests: XCTestCase {
     func testNumberedListFormatting() {
         let input = "plan is one gather logs two isolate bug three ship fix"
         let result = service.clean(input, configuration: config())
-        XCTAssertEqual(result.text, "plan is\n1. gather logs\n2. isolate bug\n3. ship fix")
+        XCTAssertEqual(result.text, "plan is:\n1. gather logs\n2. isolate bug\n3. ship fix")
         XCTAssertEqual(result.stats.listItemsFormatted, 3)
     }
 
@@ -104,7 +104,7 @@ From Hell to 1968 to Siri in 2011 we have come so far
         let input = "From Star Trek in 1966 to Siri in 2011 we have come far. One computers now understand. Two machines listen to words. Three voice controls the future in 2030. Four humanity speaks to AI at 5 billion devices worldwide."
         let result = service.clean(input, configuration: config())
         let expected = """
-From Star Trek in 1966 to Siri in 2011 we have come far
+From Star Trek in 1966 to Siri in 2011 we have come far.
 1. computers now understand
 2. machines listen to words
 3. voice controls the future in 2030
@@ -112,6 +112,21 @@ From Star Trek in 1966 to Siri in 2011 we have come far
 """
         XCTAssertEqual(result.text, expected)
         XCTAssertEqual(result.stats.listItemsFormatted, 4)
+    }
+
+    func testNumberedListFormattingDoesNotSplitCardinalNumbersInSentence() {
+        let input = "I have one apple and two Apples and even three apple's"
+        let result = service.clean(input, configuration: config())
+        XCTAssertEqual(result.text, "I have one apple and two Apples and even three apple's")
+        XCTAssertEqual(result.stats.listItemsFormatted, 0)
+    }
+
+    func testBacktrackWithinListPreservesEarlierItems() {
+        let input = "plan is one get the logs two check the scratch that two investigate the crash three ship the fix"
+        let result = service.clean(input, configuration: config())
+        XCTAssertEqual(result.text, "plan is:\n1. get the logs\n2. investigate the crash\n3. ship the fix")
+        XCTAssertGreaterThan(result.stats.backtrackEdits, 0)
+        XCTAssertEqual(result.stats.listItemsFormatted, 3)
     }
 
     func testPunctuationNormalization() {
@@ -134,6 +149,20 @@ From Star Trek in 1966 to Siri in 2011 we have come far
         XCTAssertTrue(result.stats.grammarAttempted)
         XCTAssertTrue(result.stats.grammarSkippedForLength)
         XCTAssertEqual(result.stats.grammarEdits, 0)
+    }
+
+    func testLightGrammarDoesNotForceSentenceCapitalization() {
+        let input = "hello world. also hi there."
+        let result = service.clean(input, configuration: config(grammarMode: .light, grammarTimeoutMs: 150))
+        XCTAssertTrue(result.text.hasPrefix("hello"))
+        XCTAssertTrue(result.text.contains(". also"))
+    }
+
+    func testFullGrammarModeIsConfigurableSeparatelyFromDefaultLightMode() {
+        XCTAssertEqual(TextCleanupConfiguration.defaults.grammarMode, .light)
+
+        let explicitFullConfig = config(grammarMode: .full, grammarTimeoutMs: 150)
+        XCTAssertEqual(explicitFullConfig.grammarMode, .full)
     }
 
     func testTimeoutNeverReturnsEmpty() {

@@ -57,7 +57,12 @@ struct KalamTestRunner {
     
     private func applyITN(to text: String) -> (text: String, changed: Bool) {
         let defaults = UserDefaults.standard
-        let itnEnabled = defaults.bool(forKey: "internal.itn.enabled") 
+        let itnEnabled: Bool = {
+            guard defaults.object(forKey: "internal.itn.enabled") != nil else {
+                return true
+            }
+            return defaults.bool(forKey: "internal.itn.enabled")
+        }()
         let itnSpan = defaults.integer(forKey: "internal.itn.maxSpanTokens")
         
         guard itnEnabled, NemoTextProcessing.isAvailable else {

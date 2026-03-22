@@ -31,20 +31,6 @@ enum SystemSettingsNavigator {
 enum ModelSetupSupport {
     static let huggingFaceInstallCommand = "curl -LsSf https://hf.co/cli/install.sh | bash"
 
-    static func isHuggingFaceCLIAvailable() -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-lic", "command -v hf >/dev/null 2>&1"]
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
-            return false
-        }
-    }
-
     @discardableResult
     static func openModelLibraryFolder(_ url: URL) -> Bool {
         NSWorkspace.shared.open(url)
@@ -78,6 +64,15 @@ enum ModelSetupSupport {
         var updated = config
         updated.asrVersion = firstInstalled
         return updated
+    }
+
+    static func loadPersistedNormalizedSelectedModel(from defaults: UserDefaults = .standard) -> ModelsConfiguration {
+        let loaded = ModelsConfiguration.load(from: defaults)
+        let normalized = normalizedSelectedModel(in: loaded)
+        if normalized != loaded {
+            normalized.save(to: defaults)
+        }
+        return normalized
     }
 
     static func availabilityMessage(for availability: ASRModelAvailability) -> String {

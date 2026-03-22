@@ -347,7 +347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func currentOnboardingSnapshot() -> OnboardingStatusSnapshot {
-        let config = ModelSetupSupport.normalizedSelectedModel(in: ModelsConfiguration.load())
+        let config = ModelSetupSupport.loadPersistedNormalizedSelectedModel()
         let onboardingConfig = OnboardingConfiguration.load()
         let hotkeyConfig = PTTHotkeyConfiguration.load()
         let installedModels = ModelSetupSupport.installedModelVersions(in: config)
@@ -445,6 +445,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.onboardingWC?.window?.close()
         }
         let hostingController = NSHostingController(rootView: root)
+        if #available(macOS 13.0, *) {
+            hostingController.sizingOptions = []
+        }
         let window = NSWindow(contentViewController: hostingController)
         window.styleMask = [.titled, .closable]
         configureOnboardingWindow(window, mode: mode)
@@ -455,12 +458,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureOnboardingWindow(_ window: NSWindow, mode: OnboardingMode) {
+        let onboardingFrameSize = onboardingWindowFrameSize(for: window.screen ?? NSScreen.main, window: window)
         window.identifier = NSUserInterfaceItemIdentifier("KalamOnboardingWindow")
         window.title = mode.windowTitle
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
-        window.isMovableByWindowBackground = true
+        window.isMovableByWindowBackground = false
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = true
@@ -472,20 +476,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.standardWindowButton(.closeButton)?.isHidden = true
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
-        
-        window.setContentSize(NSSize(width: 600, height: 800))
-        window.minSize = NSSize(width: 600, height: 800)
-        window.maxSize = NSSize(width: 600, height: 800)
+
+        window.minSize = onboardingFrameSize
+        window.maxSize = onboardingFrameSize
     }
 
     private func presentWindowController(_ controller: NSWindowController, centerIfNeeded: Bool) {
         guard let window = controller.window else { return }
         controller.showWindow(nil)
-        if centerIfNeeded {
-            window.center()
-        }
+        applyOnboardingWindowFrame(window, centerIfNeeded: centerIfNeeded)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func onboardingWindowFrameSize(for screen: NSScreen?, window: NSWindow) -> NSSize {
+        let preferredContentSize = NSSize(width: 600, height: 720)
+        let preferredFrameSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: preferredContentSize)).size
+        guard let visibleFrame = screen?.visibleFrame else {
+            return preferredFrameSize
+        }
+
+        let horizontalMargin: CGFloat = 32
+        let verticalMargin: CGFloat = 32
+        return NSSize(
+            width: min(preferredFrameSize.width, max(420, visibleFrame.width - horizontalMargin)),
+            height: min(preferredFrameSize.height, max(520, visibleFrame.height - verticalMargin))
+        )
+    }
+
+    private func applyOnboardingWindowFrame(_ window: NSWindow, centerIfNeeded: Bool) {
+        guard window.identifier == NSUserInterfaceItemIdentifier("KalamOnboardingWindow") else {
+            if centerIfNeeded {
+                window.center()
+            }
+            return
+        }
+
+        let targetScreen = window.screen ?? NSScreen.main ?? NSScreen.screens.first
+        guard let visibleFrame = targetScreen?.visibleFrame else {
+            if centerIfNeeded {
+                window.center()
+            }
+            return
+        }
+
+        let targetFrameSize = onboardingWindowFrameSize(for: targetScreen, window: window)
+        window.minSize = targetFrameSize
+        window.maxSize = targetFrameSize
+        var frame = window.frame
+        frame.size = targetFrameSize
+
+        if centerIfNeeded {
+            frame.origin.x = visibleFrame.midX - (frame.width * 0.5)
+            frame.origin.y = visibleFrame.midY - (frame.height * 0.5)
+        }
+
+        frame.origin.x = min(max(frame.origin.x, visibleFrame.minX), visibleFrame.maxX - frame.width)
+        frame.origin.y = min(max(frame.origin.y, visibleFrame.minY), visibleFrame.maxY - frame.height)
+        window.setFrame(frame, display: false)
     }
 
     private func completeOnboarding() {
@@ -615,7 +663,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             isAudioReady = false
         }
 
-        let config = ModelSetupSupport.normalizedSelectedModel(in: ModelsConfiguration.load())
+        let config = ModelSetupSupport.loadPersistedNormalizedSelectedModel()
         let availability = config.availability(for: config.asrVersion)
         switch availability {
         case .installed:
@@ -2642,7 +2690,7 @@ final class ASRService {
     }
     
     func initialize() async throws {
-        try await initialize(using: ModelsConfiguration.load())
+        try await initialize(using: ModelSetupSupport.loadPersistedNormalizedSelectedModel())
     }
     
     func initialize(with version: ASRModelVersion) async throws {

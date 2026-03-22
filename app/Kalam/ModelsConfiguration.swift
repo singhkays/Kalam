@@ -12,9 +12,9 @@ enum ASRModelVersion: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .v2:
-            return "Parakeet TDT v2"
+            return "Parakeet TDT v2 (English-only)"
         case .v3:
-            return "Parakeet TDT v3"
+            return "Parakeet TDT v3 (Multilingual - 25+ languages)"
         }
     }
     

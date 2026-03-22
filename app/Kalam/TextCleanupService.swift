@@ -156,7 +156,8 @@ final class TextCleanupService {
                 break
             }
 
-            let removalStart = startOfPreviousClause(before: cueRange.lowerBound, in: out)
+            let clauseStart = startOfPreviousClause(before: cueRange.lowerBound, in: out)
+            let removalStart = listAwareBacktrackStart(before: cueRange.lowerBound, clauseStart: clauseStart, in: out) ?? clauseStart
             out.removeSubrange(removalStart..<cueRange.upperBound)
             edits += 1
         }
@@ -178,9 +179,14 @@ final class TextCleanupService {
         let textBefore = text[..<markerRange.lowerBound]
         let wordsBefore = textBefore.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
         let lastWordBefore = wordsBefore.last?.lowercased().trimmingCharacters(in: .punctuationCharacters)
+        let previousWordBefore = wordsBefore.dropLast().last?.lowercased().trimmingCharacters(in: .punctuationCharacters)
         
         let prepositions: Set<String> = ["at", "in", "of", "to", "for", "with", "by", "on", "from", "than", "about", "under", "over"]
         if let w = lastWordBefore, prepositions.contains(w) {
+            let listLeadIns: Set<String> = ["and", "then", "plus"]
+            if let previousWordBefore, listLeadIns.contains(previousWordBefore) {
+                return false
+            }
             return true
         }
         
@@ -261,13 +267,20 @@ final class TextCleanupService {
             guard !item.isEmpty, wordCount > 0, wordCount <= 20 else {
                 return (text, 0)
             }
+            guard !Self.isLikelyContinuationFragment(item) else {
+                return (text, 0)
+            }
 
             items.append((number, item))
         }
 
         var parts: [String] = []
         if !prefix.isEmpty {
-            parts.append(prefix)
+            if Self.shouldAppendListIntroColon(to: prefix) {
+                parts.append("\(prefix):")
+            } else {
+                parts.append(prefix)
+            }
         }
         parts.append(contentsOf: items.map { "\($0.number). \($0.item)" })
 
@@ -415,6 +428,41 @@ final class TextCleanupService {
         return (output, editCount)
     }
 
+    private func listAwareBacktrackStart(before index: String.Index, clauseStart: String.Index, in text: String) -> String.Index? {
+        guard clauseStart < index else { return nil }
+
+        let clauseRange = NSRange(clauseStart..<index, in: text)
+        let matches = Self.numberMarkerPattern.matches(in: text, options: [], range: clauseRange)
+        guard matches.count >= 2 else { return nil }
+
+        var validRanges: [(range: Range<String.Index>, number: Int)] = []
+        var expectedNumber = 1
+
+        for match in matches {
+            guard let markerRange = Range(match.range, in: text) else { continue }
+            let marker = String(text[markerRange]).lowercased()
+            let number: Int
+            if let mapped = Self.numberWords[marker] {
+                number = mapped
+            } else if let parsed = Int(marker.filter { $0.isNumber }) {
+                number = parsed
+            } else {
+                continue
+            }
+
+            guard number == expectedNumber else { continue }
+            guard !Self.isFalsePositiveMarker(match: match, in: text) else { continue }
+            validRanges.append((markerRange, number))
+            expectedNumber += 1
+        }
+
+        guard let lastRange = validRanges.last, lastRange.number > 1 else {
+            return nil
+        }
+
+        return lastRange.range.lowerBound
+    }
+
     private func startOfPreviousClause(before index: String.Index, in text: String) -> String.Index {
         let prefix = text[..<index]
         if let boundary = prefix.lastIndex(where: { Self.clauseBoundaryCharacters.contains($0) }) {
@@ -429,6 +477,42 @@ final class TextCleanupService {
         guard count > 0 else { return (text, 0) }
         let updated = regex.stringByReplacingMatches(in: text, options: [], range: nsRange, withTemplate: template)
         return (updated, count)
+    }
+
+    private static func isLikelyContinuationFragment(_ item: String) -> Bool {
+        let words = item
+            .split(whereSeparator: { $0.isWhitespace })
+            .map { $0.lowercased().trimmingCharacters(in: .punctuationCharacters) }
+            .filter { !$0.isEmpty }
+
+        guard let lastWord = words.last else { return true }
+        let continuationWords: Set<String> = [
+            "and", "or", "to", "for", "with", "of", "the", "a", "an",
+            "my", "your", "our", "their", "this", "that", "these", "those", "even"
+        ]
+        return continuationWords.contains(lastWord)
+    }
+
+    private static func shouldAppendListIntroColon(to prefix: String) -> Bool {
+        let trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        guard let lastCharacter = trimmed.last, !Self.clauseBoundaryCharacters.contains(lastCharacter), lastCharacter != ":" else {
+            return false
+        }
+
+        let words = trimmed.split(whereSeparator: { $0.isWhitespace }).map { $0.lowercased().trimmingCharacters(in: .punctuationCharacters) }
+        guard words.count <= 4 else { return false }
+
+        let phrases: Set<String> = [
+            "plan is",
+            "plans are",
+            "we must ship",
+            "requirements are",
+            "tasks are",
+            "steps are"
+        ]
+        let candidate = words.joined(separator: " ")
+        return phrases.contains(candidate)
     }
 
     private static func isSingleWordFiller(_ token: String) -> Bool {

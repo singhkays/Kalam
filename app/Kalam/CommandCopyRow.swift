@@ -25,6 +25,13 @@ struct CommandCopyRow: View {
         isCopied ? "checkmark" : "doc.on.doc"
     }
 
+    private var currentButtonForegroundStyle: AnyShapeStyle {
+        if isCopied {
+            return AnyShapeStyle(Color.primary.opacity(0.82))
+        }
+        return AnyShapeStyle(Color.primary.opacity(0.92))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if buttonPlacement == .prominent {
@@ -89,6 +96,8 @@ struct CommandCopyRow: View {
     private func copyButton(prominent: Bool) -> some View {
         Button(action: copyAction) {
             Label(currentButtonTitle, systemImage: currentButtonIcon)
+                .symbolVariant(isCopied ? .fill : .none)
+                .foregroundStyle(currentButtonForegroundStyle)
         }
         .buttonStyle(OnboardingGlassButtonStyle())
         .accessibilityLabel(currentButtonTitle)
