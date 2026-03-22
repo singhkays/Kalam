@@ -40,13 +40,14 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git clone https://x-access-token:${PAGES_PAT}@github.com/singhkays/singhkays.github.io.git out
           cd out
+          git checkout gh-pages || git checkout -b gh-pages
           rm -rf kalam
           mkdir -p kalam
           cp -R ../landing-page/dist/* kalam/
           git add kalam
           if ! git diff --cached --quiet; then
             git commit -m "Deploy Kalam landing page"
-            git push
+            git push origin gh-pages
           else
             echo "No changes to deploy"
           fi
