@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'landing-page/**'
+      - '.github/workflows/deploy-kalam-landing.yml'
 
 jobs:
   build-and-deploy:
