@@ -45,7 +45,8 @@ jobs:
           rm -rf kalam
           mkdir -p kalam
           cp -R ../landing-page/dist/* kalam/
-          git add kalam
+          echo "singhkays.com" > CNAME
+          git add kalam CNAME
           if ! git diff --cached --quiet; then
             git commit -m "Deploy Kalam landing page"
             git push origin gh-pages
