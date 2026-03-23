@@ -12,6 +12,9 @@ final class ModelSetupSupportTests: XCTestCase {
     }
 
     override func tearDown() {
+        SystemSettingsNavigator.openURL = { url in
+            NSWorkspace.shared.open(url)
+        }
         if let suiteName {
             defaults?.removePersistentDomain(forName: suiteName)
         }
@@ -63,5 +66,54 @@ final class ModelSetupSupportTests: XCTestCase {
 
         XCTAssertEqual(normalized.asrVersion, .v3)
         XCTAssertEqual(ModelsConfiguration.load(from: defaults).asrVersion, .v3)
+    }
+
+    func testSystemSettingsNavigatorPrefersLegacyAccessibilityDeepLink() {
+        var openedURLs: [URL] = []
+        SystemSettingsNavigator.openURL = { url in
+            openedURLs.append(url)
+            return true
+        }
+
+        XCTAssertTrue(SystemSettingsNavigator.open(.accessibility))
+        XCTAssertEqual(
+            openedURLs.map(\.absoluteString),
+            ["x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"]
+        )
+    }
+
+    func testSystemSettingsNavigatorFallsBackToExtensionDeepLinkWhenNeeded() {
+        var openedURLs: [URL] = []
+        SystemSettingsNavigator.openURL = { url in
+            openedURLs.append(url)
+            return openedURLs.count > 1
+        }
+
+        XCTAssertTrue(SystemSettingsNavigator.open(.microphone))
+        XCTAssertEqual(
+            openedURLs.map(\.absoluteString),
+            [
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+                "x-apple.systempreferences:com.apple.Settings.PrivacySecurity.extension?Privacy_Microphone",
+            ]
+        )
+    }
+
+    func testSystemSettingsNavigatorFallsBackToRootSettingsWhenAllDeepLinksFail() {
+        var openedURLs: [URL] = []
+        SystemSettingsNavigator.openURL = { url in
+            openedURLs.append(url)
+            return url.absoluteString == "x-apple.systempreferences:"
+        }
+
+        XCTAssertTrue(SystemSettingsNavigator.open(.accessibility))
+        XCTAssertEqual(
+            openedURLs.map(\.absoluteString),
+            [
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+                "x-apple.systempreferences:com.apple.Settings.PrivacySecurity.extension?Privacy_Accessibility",
+                "x-apple.systempreferences:",
+            ]
+        )
     }
 }

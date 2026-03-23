@@ -5,24 +5,36 @@ enum SystemSettingsDestination {
     case accessibility
     case microphone
 
-    var deepLinkURL: String {
+    var deepLinkURLs: [String] {
         switch self {
         case .accessibility:
-            return "x-apple.systempreferences:com.apple.Settings.PrivacySecurity.extension?Privacy_Accessibility"
+            return [
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+                "x-apple.systempreferences:com.apple.Settings.PrivacySecurity.extension?Privacy_Accessibility",
+            ]
         case .microphone:
-            return "x-apple.systempreferences:com.apple.Settings.PrivacySecurity.extension?Privacy_Microphone"
+            return [
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+                "x-apple.systempreferences:com.apple.Settings.PrivacySecurity.extension?Privacy_Microphone",
+            ]
         }
     }
 }
 
 enum SystemSettingsNavigator {
+    static var openURL: (URL) -> Bool = { url in
+        NSWorkspace.shared.open(url)
+    }
+
     @discardableResult
     static func open(_ destination: SystemSettingsDestination) -> Bool {
-        if let deepLink = URL(string: destination.deepLinkURL), NSWorkspace.shared.open(deepLink) {
-            return true
+        for deepLinkURL in destination.deepLinkURLs {
+            if let deepLink = URL(string: deepLinkURL), openURL(deepLink) {
+                return true
+            }
         }
         if let fallback = URL(string: "x-apple.systempreferences:") {
-            return NSWorkspace.shared.open(fallback)
+            return openURL(fallback)
         }
         return false
     }
