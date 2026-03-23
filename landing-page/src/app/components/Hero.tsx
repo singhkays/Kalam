@@ -4,7 +4,7 @@ export function Hero() {
   return (
     <section
       style={{
-        paddingTop: "clamp(3rem, 6vw, 5rem)",
+        paddingTop: "clamp(0.75rem, 2vw, 2.5rem)",
         paddingBottom: "clamp(5rem, 10vw, 8rem)",
         paddingLeft: "clamp(1.5rem, 5vw, 5rem)",
         paddingRight: "clamp(1.5rem, 5vw, 5rem)",
@@ -91,7 +91,7 @@ export function Hero() {
           <h1
             style={{
               fontFamily: "'Instrument Serif', serif",
-              fontSize: "clamp(4rem, 9.5vw, 9rem)",
+              fontSize: "clamp(3rem, 7vw, 7rem)",
               letterSpacing: "-0.03em",
               lineHeight: 1.0,
               color: "#1A1A18",
@@ -99,18 +99,17 @@ export function Hero() {
               fontWeight: 400,
             }}
           >
-            <span style={{ display: "block" }}>Talk messy.</span>
-            <span style={{ display: "block" }}>
-              Type{" "}
-              <em
-                style={{
-                  fontStyle: "italic",
-                  fontFamily: "'Instrument Serif', serif",
-                }}
-              >
-                clean
-              </em>
-              .
+            <span style={{ display: "block" }}>Speak messy.</span>
+            <span
+              style={{
+                display: "block",
+                whiteSpace: "normal",
+                lineHeight: 1.05,
+                maxWidth: "min(26ch, 100%)",
+                margin: "0 auto",
+              }}
+            >
+              Type clean <span style={{ fontStyle: "italic", fontSize: "0.72em" }}>(privately)</span>.
             </span>
           </h1>
 
@@ -134,24 +133,57 @@ export function Hero() {
               gap: "0.75rem",
               marginTop: "clamp(1.5rem, 2.5vw, 2rem)",
               flexWrap: "wrap",
+              alignItems: "flex-start",
             }}
           >
-            <button
+            <div
               style={{
-                backgroundColor: "#1A5C3A",
-                color: "#fff",
-                border: "none",
-                borderRadius: "7px",
-                padding: "0.75rem 1.5rem",
-                fontFamily: "'Plus Jakarta Sans', sans-serif",
-                fontSize: "0.9rem",
-                cursor: "pointer",
-                letterSpacing: "0.01em",
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.4rem",
+                alignItems: "center",
               }}
             >
-              Download for Mac
-            </button>
-            <button
+              <a
+                href="https://github.com/singhkays/Kalam/releases/tag/v1.0"
+                target="_blank"
+                rel="noreferrer noopener"
+                style={{
+                  backgroundColor: "#1A5C3A",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "7px",
+                  padding: "0.75rem 1.5rem",
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  fontSize: "0.9rem",
+                  cursor: "pointer",
+                  letterSpacing: "0.01em",
+                  textDecoration: "none",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                Download for Mac
+              </a>
+              <a
+                href="#installation"
+                style={{
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  fontSize: "0.8rem",
+                  color: "#6B6860",
+                  textDecoration: "underline",
+                  textUnderlineOffset: "4px",
+                  cursor: "pointer",
+                }}
+              >
+                Installation instructions
+              </a>
+            </div>
+            <a
+              href="https://github.com/singhkays/Kalam"
+              target="_blank"
+              rel="noreferrer noopener"
               style={{
                 backgroundColor: "transparent",
                 color: "#1A1A18",
@@ -162,31 +194,13 @@ export function Hero() {
                 fontSize: "0.9rem",
                 cursor: "pointer",
                 letterSpacing: "0.01em",
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
               }}
             >
               View on GitHub
-            </button>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "1.5rem",
-              marginTop: "1.25rem",
-            }}
-          >
-            <a
-              href="#installation"
-              style={{
-                fontFamily: "'Plus Jakarta Sans', sans-serif",
-                fontSize: "0.8rem",
-                color: "#6B6860",
-                textDecoration: "underline",
-                textUnderlineOffset: "4px",
-                cursor: "pointer",
-              }}
-            >
-              Installation instructions
             </a>
           </div>
         </div>

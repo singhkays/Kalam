@@ -89,7 +89,10 @@ export function FinalCTA() {
             flexWrap: "wrap",
           }}
         >
-          <button
+          <a
+            href="https://github.com/singhkays/Kalam/releases/tag/v1.0"
+            target="_blank"
+            rel="noreferrer noopener"
             style={{
               backgroundColor: "#1A5C3A",
               color: "#fff",
@@ -100,11 +103,18 @@ export function FinalCTA() {
               fontSize: "0.9rem",
               cursor: "pointer",
               letterSpacing: "0.01em",
+              textDecoration: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
             Download for Mac
-          </button>
-          <button
+          </a>
+          <a
+            href="https://github.com/singhkays/Kalam"
+            target="_blank"
+            rel="noreferrer noopener"
             style={{
               backgroundColor: "transparent",
               color: "#1A1A18",
@@ -115,10 +125,14 @@ export function FinalCTA() {
               fontSize: "0.9rem",
               cursor: "pointer",
               letterSpacing: "0.01em",
+              textDecoration: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
             View Source
-          </button>
+          </a>
         </div>
       </section>
 
