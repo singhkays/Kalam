@@ -1,8 +1,9 @@
-import { QuillSVG } from "./QuillSVG";
+import { CtaButtonLabel } from "./CtaButtonLabel";
 
 export function Hero() {
   return (
     <section
+      className="hero-section"
       style={{
         paddingTop: "clamp(0.75rem, 2vw, 2.5rem)",
         paddingBottom: "clamp(5rem, 10vw, 8rem)",
@@ -13,6 +14,12 @@ export function Hero() {
       }}
     >
       <style>{`
+        .hero-section {
+          display: flex;
+          flex: 1;
+          align-items: center;
+        }
+
         .hero-content {
           display: grid;
           grid-template-columns: 1.15fr 0.85fr;
@@ -39,31 +46,139 @@ export function Hero() {
           transform-origin: center right;
         }
 
+        .hero-copy {
+          min-width: 0;
+          position: relative;
+          z-index: 2;
+        }
+
+        .hero-body {
+          max-width: 36rem;
+        }
+
+        .hero-cta-group {
+          display: flex;
+          gap: 0.75rem;
+          margin-top: clamp(1.5rem, 2.5vw, 2rem);
+          flex-wrap: wrap;
+          align-items: flex-start;
+        }
+
+        .hero-primary-group {
+          display: flex;
+          flex-direction: column;
+          gap: 0.4rem;
+          align-items: center;
+        }
+
+        .hero-button-mobile-label {
+          display: none;
+        }
+
         @media (max-width: 900px) {
-          .hero-content {
-            display: block;
+          .hero-section {
+            align-items: stretch;
+            padding-top: clamp(0.75rem, 4vw, 1.25rem);
+            padding-bottom: clamp(1.5rem, 6vw, 2.25rem);
           }
-          .quill-wrapper {
-            position: absolute;
-            top: 6%;
-            right: -2%;
-            width: 48%;
+
+          .hero-content {
             display: flex;
-            justify-content: flex-end;
-            align-items: flex-start;
+            flex-direction: column;
+            justify-content: flex-start;
+            gap: clamp(0.75rem, 3vw, 1.1rem);
+            min-height: 100%;
+            flex: 1;
+          }
+
+          .hero-copy {
+            display: flex;
+            flex-direction: column;
+            min-height: 100%;
+            padding-top: clamp(0.25rem, 2vw, 0.75rem);
+          }
+
+          .hero-body {
+            max-width: none;
+            padding-right: 0;
+          }
+
+          .quill-wrapper {
+            position: relative;
+            top: auto;
+            right: auto;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
             z-index: 1;
             pointer-events: none;
+            order: -1;
+            margin-bottom: -0.2rem;
           }
+
           .hero-quill {
-            width: 100%;
-            max-width: 230px;
-            transform: rotate(-10deg) translateY(-10%);
-            opacity: 0.9;
+            width: min(42vw, 11rem);
+            max-width: none;
+            transform: rotate(-8deg);
+            opacity: 0.86;
           }
+
           .kicker-text {
-             white-space: normal;
-             line-height: 1.6 !important;
-             max-width: 90%;
+            white-space: normal;
+            line-height: 1.6 !important;
+            max-width: 17rem;
+            margin-bottom: 1.15rem !important;
+          }
+
+          .hero-headline {
+            font-size: clamp(3.25rem, 16vw, 5rem) !important;
+          }
+
+          .hero-subcopy {
+            font-size: 0.95rem !important;
+            line-height: 1.6 !important;
+            margin-top: 1rem !important;
+            max-width: 19rem !important;
+          }
+
+          .hero-cta-group {
+            margin-top: clamp(1rem, 4vw, 1.5rem);
+            padding-top: clamp(0.35rem, 2vw, 0.75rem);
+            flex-direction: column;
+            align-items: center;
+            width: min(100%, 18rem);
+            gap: 0.7rem;
+            margin-left: auto;
+            margin-right: auto;
+          }
+
+          .hero-primary-group {
+            align-items: center;
+            width: 100%;
+          }
+
+          .hero-button {
+            width: 100%;
+            min-height: 3.5rem;
+            font-size: 0.98rem !important;
+            justify-content: center !important;
+          }
+
+          .hero-secondary {
+            order: 2;
+          }
+
+          .hero-install-link {
+            display: none !important;
+          }
+
+          .hero-button-desktop-label {
+            display: none;
+          }
+
+          .hero-button-mobile-label {
+            display: inline;
           }
         }
       `}</style>
@@ -71,7 +186,7 @@ export function Hero() {
       {/* Headline + Quill row */}
       <div className="hero-content">
         {/* Left: headline + subhead + CTAs */}
-        <div style={{ minWidth: 0, position: "relative", zIndex: 2 }}>
+        <div className="hero-copy">
           {/* Kicker */}
           <p
             className="kicker-text"
@@ -89,6 +204,7 @@ export function Hero() {
           </p>
 
           <h1
+            className="hero-headline"
             style={{
               fontFamily: "'Instrument Serif', serif",
               fontSize: "clamp(3rem, 7vw, 7rem)",
@@ -114,60 +230,61 @@ export function Hero() {
           </h1>
 
           <p
+            className="hero-subcopy"
             style={{
               fontFamily: "'Plus Jakarta Sans', sans-serif",
               fontSize: "clamp(0.95rem, 1.5vw, 1.1rem)",
               color: "#6B6860",
               lineHeight: 1.65,
               marginTop: "clamp(1.5rem, 3vw, 2.5rem)",
-              maxWidth: "36rem",
+              maxWidth: "36rem"
             }}
           >
             A dictation app that knows &lsquo;um&rsquo; isn&rsquo;t a word and
             &lsquo;scratch that&rsquo; is an instruction.
           </p>
 
-          <div
-            style={{
-              display: "flex",
-              gap: "0.75rem",
-              marginTop: "clamp(1.5rem, 2.5vw, 2rem)",
-              flexWrap: "wrap",
-              alignItems: "flex-start",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "0.4rem",
-                alignItems: "center",
-              }}
-            >
+          <div className="hero-cta-group">
+            <div className="hero-primary-group">
               <a
                 href="https://github.com/singhkays/Kalam/releases/tag/v1.0"
                 target="_blank"
                 rel="noreferrer noopener"
+                className="hero-button"
                 style={{
                   backgroundColor: "#1A5C3A",
                   color: "#fff",
-                  border: "none",
-                  borderRadius: "7px",
-                  padding: "0.75rem 1.5rem",
+                  border: "1px solid #154C30",
+                  borderRadius: "6px",
+                  padding: "0.78rem 1.45rem",
                   fontFamily: "'Plus Jakarta Sans', sans-serif",
                   fontSize: "0.9rem",
+                  fontWeight: 500,
                   cursor: "pointer",
                   letterSpacing: "0.01em",
+                  lineHeight: 1,
+                  minHeight: "3.45rem",
                   textDecoration: "none",
                   display: "inline-flex",
                   alignItems: "center",
                   justifyContent: "center",
+                  boxShadow: "0 1px 0 rgba(255,255,255,0.12) inset",
                 }}
               >
-                Download for Mac
+                <span className="hero-button-desktop-label">
+                  <CtaButtonLabel icon="apple" iconColor="#F7F5EF">
+                    Download for MacOS
+                  </CtaButtonLabel>
+                </span>
+                <span className="hero-button-mobile-label">
+                  <CtaButtonLabel icon="apple" iconColor="#F7F5EF">
+                    Available for MacOS
+                  </CtaButtonLabel>
+                </span>
               </a>
               <a
                 href="#installation"
+                className="hero-install-link"
                 style={{
                   fontFamily: "'Plus Jakarta Sans', sans-serif",
                   fontSize: "0.8rem",
@@ -184,23 +301,30 @@ export function Hero() {
               href="https://github.com/singhkays/Kalam"
               target="_blank"
               rel="noreferrer noopener"
+              className="hero-button hero-secondary"
               style={{
-                backgroundColor: "transparent",
+                backgroundColor: "#F1F1ED",
                 color: "#1A1A18",
-                border: "1px solid #C8C8C4",
-                borderRadius: "7px",
-                padding: "0.75rem 1.5rem",
+                border: "1px solid #D4D4D0",
+                borderRadius: "6px",
+                padding: "0.78rem 1.45rem",
                 fontFamily: "'Plus Jakarta Sans', sans-serif",
                 fontSize: "0.9rem",
+                fontWeight: 500,
                 cursor: "pointer",
                 letterSpacing: "0.01em",
+                lineHeight: 1,
+                minHeight: "3.45rem",
                 textDecoration: "none",
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
+                boxShadow: "0 1px 0 rgba(255,255,255,0.62) inset",
               }}
             >
-              View on GitHub
+              <CtaButtonLabel icon="github" iconColor="#1A1A18">
+                View on GitHub
+              </CtaButtonLabel>
             </a>
           </div>
         </div>

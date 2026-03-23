@@ -47,7 +47,7 @@ Implement a highly asymmetrical layout resembling a high-end photography book or
 - **The Kicker (Etymology):** Above the main massive headline, in the negative space of the grid, place the origins as a small, widely-tracked, uppercase mono-spaced or sans-serif "kicker" that simply reads: `PUNJABI [ ਕਲਮ ] · /kə.ləm/ · A TRADITIONAL REED PEN`
 - Headline: "Talk messy. Type *clean*."
 - Subhead: "A dictation app that knows 'um' isn't a word and 'scratch that' is an instruction." (Must be clean and modern. Strictly use the `Plus Jakarta Sans` body font).
-- CTAs: "Download for Mac" and "View on GitHub"
+- CTAs: "Download for MacOS" and "View on GitHub"
 
 **2. The Dictation Engine (Audio Integration)**
 - **Headline:** "The Dictation Engine."
@@ -104,7 +104,7 @@ Implement a highly asymmetrical layout resembling a high-end photography book or
   - **Main Heading:** `Your pen keeps your words between you and the page.` (Huge Serif).
   - **Sub Heading:** `So does Kalam.` (Make this text elegant and slightly smaller, or simply italicize it using the primary text color to ensure it feels like an emphatic continuation).
   - **Body:** `Free, open-source, and available now.`
-  - *(Include "Download for Mac" and "View Source" buttons side-by-side here)*
+  - *(Include "Download for MacOS" and "View Source" buttons side-by-side here)*
 - **The Footer:** This section flows seamlessly into a minimalist footer at the very bottom.
 - **Footer Layout:** Split the content into a two-column layout:
   - **Left side:** `© 2026 Kalam.`

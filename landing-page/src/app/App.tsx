@@ -26,6 +26,7 @@ export default function App() {
     >
       {/* Hero section — grid background + header float over it */}
       <div
+        className="hero-shell"
         style={{
           background: "#FAFAF7",
           backgroundImage: `
@@ -35,6 +36,19 @@ export default function App() {
           backgroundSize: "44px 44px",
         }}
       >
+        <style>{`
+          @media (max-width: 900px) {
+            .hero-shell {
+              min-height: 100svh;
+              display: flex;
+              flex-direction: column;
+            }
+
+            .installation-hairline {
+              display: none;
+            }
+          }
+        `}</style>
         <Header />
         <Hero />
       </div>
@@ -42,7 +56,9 @@ export default function App() {
       {/* All content sections on solid warm off-white */}
       <main>
         <InstallationGuide />
-        <Hairline />
+        <div className="installation-hairline">
+          <Hairline />
+        </div>
         <DictationEngine />
         <Hairline />
         <CleanupDemo />

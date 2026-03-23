@@ -3,6 +3,7 @@ export function InstallationGuide() {
   return (
     <section
       id="installation"
+      className="installation-guide"
       style={{
         backgroundColor: "#FAFAF7",
         paddingTop: "clamp(3rem, 6vw, 4rem)",
@@ -11,6 +12,13 @@ export function InstallationGuide() {
         paddingRight: "clamp(1.5rem, 8vw, 10rem)",
       }}
     >
+      <style>{`
+        @media (max-width: 900px) {
+          .installation-guide {
+            display: none;
+          }
+        }
+      `}</style>
       <div style={{ maxWidth: "50rem", margin: "0 auto" }}>
         <h2
           style={{
