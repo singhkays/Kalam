@@ -1103,8 +1103,7 @@ struct SettingsView: View {
         isInitializingSettingsState = true
         let currentHotkey = PTTHotkeyConfiguration.load()
         hotkeyDraft = currentHotkey
-        var currentModelsConfig = ModelsConfiguration.load()
-        currentModelsConfig.textCleanup.grammarTimeoutMs = 100
+        let currentModelsConfig = ModelsConfiguration.load()
         modelsConfig = currentModelsConfig
         previousGrammarModeSelection = currentModelsConfig.textCleanup.grammarMode
         normalizeSelectedModelForAvailability()

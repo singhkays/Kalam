@@ -8,6 +8,7 @@ import ApplicationServices
 import CoreAudio
 import AudioToolbox
 import ServiceManagement
+import OSLog
 
 // MARK: - Secure Memory Zeroing
 extension Array where Element == Float {
@@ -1115,13 +1116,22 @@ import CoreAudio
 
 final class SystemAudioDucker {
     static let shared = SystemAudioDucker()
-    private init() {}
+    private let logger = Logger(subsystem: "singhkays.Kalam", category: "SystemAudioDucker")
+    private let capabilitiesProvider: () -> RuntimeCapabilities
+
+    private init(capabilitiesProvider: @escaping () -> RuntimeCapabilities = RuntimeCapabilities.current) {
+        self.capabilitiesProvider = capabilitiesProvider
+    }
     
     private var duckingActive = false
     private var preDuckingVolume: Float? = nil
     
     func initialize() {
-        // We will mute/unmute on demand.
+        let capabilities = capabilitiesProvider()
+        logger.info("Runtime capabilities: sandbox=\(capabilities.appSandbox), audioInput=\(capabilities.audioInput), accessibility=\(capabilities.accessibility), outgoingNetwork=\(capabilities.outgoingNetworkClient)")
+        if let caveat = capabilities.sandboxedAudioCaveat {
+            logger.warning("Manual CoreAudio ducking may be unavailable: \(caveat, privacy: .public)")
+        }
     }
     
     func startDucking() {
@@ -1129,7 +1139,7 @@ final class SystemAudioDucker {
         guard GeneralSettingsConfiguration.load().muteWhileRecording else { return }
         
         duckingActive = true
-        print("🔻 Muting system volume")
+        logger.info("Muting system volume for recording")
         
         let deviceID = getDefaultOutputDevice()
         guard deviceID != kAudioObjectUnknown else { return }
@@ -1143,7 +1153,7 @@ final class SystemAudioDucker {
     func stopDucking(cancelOnly: Bool = false) {
         guard duckingActive else { return }
         duckingActive = false
-        print("🔊 Restoring system volume")
+        logger.info("Restoring system volume after recording")
         
         guard let savedVolume = preDuckingVolume else { return }
         let deviceID = getDefaultOutputDevice()
@@ -1173,7 +1183,7 @@ final class SystemAudioDucker {
         )
         
         if status != noErr {
-            print("Error getting default output device: \\(status)")
+            logger.warning("Error getting default output device: \(status)")
         }
         return deviceID
     }
@@ -1188,7 +1198,7 @@ final class SystemAudioDucker {
         )
         
         guard AudioHardwareServiceHasProperty(deviceID, &propertyAddress) else {
-            print("Device does not support VirtualMainVolume")
+            logger.info("Device does not support VirtualMainVolume")
             return nil
         }
         
@@ -1201,7 +1211,7 @@ final class SystemAudioDucker {
         )
         
         if status != noErr {
-            print("Error getting volume: \\(status)")
+            logger.warning("Error getting volume: \(status)")
             return nil
         }
         return volume
@@ -1227,7 +1237,7 @@ final class SystemAudioDucker {
         )
         
         if status != noErr {
-            print("Error setting volume: \\(status)")
+            logger.warning("Error setting volume: \(status)")
         }
     }
 }
@@ -2623,380 +2633,6 @@ final class AudioRecorder {
 
 // MARK: - ASR (FluidAudio Parakeet TDT v3)
 
-enum ASRError: LocalizedError {
-    case notInitialized
-    case modelLibraryNotConfigured
-    case modelFolderMissing(version: ASRModelVersion, expectedPath: String)
-    case invalidModelFiles(version: ASRModelVersion, expectedPath: String)
-    
-    var errorDescription: String? {
-        switch self {
-        case .notInitialized:
-            return "ASR not initialized yet."
-        case .modelLibraryNotConfigured:
-            return "No model library folder selected. Open Settings > Models and choose your model library folder."
-        case .modelFolderMissing(let version, let expectedPath):
-            return "Missing \(version.displayName) model folder at \(expectedPath)."
-        case .invalidModelFiles(let version, let expectedPath):
-            return "Incomplete or invalid files for \(version.displayName) at \(expectedPath)."
-        }
-    }
-
-    var isSetupRelated: Bool {
-        switch self {
-        case .modelLibraryNotConfigured, .modelFolderMissing, .invalidModelFiles:
-            return true
-        case .notInitialized:
-            return false
-        }
-    }
-
-    var recordingBlockMessage: String {
-        switch self {
-        case .modelLibraryNotConfigured:
-            return "Set model folder in Settings"
-        case .modelFolderMissing:
-            return "Selected model is missing"
-        case .invalidModelFiles:
-            return "Selected model files are invalid"
-        case .notInitialized:
-            return "Model loading..."
-        }
-    }
-}
-
-final class ASRService {
-    private var asrManager: AsrManager?
-    private var initialized = false
-    private var currentModelVersion: ASRModelVersion?
-    private var currentModelDirectoryPath: String?
-    private(set) var lastInitializationErrorDescription: String?
-    private(set) var isSetupIssue = false
-    private var lastASRError: ASRError?
-    
-    // Public read-only property for readiness check
-    var isReady: Bool {
-        asrManager != nil && initialized
-    }
-
-    var recordingBlockMessage: String {
-        if let lastASRError {
-            return lastASRError.recordingBlockMessage
-        }
-        if let lastInitializationErrorDescription, !lastInitializationErrorDescription.isEmpty {
-            return "Model initialization failed"
-        }
-        return "Model loading..."
-    }
-    
-    func initialize() async throws {
-        try await initialize(using: ModelSetupSupport.loadPersistedNormalizedSelectedModel())
-    }
-    
-    func initialize(with version: ASRModelVersion) async throws {
-        var config = ModelsConfiguration.load()
-        config.asrVersion = version
-        try await initialize(using: config)
-    }
-
-    private func initialize(using config: ModelsConfiguration) async throws {
-        do {
-            let version = config.asrVersion
-            let availability = config.availability(for: version)
-            let modelDirectory: URL
-            let modelLibraryURL: URL
-
-            switch availability {
-            case .modelLibraryNotConfigured:
-                throw ASRError.modelLibraryNotConfigured
-            case .missingModelFolder(let expectedPath):
-                throw ASRError.modelFolderMissing(version: version, expectedPath: expectedPath)
-            case .invalidModelFolder(let expectedPath):
-                throw ASRError.invalidModelFiles(version: version, expectedPath: expectedPath)
-            case .installed(let path):
-                modelDirectory = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
-                guard let libraryURL = config.modelLibraryURL else {
-                    throw ASRError.modelLibraryNotConfigured
-                }
-                modelLibraryURL = libraryURL.standardizedFileURL
-            }
-
-            if initialized && currentModelVersion == version && currentModelDirectoryPath == modelDirectory.path {
-                return
-            }
-
-            let models = try await ModelsConfiguration.withSecurityScopedAccess(to: modelLibraryURL) {
-                try await AsrModels.load(from: modelDirectory, version: version.fluidAudioVersion)
-            }
-            let manager = AsrManager(config: .default)
-            try await manager.initialize(models: models)
-            self.asrManager = manager
-            self.initialized = true
-            self.currentModelVersion = version
-            self.currentModelDirectoryPath = modelDirectory.path
-            self.lastInitializationErrorDescription = nil
-            self.isSetupIssue = false
-            self.lastASRError = nil
-            
-            print("ASR initialized with model: \(version.displayName) from \(modelDirectory.path)")
-            
-            // Warm-up: run inference with model-expected shape (15s) to compile/allocate graph and avoid shape mismatches.
-            Task.detached(priority: .utility) { [weak self] in
-                guard let self = self, let asrManager = self.asrManager else { return }
-                do {
-                    let warm = [Float](repeating: 0.0, count: 240_000)  // 15s at 16kHz to match [1, 240000] shape and min requirements
-                    _ = try await asrManager.transcribe(warm, source: .system)
-                    print("ASR warm-up completed.")
-                } catch {
-                    print("ASR warm-up skipped/failed (possible shape issue): \(error.localizedDescription)")
-                }
-            }
-        } catch {
-            self.asrManager = nil
-            self.initialized = false
-            self.currentModelVersion = nil
-            self.currentModelDirectoryPath = nil
-            self.lastInitializationErrorDescription = error.localizedDescription
-            if let asrError = error as? ASRError {
-                self.isSetupIssue = asrError.isSetupRelated
-                self.lastASRError = asrError
-            } else {
-                self.isSetupIssue = true
-                self.lastASRError = nil
-            }
-            throw error
-        }
-    }
-    
-    func reinitializeIfNeeded() async throws {
-        let config = ModelsConfiguration.load()
-        let version = config.asrVersion
-        let targetPath = config.modelDirectoryURL(for: version)?.standardizedFileURL.path
-
-        if !initialized || currentModelVersion != version || currentModelDirectoryPath != targetPath {
-            print("ASR model configuration changed. Reinitializing...")
-            asrManager = nil
-            initialized = false
-            try await initialize(using: config)
-        }
-    }
-    
-    func transcribe(samples: [Float]) async throws -> String {
-        let config = ModelsConfiguration.load()
-        let targetPath = config.modelDirectoryURL(for: config.asrVersion)?.standardizedFileURL.path
-        if !initialized || currentModelVersion != config.asrVersion || currentModelDirectoryPath != targetPath {
-            try await reinitializeIfNeeded()
-        }
-        
-        guard let asrManager = asrManager, initialized else {
-            throw ASRError.notInitialized
-        }
-        // Parakeet TDT expects 16kHz mono Float32
-        let result = try await asrManager.transcribe(samples, source: .system)
-        return result.text
-    }
-}
-
-// MARK: - Paste into focused app
-
-enum PasteServiceError: LocalizedError {
-    case accessibilityNotTrusted
-    case pasteExecutionFailed(reason: String)
-    
-    var errorDescription: String? {
-        switch self {
-        case .accessibilityNotTrusted:
-            return "Accessibility permission is required to insert text."
-        case .pasteExecutionFailed(let reason):
-            return "Failed to insert text via Accessibility: \(reason)"
-        }
-    }
-}
-
-final class PasteService {
-    private let logPrefix = "[PasteService]"
-
-    private struct PasteboardSnapshot {
-        let items: [[String: Data]]
-
-        init(pasteboard: NSPasteboard) {
-            var saved: [[String: Data]] = []
-            for item in pasteboard.pasteboardItems ?? [] {
-                var itemDict: [String: Data] = [:]
-                for type in item.types {
-                    if let data = item.data(forType: type) {
-                        itemDict[type.rawValue] = data
-                    }
-                }
-                saved.append(itemDict)
-            }
-            self.items = saved
-        }
-
-        func restore(to pasteboard: NSPasteboard) {
-            pasteboard.clearContents()
-            for itemDict in items {
-                let item = NSPasteboardItem()
-                for (type, data) in itemDict {
-                    item.setData(data, forType: NSPasteboard.PasteboardType(rawValue: type))
-                }
-                pasteboard.writeObjects([item])
-            }
-        }
-    }
-
-    func paste(_ text: String) throws {
-        // Check Accessibility without prompting in the hot path.
-        guard AXIsProcessTrusted() else {
-            print("\(logPrefix) Accessibility not trusted; aborting paste.")
-            throw PasteServiceError.accessibilityNotTrusted
-        }
-
-        if postUnicodeTextIfPossible(text) {
-            print("\(logPrefix) Paste succeeded via CGEvent unicode.")
-            return
-        }
-
-        let pasteboard = NSPasteboard.general
-        let snapshot = PasteboardSnapshot(pasteboard: pasteboard)
-        let targetChangeCount = writeAndTrackChangeCount(pasteboard: pasteboard, text: text)
-        _ = waitForPasteboardCommit(targetChangeCount: targetChangeCount)
-
-        if postCmdV() {
-            print("\(logPrefix) Paste succeeded via Cmd+V.")
-            restoreClipboardIfNeeded(snapshot)
-            return
-        }
-
-        if let error = insertTextViaAccessibility(text) {
-            print("\(logPrefix) Paste failed after AX fallback: \(error)")
-            throw PasteServiceError.pasteExecutionFailed(reason: error)
-        }
-
-        print("\(logPrefix) Paste succeeded via Accessibility.")
-        restoreClipboardIfNeeded(snapshot)
-    }
-
-    private func restoreClipboardIfNeeded(_ snapshot: PasteboardSnapshot) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            snapshot.restore(to: NSPasteboard.general)
-            print("\(self.logPrefix) Clipboard restored.")
-        }
-    }
-
-    private func writeAndTrackChangeCount(pasteboard: NSPasteboard, text: String) -> Int {
-        let before = pasteboard.changeCount
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        let after = pasteboard.changeCount
-        if after == before {
-            return after + 1
-        }
-        return after
-    }
-
-    private func waitForPasteboardCommit(
-        targetChangeCount: Int,
-        timeoutSeconds: TimeInterval = 0.15,
-        pollIntervalSeconds: TimeInterval = 0.005
-    ) -> Bool {
-        if targetChangeCount <= NSPasteboard.general.changeCount {
-            return true
-        }
-        let deadline = Date().addingTimeInterval(timeoutSeconds)
-        while Date() < deadline {
-            if NSPasteboard.general.changeCount >= targetChangeCount {
-                return true
-            }
-            usleep(useconds_t(pollIntervalSeconds * 1_000_000))
-        }
-        return false
-    }
-
-    private func postCmdV() -> Bool {
-        let source = CGEventSource(stateID: .combinedSessionState)
-        let cmdKey: CGKeyCode = 55
-        let vKey: CGKeyCode = 9
-        guard let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: cmdKey, keyDown: true),
-              let vDown = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true),
-              let vUp = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false),
-              let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: cmdKey, keyDown: false)
-        else {
-            print("\(logPrefix) Failed to create Cmd+V CGEvents.")
-            return false
-        }
-
-        vDown.flags = .maskCommand
-        vUp.flags = .maskCommand
-
-        cmdDown.post(tap: .cghidEventTap)
-        vDown.post(tap: .cghidEventTap)
-        vUp.post(tap: .cghidEventTap)
-        cmdUp.post(tap: .cghidEventTap)
-        return true
-    }
-
-    private func postUnicodeTextIfPossible(_ text: String) -> Bool {
-        let utf16Array = Array(text.utf16)
-        if utf16Array.isEmpty {
-            return false
-        }
-        if utf16Array.count > 200 {
-            print("\(logPrefix) CGEvent unicode skipped (len=\(utf16Array.count) > 200).")
-            return false
-        }
-
-        guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
-              let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
-        else {
-            print("\(logPrefix) Failed to create CGEvent unicode events.")
-            return false
-        }
-
-        keyDown.keyboardSetUnicodeString(stringLength: utf16Array.count, unicodeString: utf16Array)
-        keyUp.keyboardSetUnicodeString(stringLength: utf16Array.count, unicodeString: utf16Array)
-
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
-        return true
-    }
-
-    private func insertTextViaAccessibility(_ text: String) -> String? {
-        guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
-            return "No frontmost application found"
-        }
-
-        let resolution: AccessibilityFocusedElementResolution
-        switch AccessibilityFocusResolver.resolveFocusedElement(frontmostApp: frontmostApp) {
-        case .success(let focusedElementResolution):
-            resolution = focusedElementResolution
-        case .failure(let error):
-            return error.reason
-        }
-
-        let insertResult = AXUIElementSetAttributeValue(
-            resolution.element,
-            kAXSelectedTextAttribute as CFString,
-            text as CFTypeRef
-        )
-        if insertResult == .success {
-            return nil
-        }
-
-        let valueResult = AXUIElementSetAttributeValue(
-            resolution.element,
-            kAXValueAttribute as CFString,
-            text as CFTypeRef
-        )
-        if valueResult == .success {
-            return nil
-        }
-
-        return "Resolved focused element in \(resolution.appName) via \(resolution.strategy), "
-            + "but kAXSelectedTextAttribute failed with \(insertResult.debugName) and "
-            + "kAXValueAttribute failed with \(valueResult.debugName)."
-    }
-}
 // MARK: - Silence Trimmer (robust energy-based endpointer with hysteresis)
 
 enum SilenceTrimmer {
@@ -3662,6 +3298,7 @@ enum CaseHelper {
 // Persistence + Manager
 final class CustomDictionaryManager: ObservableObject {
     static let shared = CustomDictionaryManager()
+    private let logger = Logger(subsystem: "singhkays.Kalam", category: "CustomDictionary")
     private init() {}
     
     @Published var entries: [DictionaryEntry] = []
@@ -3691,10 +3328,10 @@ final class CustomDictionaryManager: ObservableObject {
     }
     
     func bootstrap() {
-        print("[\(Date())] CustomDictionaryManager: Bootstrapping - loading from \(appSupportURL.path)")
+        logger.info("Custom dictionary bootstrap started")
         load()
         recompile()
-        print("[\(Date())] CustomDictionaryManager: Bootstrap complete. Loaded \(entries.count) entries, first launch: \(isFirstLaunch)")
+        logger.info("Custom dictionary bootstrap complete: entries=\(self.entries.count), firstLaunch=\(self.isFirstLaunch)")
     }
     
     func apply(to text: String) -> (String, Int) {
@@ -3702,64 +3339,64 @@ final class CustomDictionaryManager: ObservableObject {
         queue.sync { engine = self.compiled }
         let (out, count) = engine.apply(to: text)
         if count > 0 {
-            print("[\(Date())] CustomDictionary: applied \(count) replacement(s). Output length: \(out.count)")
+            logger.info("Custom dictionary applied replacements=\(count), outputLength=\(out.count)")
         }
         return (out, count)
     }
     
     func addEntry(_ entry: DictionaryEntry) {
-        print("[\(Date())] CustomDictionaryManager: Adding entry (ID: \(entry.id), trigger: '\(entry.trigger)'). Previous count: \(entries.count)")
+        logger.info("Custom dictionary adding entry; previousCount=\(self.entries.count)")
         entries.append(entry)
-        print("[\(Date())] CustomDictionaryManager: Added entry. New count: \(entries.count)")
+        logger.info("Custom dictionary entry added; count=\(self.entries.count)")
         entriesDidChange()
     }
     
     func removeEntries(withIds ids: [UUID]) {
         guard !ids.isEmpty else { return }
-        print("[\(Date())] CustomDictionaryManager: Removing \(ids.count) entries (IDs: \(ids)). Previous count: \(entries.count)")
+        logger.info("Custom dictionary removing entries=\(ids.count), previousCount=\(self.entries.count)")
         let beforeCount = entries.count
         entries.removeAll { ids.contains($0.id) }
-        print("[\(Date())] CustomDictionaryManager: Removed entries. New count: \(entries.count) (removed \(beforeCount - entries.count))")
+        logger.info("Custom dictionary removed entries; count=\(self.entries.count), removed=\(beforeCount - self.entries.count)")
         entriesDidChange()
     }
     
     func sortEntriesByTrigger() {
-        print("[\(Date())] CustomDictionaryManager: Sorting \(entries.count) entries by trigger")
+        logger.info("Custom dictionary sorting entries=\(self.entries.count)")
         entries.sort { $0.trigger.localizedCaseInsensitiveCompare($1.trigger) == .orderedAscending }
         entriesDidChange()
     }
     
     func importJSON(from url: URL) throws {
-        print("[\(Date())] CustomDictionaryManager: Importing from \(url.path)")
+        logger.info("Custom dictionary import started")
         let data = try Data(contentsOf: url)
         let decoded = try JSONDecoder().decode([DictionaryEntry].self, from: data)
         entries = decoded
-        print("[\(Date())] CustomDictionaryManager: Import complete. Loaded \(entries.count) entries")
+        logger.info("Custom dictionary import complete; count=\(self.entries.count)")
         save()
         recompile()
     }
     
     func exportJSON(to url: URL) throws {
-        print("[\(Date())] CustomDictionaryManager: Exporting \(entries.count) entries to \(url.path)")
+        logger.info("Custom dictionary export started; count=\(self.entries.count)")
         let data = try JSONEncoder().encode(entries)
         try data.write(to: url, options: .atomic)
-        print("[\(Date())] CustomDictionaryManager: Export complete")
+        logger.info("Custom dictionary export complete")
     }
     
     private func load() {
         let url = appSupportURL
         guard FileManager.default.fileExists(atPath: url.path) else {
             entries = []
-            print("[\(Date())] CustomDictionaryManager: No saved file found, starting empty (first launch)")
+            logger.info("Custom dictionary file missing; starting empty")
             return
         }
         do {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode([DictionaryEntry].self, from: data)
             entries = decoded.filter { $0.userAdded }  // New: Filter non-user (samples) on first launch
-            print("[\(Date())] CustomDictionaryManager: Loaded \(decoded.count) entries from \(url.path), showing \(entries.count) user entries")
+            logger.info("Custom dictionary loaded entries=\(decoded.count), userEntries=\(self.entries.count)")
         } catch {
-            print("[\(Date())] CustomDictionaryManager: Load failed: \(error.localizedDescription)")
+            logger.warning("Custom dictionary load failed: \(error.localizedDescription, privacy: .public)")
             entries = []
         }
     }
@@ -3768,9 +3405,9 @@ final class CustomDictionaryManager: ObservableObject {
         do {
             let data = try JSONEncoder().encode(entries)
             try data.write(to: appSupportURL, options: .atomic)
-            print("[\(Date())] CustomDictionaryManager: Saved \(entries.count) entries to \(appSupportURL.path)")
+            logger.info("Custom dictionary saved entries=\(self.entries.count)")
         } catch {
-            print("[\(Date())] CustomDictionaryManager: Save failed: \(error.localizedDescription)")
+            logger.warning("Custom dictionary save failed: \(error.localizedDescription, privacy: .public)")
         }
     }
     
@@ -3780,7 +3417,7 @@ final class CustomDictionaryManager: ObservableObject {
         debounceWork = nil
         save()
         recompile()
-        print("[\(Date())] CustomDictionaryManager: Immediate save triggered")
+        logger.info("Custom dictionary immediate save triggered")
     }
     
     func entriesDidChange() {
