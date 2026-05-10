@@ -1,6 +1,6 @@
 import Foundation
 
-enum TextCleanupGrammarMode: String, CaseIterable, Codable, Identifiable {
+enum TextCleanupGrammarMode: String, CaseIterable, Codable, Identifiable, Sendable {
     case off
     case light
     case full
@@ -19,7 +19,7 @@ enum TextCleanupGrammarMode: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-struct TextCleanupConfiguration: Equatable, Codable {
+struct TextCleanupConfiguration: Equatable, Codable, Sendable {
     static let defaults = TextCleanupConfiguration(
         enabled: true,
         removeFillers: true,

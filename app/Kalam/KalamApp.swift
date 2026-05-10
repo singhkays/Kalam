@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 import AVFoundation
-import FluidAudio
+@preconcurrency import FluidAudio
 import Foundation
 import HotKey
 import ApplicationServices
@@ -83,6 +83,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     
     private var isRecording = false
     private var isASRReady = false
+    private var isASRSetupIssue = false
+    private var asrRecordingBlockMessage = "Model loading..."
     private var isAudioReady = false
     private var pttDownTime: CFAbsoluteTime = 0
     private var pttUpTime: CFAbsoluteTime = 0
@@ -669,19 +671,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch availability {
         case .installed:
             do {
-                if asr.isReady {
+                let status = await asr.status
+                if status.isReady {
                     try await asr.reinitializeIfNeeded()
                 } else {
                     try await asr.initialize()
                 }
-                isASRReady = asr.isReady
+                updateASRStatus(await asr.status)
             } catch {
-                isASRReady = false
+                updateASRStatus(await asr.status, forceReady: false)
                 print("ASR init failed: \(error.localizedDescription)")
             }
         case .modelLibraryNotConfigured, .missingModelFolder, .invalidModelFolder:
             isASRReady = false
+            isASRSetupIssue = true
+            asrRecordingBlockMessage = "Set model folder in Settings"
         }
+    }
+
+    private func updateASRStatus(_ status: ASRServiceStatus, forceReady: Bool? = nil) {
+        isASRReady = forceReady ?? status.isReady
+        isASRSetupIssue = status.isSetupIssue
+        asrRecordingBlockMessage = status.recordingBlockMessage
     }
 
     private func handleHotkeyEvent(isDown: Bool) {
@@ -825,11 +836,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         guard isASRReady else {
             print("⚠️ ASR not ready yet, ignoring PTT press.")
-            if asr.isSetupIssue {
+            if isASRSetupIssue {
                 showOnboardingWindow(mode: .repair)
-                overlay.showError(asr.recordingBlockMessage, action: nil, autoHideAfter: 4.0)
+                overlay.showError(asrRecordingBlockMessage, action: nil, autoHideAfter: 4.0)
             } else {
-                overlay.showInfoAndAutoHide(asr.recordingBlockMessage)
+                overlay.showInfoAndAutoHide(asrRecordingBlockMessage)
             }
             return false
         }
@@ -888,8 +899,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         transcriptionTask?.cancel()
         
-        // Keep heavy work off the MainActor. Add post-roll to preserve trailing phonemes.
-        transcriptionTask = Task.detached(priority: .userInitiated) { [weak self, pttDown, pttUp] in
+        // Run as an actor-inherited task instead of Task.detached so Swift 6 does not
+        // send MainActor app state into an unisolated closure. Add post-roll to preserve trailing phonemes.
+        transcriptionTask = Task(priority: .userInitiated) { [weak self, pttDown, pttUp] in
             guard let self = self else { return }
             guard !Task.isCancelled else { return }
             let defaults = UserDefaults.standard
@@ -939,21 +951,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             
             do {
-                // Parallelize lightweight peak normalization (~5ms for 10s) in a concurrent Task.
-                // Await before ASR due to input dependency (normalized samples required for transcription).
-                // Structure uses async let for "parallel" invocation; enables future overlap (e.g., with post-ASR steps).
-                // Rationale: Overlaps micro-delays in serial chain (trim → normalize → ASR); negligible CPU on Apple Silicon.
-                // Expected: 10-20ms savings per plan. Real-app pattern: Final Cut Pro/Whisper.cpp batch audio pipelines.
-                // Low confidence: True parallelism limited by dependency; test on long segments for gains.
+                // Normalize before ASR without spawning an extra child task; this keeps the
+                // transcription flow inside one actor-inherited task for Swift 6 safety.
                 let asrStart = CFAbsoluteTimeGetCurrent()
-                let normalizedTask = Task {
-                    SilenceTrimmer.normalizePeak(trimmed, targetDbFS: -3.0)
-                }
-                async let asrText: String = {
-                    let normalized = await normalizedTask.value
-                    return try await self.asr.transcribe(samples: normalized)
-                }()
-                let text = try await asrText
+                let normalized = SilenceTrimmer.normalizePeak(trimmed, targetDbFS: -3.0)
+                let text = try await self.asr.transcribe(samples: normalized)
                 guard !Task.isCancelled else { return }
                 let asrEnd = CFAbsoluteTimeGetCurrent()
                 stageMark("asr")
@@ -1054,7 +1056,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         playRecordingChime()
 
         transcriptionTask?.cancel()
-        transcriptionTask = Task.detached(priority: .userInitiated) { [weak self] in
+        transcriptionTask = Task(priority: .userInitiated) { [weak self] in
             guard let self else { return }
             await self.audio.cancelCapture()
             await MainActor.run {

@@ -1,5 +1,5 @@
 import Foundation
-import FluidAudio
+@preconcurrency import FluidAudio
 
 /// A unified runner to exercise the Kalam engine pipeline in a "special mode" for testing.
 /// This allows feeding text or audio through the system and inspecting intermediate results.

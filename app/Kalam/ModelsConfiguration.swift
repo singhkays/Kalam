@@ -1,9 +1,9 @@
 import Foundation
-import FluidAudio
+@preconcurrency import FluidAudio
 
 // MARK: - ASR Model Version
 
-enum ASRModelVersion: String, CaseIterable, Identifiable {
+enum ASRModelVersion: String, CaseIterable, Identifiable, Sendable {
     case v2 = "v2"
     case v3 = "v3"
     
@@ -51,7 +51,7 @@ enum ASRModelVersion: String, CaseIterable, Identifiable {
     }
 }
 
-enum ASRModelAvailability: Equatable {
+enum ASRModelAvailability: Equatable, Sendable {
     case modelLibraryNotConfigured
     case missingModelFolder(expectedPath: String)
     case invalidModelFolder(expectedPath: String)
@@ -80,7 +80,7 @@ enum ASRModelAvailability: Equatable {
 
 // MARK: - Models Configuration
 
-struct ModelsConfiguration: Equatable {
+struct ModelsConfiguration: Equatable, Sendable {
     static let defaults = ModelsConfiguration(
         asrVersion: .v2,
         modelLibraryBookmarkData: nil,

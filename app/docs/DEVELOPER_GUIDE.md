@@ -424,10 +424,10 @@ Required:
 Requirements (project settings):
 
 - macOS deployment target: `14.6`
-- Swift language version: `5.0` until the remaining strict-concurrency blockers are resolved
+- Swift language version: `6.0`
 - Xcode 16.x recommended
 
-Swift 6 migration note: the app target intentionally remains on Swift 5 for now because strict concurrency checking rejects existing `Task.detached` pipelines that capture non-`Sendable` runtime objects. Known blockers include the ASR warm-up in `Kalam/Services/ASRService.swift` and the stop/cancel transcription tasks in `Kalam/KalamApp.swift`; enabling Swift 6 currently produces diagnostics like `passing closure as a 'sending' parameter risks causing data races`. Finish the service actorization/pipeline split before re-enabling `SWIFT_VERSION = 6.0`.
+Swift 6 concurrency posture: ASR mutable state is actor-isolated in `Kalam/Services/ASRService.swift`, paste execution is main-actor isolated in `Kalam/Services/PasteService.swift`, and the dictation flow no longer uses `Task.detached` to capture app/runtime objects. New background work should either live behind an actor boundary or capture only immutable `Sendable` values.
 
 Open `Kalam.xcodeproj`, run the `Kalam` target.
 

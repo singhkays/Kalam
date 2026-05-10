@@ -17,6 +17,7 @@ enum PasteServiceError: LocalizedError {
     }
 }
 
+@MainActor
 final class PasteService {
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "PasteService")
 

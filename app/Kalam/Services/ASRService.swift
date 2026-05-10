@@ -1,9 +1,9 @@
 import AppKit
 import Foundation
-import FluidAudio
+@preconcurrency import FluidAudio
 import OSLog
 
-enum ASRError: LocalizedError {
+enum ASRError: LocalizedError, Sendable {
     case notInitialized
     case modelLibraryNotConfigured
     case modelFolderMissing(version: ASRModelVersion, expectedPath: String)
@@ -45,7 +45,13 @@ enum ASRError: LocalizedError {
     }
 }
 
-final class ASRService {
+struct ASRServiceStatus: Sendable {
+    let isReady: Bool
+    let isSetupIssue: Bool
+    let recordingBlockMessage: String
+}
+
+actor ASRService {
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "ASRService")
     private var asrManager: AsrManager?
     private var initialized = false
@@ -54,6 +60,7 @@ final class ASRService {
     private(set) var lastInitializationErrorDescription: String?
     private(set) var isSetupIssue = false
     private var lastASRError: ASRError?
+    private var warmupTask: Task<Void, Never>?
     
     // Public read-only property for readiness check
     var isReady: Bool {
@@ -61,6 +68,18 @@ final class ASRService {
     }
 
     var recordingBlockMessage: String {
+        recordingBlockMessageValue
+    }
+
+    var status: ASRServiceStatus {
+        ASRServiceStatus(
+            isReady: isReady,
+            isSetupIssue: isSetupIssue,
+            recordingBlockMessage: recordingBlockMessageValue
+        )
+    }
+
+    private var recordingBlockMessageValue: String {
         if let lastASRError {
             return lastASRError.recordingBlockMessage
         }
@@ -111,6 +130,7 @@ final class ASRService {
             }
             let manager = AsrManager(config: .default)
             try await manager.initialize(models: models)
+            warmupTask?.cancel()
             self.asrManager = manager
             self.initialized = true
             self.currentModelVersion = version
@@ -121,18 +141,13 @@ final class ASRService {
             
             logger.info("ASR initialized with model=\(version.displayName, privacy: .public)")
             
-            // Warm-up: run inference with model-expected shape (15s) to compile/allocate graph and avoid shape mismatches.
-            Task.detached(priority: .utility) { [weak self] in
-                guard let self = self, let asrManager = self.asrManager else { return }
-                do {
-                    let warm = [Float](repeating: 0.0, count: 240_000)  // 15s at 16kHz to match [1, 240000] shape and min requirements
-                    _ = try await asrManager.transcribe(warm, source: .system)
-                    self.logger.info("ASR warm-up completed")
-                } catch {
-                    self.logger.warning("ASR warm-up skipped or failed: \(error.localizedDescription, privacy: .public)")
-                }
+            // Warm-up: actor-owned task avoids detached captures of non-Sendable ASR state.
+            warmupTask = Task(priority: .utility) { [modelPath = modelDirectory.path] in
+                await self.warmUpCurrentManager(expectedModelDirectoryPath: modelPath)
             }
         } catch {
+            warmupTask?.cancel()
+            warmupTask = nil
             self.asrManager = nil
             self.initialized = false
             self.currentModelVersion = nil
@@ -156,12 +171,34 @@ final class ASRService {
 
         if !initialized || currentModelVersion != version || currentModelDirectoryPath != targetPath {
             logger.info("ASR model configuration changed; reinitializing")
+            warmupTask?.cancel()
+            warmupTask = nil
             asrManager = nil
             initialized = false
             try await initialize(using: config)
         }
     }
     
+    private func warmUpCurrentManager(expectedModelDirectoryPath: String) async {
+        guard currentModelDirectoryPath == expectedModelDirectoryPath,
+              let asrManager,
+              initialized
+        else {
+            return
+        }
+
+        do {
+            let warm = [Float](repeating: 0.0, count: 240_000)  // 15s at 16kHz to match [1, 240000] shape and min requirements
+            _ = try await asrManager.transcribe(warm, source: .system)
+            guard !Task.isCancelled else { return }
+            logger.info("ASR warm-up completed")
+        } catch is CancellationError {
+            return
+        } catch {
+            logger.warning("ASR warm-up skipped or failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     func transcribe(samples: [Float]) async throws -> String {
         let config = ModelsConfiguration.load()
         let targetPath = config.modelDirectoryURL(for: config.asrVersion)?.standardizedFileURL.path
