@@ -24,7 +24,7 @@ struct KalamTestRunner {
     static let shared = KalamTestRunner()
     
     /// Run the full pipeline starting from processed text (simulating ASR output)
-    func runTextPipeline(_ text: String, configuration: TextCleanupConfiguration? = nil) -> EngineResult {
+    func runTextPipeline(_ text: String, configuration: TextCleanupConfiguration? = nil) async -> EngineResult {
         let config = configuration ?? ModelsConfiguration.load().textCleanup
         
         // 1. Cleanup
@@ -36,7 +36,7 @@ struct KalamTestRunner {
         let itnText = itnResult.text
         
         // 3. Custom Dictionary
-        let (finalText, _) = CustomDictionaryManager.shared.apply(to: itnText)
+        let (finalText, _) = await CustomDictionaryManager.shared.apply(to: itnText)
         
         return EngineResult(
             input: text,
@@ -52,7 +52,7 @@ struct KalamTestRunner {
         let transcribedText = try await asrService.transcribe(samples: samples)
         
         // 2. Process via text pipeline
-        return runTextPipeline(transcribedText)
+        return await runTextPipeline(transcribedText)
     }
     
     private func applyITN(to text: String) -> (text: String, changed: Bool) {

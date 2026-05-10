@@ -4,7 +4,7 @@ import AVFoundation
 import FluidAudio
 import Foundation
 import HotKey
-import ApplicationServices
+@preconcurrency import ApplicationServices
 import CoreAudio
 import AudioToolbox
 import ServiceManagement
@@ -973,7 +973,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 stageMark("cleanup+itn")
 
                 // Apply custom dictionary replacements (phrases first, then words)
-                let (postProcessed, replaceCount) = CustomDictionaryManager.shared.apply(to: itnResult.text)
+                let (postProcessed, replaceCount) = await CustomDictionaryManager.shared.apply(to: itnResult.text)
                 stageMark("dictionary")
                 print("Transcription completed (len=\(postProcessed.count), ASR=\(String(format: "%.0f", (asrEnd - asrStart)*1000)) ms, cleanupEdits=\(cleanupResult.stats.totalEdits), cleanupMs=\(String(format: "%.0f", cleanupResult.stats.durationMs)), fillerMs=\(String(format: "%.0f", cleanupResult.stats.fillerMs)), backtrackMs=\(String(format: "%.0f", cleanupResult.stats.backtrackMs)), listMs=\(String(format: "%.0f", cleanupResult.stats.listMs)), punctuationMs=\(String(format: "%.0f", cleanupResult.stats.punctuationMs)), grammarMs=\(String(format: "%.0f", cleanupResult.stats.grammarMs)), grammarEdits=\(cleanupResult.stats.grammarEdits), grammarAttempted=\(cleanupResult.stats.grammarAttempted), grammarTimedOut=\(cleanupResult.stats.grammarTimedOut), grammarSkippedForLength=\(cleanupResult.stats.grammarSkippedForLength), itnEnabled=\(itnResult.enabled), itnAvailable=\(itnResult.available), itnSpan=\(itnResult.spanTokens), itnChanged=\(itnResult.changed), itnMs=\(String(format: "%.0f", itnResult.durationMs)), replacements=\(replaceCount), est.segment=\(segmentEstimateMs) ms)")
 
@@ -1113,6 +1113,7 @@ private extension Float {
 
 import CoreAudio
 
+@MainActor
 final class SystemAudioDucker {
     static let shared = SystemAudioDucker()
     private init() {}
@@ -3660,6 +3661,7 @@ enum CaseHelper {
 }
 
 // Persistence + Manager
+@MainActor
 final class CustomDictionaryManager: ObservableObject {
     static let shared = CustomDictionaryManager()
     private init() {}

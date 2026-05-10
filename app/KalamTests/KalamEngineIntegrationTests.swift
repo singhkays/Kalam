@@ -16,7 +16,7 @@ final class KalamEngineIntegrationTests: XCTestCase {
         UserDefaults.standard.removeObject(forKey: "internal.itn.enabled")
     }
     
-    func testGoldenCases() throws {
+    func testGoldenCases() async throws {
         let bundle = Bundle(for: type(of: self))
         guard let url = bundle.url(forResource: "engine_golden_tests", withExtension: "json") else {
             XCTFail("Missing engine_golden_tests.json in test bundle")
@@ -35,7 +35,7 @@ final class KalamEngineIntegrationTests: XCTestCase {
                     print("\n--- Running Test Case: \(testCase.name) ---")
                     print("Description: \(testCase.description)")
                     
-                    let result = KalamTestRunner.shared.runTextPipeline(testCase.input)
+                    let result = await KalamTestRunner.shared.runTextPipeline(testCase.input)
                     result.printSummary()
                     
                     XCTAssertEqual(result.final.lowercased(), testCase.expected.lowercased(), "Test case '\(testCase.name)' failed.")
@@ -47,7 +47,7 @@ final class KalamEngineIntegrationTests: XCTestCase {
         }
     }
 
-    func testITNDefaultsToEnabledWhenUnset() throws {
+    func testITNDefaultsToEnabledWhenUnset() async throws {
         guard NemoTextProcessing.isAvailable else {
             throw XCTSkip("NemoTextProcessing is not linked in this test environment.")
         }
@@ -59,7 +59,7 @@ final class KalamEngineIntegrationTests: XCTestCase {
 
         UserDefaults.standard.removeObject(forKey: "internal.itn.enabled")
 
-        let result = KalamTestRunner.shared.runTextPipeline(
+        let result = await KalamTestRunner.shared.runTextPipeline(
             "two hundred and five",
             configuration: TextCleanupConfiguration(
                 enabled: true,
