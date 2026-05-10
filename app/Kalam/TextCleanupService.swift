@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import NaturalLanguage
 
-struct TextCleanupStats: Equatable {
+struct TextCleanupStats: Equatable, Sendable {
     var fillerRemovals: Int = 0
     var backtrackEdits: Int = 0
     var listItemsFormatted: Int = 0
@@ -25,7 +25,7 @@ struct TextCleanupStats: Equatable {
     }
 }
 
-struct TextCleanupResult {
+struct TextCleanupResult: Sendable {
     var text: String
     var stats: TextCleanupStats
 
@@ -34,7 +34,7 @@ struct TextCleanupResult {
     }
 }
 
-final class TextCleanupService {
+final class TextCleanupService: Sendable {
     static let shared = TextCleanupService()
     private init() {}
 

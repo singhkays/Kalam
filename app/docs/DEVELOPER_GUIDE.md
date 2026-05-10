@@ -20,8 +20,8 @@ Kalam is a macOS menu bar dictation app that records audio with push-to-talk, ru
   - Spoken numbered list formatting (`one ... two ... three ...` -> numbered lines)
   - Punctuation/spacing cleanup
 - Cleanup configuration persisted in UserDefaults
-- System audio ducking while recording (optional)
-- CGEvent unicode paste with clipboard snapshot/restore and AX fallback
+- System audio ducking while recording (optional; runtime-verified because sandboxed/CoreAudio behavior can vary)
+- CGEvent unicode paste with guarded clipboard snapshot/restore and AX fallback
 - Recording indicator with premium translucent design and noise texture (placed Mid-Top or Mid-Bottom)
 
 ## Usage Benefits
@@ -332,7 +332,7 @@ Kalam requires Parakeet TDT models for on-device transcription. Models are loade
    # Multilingual (v3) - 25 European languages
    hf download FluidInference/parakeet-tdt-0.6b-v3-coreml \
      --include "Preprocessor.mlmodelc/*" "Encoder.mlmodelc/*" \
-     "Decoder.mlmodelc/*" "JointDecision.mlmodelc/*" "parakeet_vocab.json" \
+     "Decoder.mlmodelc/*" "JointDecisionv3.mlmodelc/*" "parakeet_vocab.json" \
      --local-dir ~/Models/FluidAudio/parakeet-tdt-0.6b-v3-coreml
    ```
    
@@ -346,7 +346,7 @@ Each model folder must contain:
 - `Preprocessor.mlmodelc/`
 - `Encoder.mlmodelc/`
 - `Decoder.mlmodelc/`
-- `JointDecision.mlmodelc/`
+- `JointDecision.mlmodelc/` for v2, or `JointDecisionv3.mlmodelc/` for v3
 - `parakeet_vocab.json`
 
 ### Why Not the Full Repo?
@@ -357,9 +357,11 @@ The full Hugging Face repository is 2.6 GB, but Kalam only needs ~600 MB. The `-
 
 SwiftPM packages:
 
-- `FluidAudio` (ASR integration)
-- `HotKey` (global hotkeys)
-- transitive packages pinned in `Package.resolved`
+- `FluidAudio` (ASR integration), pinned to `0.12.4` in `Kalam.xcodeproj/project.pbxproj`
+- `HotKey` (global hotkeys), pinned to `0.2.1` in `Kalam.xcodeproj/project.pbxproj`
+- transitive packages pinned in `Kalam.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`
+
+Dependency updates should be deliberate: update the exact version in the Xcode project, resolve packages in Xcode, commit the regenerated `Package.resolved`, and run the documented test command before merging.
 
 System frameworks:
 
@@ -408,7 +410,9 @@ When enabled, pipeline will be:
 4. Dictionary replacements
 5. Paste
 
-## Permissions
+## Sandbox, Network, And Permissions
+
+The app target is sandboxed. It has audio-input and accessibility entitlements and no outgoing-network entitlement, so models must be acquired outside the app and selected from local disk. Paste, AX, and manual CoreAudio ducking are still runtime-verified because target applications, permissions, and output devices differ.
 
 Required:
 
@@ -420,13 +424,25 @@ Required:
 Requirements (project settings):
 
 - macOS deployment target: `14.6`
+- Swift language version: `6.0`
 - Xcode 16.x recommended
 
+Swift 6 concurrency posture: ASR mutable state is actor-isolated in `Kalam/Services/ASRService.swift`, paste execution is main-actor isolated in `Kalam/Services/PasteService.swift`, and the dictation flow no longer uses `Task.detached` to capture app/runtime objects. New background work should either live behind an actor boundary or capture only immutable `Sendable` values.
+
 Open `Kalam.xcodeproj`, run the `Kalam` target.
+
+Local CI/test command (does not require a personal signing identity):
+
+```bash
+xcodebuild test -project Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
+```
+
+On a signed developer machine, repeat without `CODE_SIGNING_ALLOWED=NO` before release signing.
 
 ## Current Notes
 
 - App currently relies on CGEvent unicode, then Cmd+V paste, then Accessibility insertion, so target-app behavior can vary.
-- Audio ducking requires output devices with settable scalar volume.
+- Clipboard restore is guarded by pasteboard text and change count so user or target-app clipboard changes are left untouched.
+- Audio ducking requires output devices with settable scalar volume and is runtime-verified under sandbox.
 - Unit tests are available in `app/KalamTests/TextCleanupServiceTests.swift` and run via the `KalamTests` target.
 - Startup logs print ITN status/version and a smoke normalization example.

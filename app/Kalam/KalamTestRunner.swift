@@ -1,5 +1,5 @@
 import Foundation
-import FluidAudio
+@preconcurrency import FluidAudio
 
 /// A unified runner to exercise the Kalam engine pipeline in a "special mode" for testing.
 /// This allows feeding text or audio through the system and inspecting intermediate results.
@@ -24,6 +24,7 @@ struct KalamTestRunner {
     static let shared = KalamTestRunner()
     
     /// Run the full pipeline starting from processed text (simulating ASR output)
+    @MainActor
     func runTextPipeline(_ text: String, configuration: TextCleanupConfiguration? = nil) -> EngineResult {
         let config = configuration ?? ModelsConfiguration.load().textCleanup
         
@@ -47,6 +48,7 @@ struct KalamTestRunner {
     }
     
     /// Run the full pipeline starting from raw audio samples
+    @MainActor
     func runAudioPipeline(samples: [Float], asrService: ASRService) async throws -> EngineResult {
         // 1. ASR
         let transcribedText = try await asrService.transcribe(samples: samples)

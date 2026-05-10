@@ -1,6 +1,6 @@
 import Foundation
 
-enum TextCleanupGrammarMode: String, CaseIterable, Codable, Identifiable {
+enum TextCleanupGrammarMode: String, CaseIterable, Codable, Identifiable, Sendable {
     case off
     case light
     case full
@@ -19,7 +19,7 @@ enum TextCleanupGrammarMode: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-struct TextCleanupConfiguration: Equatable, Codable {
+struct TextCleanupConfiguration: Equatable, Codable, Sendable {
     static let defaults = TextCleanupConfiguration(
         enabled: true,
         removeFillers: true,
@@ -63,7 +63,7 @@ struct TextCleanupConfiguration: Equatable, Codable {
             listFormatting: bool(forKey: Keys.listFormatting, defaults: defaults, fallback: Self.defaults.listFormatting),
             punctuation: bool(forKey: Keys.punctuation, defaults: defaults, fallback: Self.defaults.punctuation),
             grammarMode: mode,
-            grammarTimeoutMs: 100
+            grammarTimeoutMs: int(forKey: Keys.grammarTimeoutMs, defaults: defaults, fallback: Self.defaults.grammarTimeoutMs)
         )
     }
 
@@ -74,7 +74,7 @@ struct TextCleanupConfiguration: Equatable, Codable {
         defaults.set(listFormatting, forKey: Keys.listFormatting)
         defaults.set(punctuation, forKey: Keys.punctuation)
         defaults.set(grammarMode.rawValue, forKey: Keys.grammarMode)
-        defaults.set(100, forKey: Keys.grammarTimeoutMs)
+        defaults.set(boundedGrammarTimeoutMs, forKey: Keys.grammarTimeoutMs)
     }
 
     private static func bool(forKey key: String, defaults: UserDefaults, fallback: Bool) -> Bool {

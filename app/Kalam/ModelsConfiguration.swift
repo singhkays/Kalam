@@ -1,9 +1,9 @@
 import Foundation
-import FluidAudio
+@preconcurrency import FluidAudio
 
 // MARK: - ASR Model Version
 
-enum ASRModelVersion: String, CaseIterable, Identifiable {
+enum ASRModelVersion: String, CaseIterable, Identifiable, Sendable {
     case v2 = "v2"
     case v3 = "v3"
     
@@ -44,14 +44,33 @@ enum ASRModelVersion: String, CaseIterable, Identifiable {
     var repositoryFolderName: String {
         switch self {
         case .v2:
-            return "parakeet-tdt-0.6b-v2-coreml"
+            return "parakeet-tdt-0.6b-v2"
         case .v3:
-            return "parakeet-tdt-0.6b-v3-coreml"
+            return "parakeet-tdt-0.6b-v3"
+        }
+    }
+
+    var requiredModelDirectoryNames: [String] {
+        switch self {
+        case .v2:
+            return [
+                "Preprocessor.mlmodelc",
+                "Encoder.mlmodelc",
+                "Decoder.mlmodelc",
+                "JointDecision.mlmodelc",
+            ]
+        case .v3:
+            return [
+                "Preprocessor.mlmodelc",
+                "Encoder.mlmodelc",
+                "Decoder.mlmodelc",
+                "JointDecisionv3.mlmodelc",
+            ]
         }
     }
 }
 
-enum ASRModelAvailability: Equatable {
+enum ASRModelAvailability: Equatable, Sendable {
     case modelLibraryNotConfigured
     case missingModelFolder(expectedPath: String)
     case invalidModelFolder(expectedPath: String)
@@ -80,7 +99,7 @@ enum ASRModelAvailability: Equatable {
 
 // MARK: - Models Configuration
 
-struct ModelsConfiguration: Equatable {
+struct ModelsConfiguration: Equatable, Sendable {
     static let defaults = ModelsConfiguration(
         asrVersion: .v2,
         modelLibraryBookmarkData: nil,
