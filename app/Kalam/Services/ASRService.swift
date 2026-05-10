@@ -128,8 +128,7 @@ actor ASRService {
             let models = try await ModelsConfiguration.withSecurityScopedAccess(to: modelLibraryURL) {
                 try await AsrModels.load(from: modelDirectory, version: version.fluidAudioVersion)
             }
-            let manager = AsrManager(config: .default)
-            try await manager.initialize(models: models)
+            let manager = AsrManager(config: .default, models: models)
             warmupTask?.cancel()
             self.asrManager = manager
             self.initialized = true
@@ -189,7 +188,8 @@ actor ASRService {
 
         do {
             let warm = [Float](repeating: 0.0, count: 240_000)  // 15s at 16kHz to match [1, 240000] shape and min requirements
-            _ = try await asrManager.transcribe(warm, source: .system)
+            var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
+            _ = try await asrManager.transcribe(warm, decoderState: &decoderState)
             guard !Task.isCancelled else { return }
             logger.info("ASR warm-up completed")
         } catch is CancellationError {
@@ -210,10 +210,10 @@ actor ASRService {
             throw ASRError.notInitialized
         }
         // Parakeet TDT expects 16kHz mono Float32
-        let result = try await asrManager.transcribe(samples, source: .system)
+        var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
+        let result = try await asrManager.transcribe(samples, decoderState: &decoderState)
         return result.text
     }
 }
 
 // MARK: - Paste into focused app
-

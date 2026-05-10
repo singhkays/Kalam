@@ -22,10 +22,12 @@ enum SystemSettingsDestination {
 }
 
 enum SystemSettingsNavigator {
+    @MainActor
     static var openURL: (URL) -> Bool = { url in
         NSWorkspace.shared.open(url)
     }
 
+    @MainActor
     @discardableResult
     static func open(_ destination: SystemSettingsDestination) -> Bool {
         for deepLinkURL in destination.deepLinkURLs {
@@ -44,21 +46,22 @@ enum ModelSetupSupport {
     static let huggingFaceInstallCommand = "curl -LsSf https://hf.co/cli/install.sh | bash"
 
     @discardableResult
+    @MainActor
     static func openModelLibraryFolder(_ url: URL) -> Bool {
         NSWorkspace.shared.open(url)
     }
 
     static func downloadCommand(for version: ASRModelVersion, config: ModelsConfiguration) -> String {
-        let repo = version.repositoryFolderName
+        let repo = "\(version.repositoryFolderName)-coreml"
         let basePath = config.modelLibraryURL?.path ?? "<SELECTED_FOLDER>"
+        let includes = version.requiredModelDirectoryNames
+            .map { "  --include \"\($0)/*\" \\" }
+            .joined(separator: "\n")
         return """
         hf download FluidInference/\(repo) \\
-          --include "Preprocessor.mlmodelc/*" \\
-          --include "Encoder.mlmodelc/*" \\
-          --include "Decoder.mlmodelc/*" \\
-          --include "JointDecision.mlmodelc/*" \\
+        \(includes)
           --include "parakeet_vocab.json" \\
-          --local-dir \(basePath)/\(repo)
+          --local-dir \(basePath)/\(version.repositoryFolderName)
         """
     }
 
@@ -107,6 +110,7 @@ enum ModelSetupSupport {
         }
     }
 
+    @MainActor
     static func chooseModelLibraryFolder(currentURL: URL?, completion: @escaping (URL?) -> Void) {
         let panel = NSOpenPanel()
         panel.prompt = "Choose Folder"

@@ -1,6 +1,6 @@
 import SwiftUI
 import AppKit
-import AVFoundation
+@preconcurrency import AVFoundation
 @preconcurrency import FluidAudio
 import Foundation
 import HotKey
@@ -865,8 +865,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if UserDefaults.standard.bool(forKey: "duckEnabled") {
             duckingStartWorkItem?.cancel()
             let workItem = DispatchWorkItem { [weak self] in
-                guard let self, self.isRecording else { return }
-                SystemAudioDucker.shared.startDucking()
+                Task { @MainActor [weak self] in
+                    guard let self, self.isRecording else { return }
+                    SystemAudioDucker.shared.startDucking()
+                }
             }
             duckingStartWorkItem = workItem
             let delay = max(0.12, min(0.6, chimeDuration))
@@ -929,8 +931,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let configuredPostRollMax = max(configuredPostRollMin, min(500, defaults.integer(forKey: LatencyTuningOptions.postRollMaxMsKey)))
             let postRollMs = min(configuredPostRollMax, max(configuredPostRollMin, segmentEstimateMs))
             
+            let audio = self.audio
             let keyUpToStopStart = CFAbsoluteTimeGetCurrent()
-            let samples = await self.audio.stopAndFetchSamples(postRollMs: postRollMs)
+            let samples = await audio.stopAndFetchSamples(postRollMs: postRollMs)
             guard !Task.isCancelled else { return }
             let afterStop = CFAbsoluteTimeGetCurrent()
             let keyDownToUp = pttUp - pttDown
@@ -1056,9 +1059,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         playRecordingChime()
 
         transcriptionTask?.cancel()
-        transcriptionTask = Task(priority: .userInitiated) { [weak self] in
+        let audio = self.audio
+        transcriptionTask = Task(priority: .userInitiated) { [weak self, audio] in
             guard let self else { return }
-            await self.audio.cancelCapture()
+            await audio.cancelCapture()
             await MainActor.run {
                 self.overlay.showInfoAndAutoHide("Recording canceled")
             }
@@ -1116,6 +1120,7 @@ private extension Float {
 
 import CoreAudio
 
+@MainActor
 final class SystemAudioDucker {
     static let shared = SystemAudioDucker()
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "SystemAudioDucker")
@@ -1442,6 +1447,7 @@ final class HotkeyListener {
 }
 
 // MARK: - Dictation Overlay
+@MainActor
 final class DictationOverlayController {
     private enum Metrics {
         static let overlayWidth: CGFloat = 290
@@ -2258,7 +2264,7 @@ enum AudioRecorderError: LocalizedError {
     }
 }
 
-final class AudioRecorder {
+final class AudioRecorder: @unchecked Sendable {
     private let engine = AVAudioEngine()
     private var converter: AVAudioConverter?
     private var converterInputSampleRate: Double = 0
@@ -2419,9 +2425,10 @@ final class AudioRecorder {
         // Stop the engine on the main thread to turn off the microphone indicator
         if engine.isRunning {
             let stopStart = CFAbsoluteTimeGetCurrent()
+            let engine = self.engine
             // Ensure engine.stop is done on main to avoid CoreAudio surprises
             await MainActor.run {
-                self.engine.stop()
+                engine.stop()
             }
             let stopElapsed = (CFAbsoluteTimeGetCurrent() - stopStart) * 1000
             print(String(format: "Audio engine stopped (%.1f ms) - system mic indicator should turn off", stopElapsed))
@@ -2843,7 +2850,7 @@ enum AccessibilityHelper {
     
     @discardableResult
     static func ensureTrusted(prompt: Bool) -> Bool {
-        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt] as CFDictionary
+        let opts = ["AXTrustedCheckOptionPrompt": prompt] as CFDictionary
         let trusted = AXIsProcessTrustedWithOptions(opts)
         if !trusted {
             explainAccessibilityIfNeeded()
@@ -3298,6 +3305,7 @@ enum CaseHelper {
 }
 
 // Persistence + Manager
+@MainActor
 final class CustomDictionaryManager: ObservableObject {
     static let shared = CustomDictionaryManager()
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "CustomDictionary")
@@ -3317,7 +3325,6 @@ final class CustomDictionaryManager: ObservableObject {
         return dir.appendingPathComponent(fileName)
     }
     
-    private let queue = DispatchQueue(label: "Kalam.CustomDictionary", attributes: .concurrent)
     private var compiled: CompiledReplacementEngine = .empty
     
     private var debounceWork: DispatchWorkItem?
@@ -3337,9 +3344,7 @@ final class CustomDictionaryManager: ObservableObject {
     }
     
     func apply(to text: String) -> (String, Int) {
-        var engine: CompiledReplacementEngine = .empty
-        queue.sync { engine = self.compiled }
-        let (out, count) = engine.apply(to: text)
+        let (out, count) = compiled.apply(to: text)
         if count > 0 {
             logger.info("Custom dictionary applied replacements=\(count), outputLength=\(out.count)")
         }
@@ -3433,10 +3438,7 @@ final class CustomDictionaryManager: ObservableObject {
     }
     
     private func recompile() {
-        let engine = ReplacementCompiler.compile(entries: entries)
-        queue.async(flags: .barrier) { [weak self] in
-            self?.compiled = engine
-        }
+        compiled = ReplacementCompiler.compile(entries: entries)
     }
     
     func reloadFromDisk() {

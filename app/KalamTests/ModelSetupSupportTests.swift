@@ -1,6 +1,7 @@
 import XCTest
 @testable import Kalam_test
 
+@MainActor
 final class ModelSetupSupportTests: XCTestCase {
     private var defaults: UserDefaults!
     private var suiteName: String!
@@ -35,6 +36,22 @@ final class ModelSetupSupportTests: XCTestCase {
 
         XCTAssertTrue(command.contains("hf download FluidInference/parakeet-tdt-0.6b-v2-coreml"))
         XCTAssertTrue(command.contains("--local-dir \(folderURL.path)/parakeet-tdt-0.6b-v2-coreml"))
+        XCTAssertTrue(command.contains("--include \"JointDecision.mlmodelc/*\""))
+    }
+
+    func testDownloadCommandUsesV3JointModelName() throws {
+        let folderURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
+
+        var config = ModelsConfiguration.defaults
+        try config.setModelLibraryURL(folderURL)
+
+        let command = ModelSetupSupport.downloadCommand(for: .v3, config: config)
+
+        XCTAssertTrue(command.contains("hf download FluidInference/parakeet-tdt-0.6b-v3-coreml"))
+        XCTAssertTrue(command.contains("--include \"JointDecisionv3.mlmodelc/*\""))
+        XCTAssertFalse(command.contains("--include \"JointDecision.mlmodelc/*\""))
     }
 
     func testSelectedModelRepoFolderVersionDetectsKnownRepoFolder() {
@@ -51,10 +68,12 @@ final class ModelSetupSupportTests: XCTestCase {
 
         let modelURL = rootURL.appendingPathComponent(ASRModelVersion.v3.repositoryFolderName, isDirectory: true)
         try FileManager.default.createDirectory(at: modelURL, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: modelURL.appendingPathComponent("Preprocessor.mlmodelc", isDirectory: true), withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: modelURL.appendingPathComponent("Encoder.mlmodelc", isDirectory: true), withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: modelURL.appendingPathComponent("Decoder.mlmodelc", isDirectory: true), withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: modelURL.appendingPathComponent("JointDecision.mlmodelc", isDirectory: true), withIntermediateDirectories: true)
+        for modelDirectoryName in ASRModelVersion.v3.requiredModelDirectoryNames {
+            try FileManager.default.createDirectory(
+                at: modelURL.appendingPathComponent(modelDirectoryName, isDirectory: true),
+                withIntermediateDirectories: true
+            )
+        }
         FileManager.default.createFile(atPath: modelURL.appendingPathComponent("parakeet_vocab.json").path, contents: Data("{}".utf8))
 
         var config = ModelsConfiguration.defaults

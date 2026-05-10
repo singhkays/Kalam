@@ -34,7 +34,7 @@ struct TextCleanupResult: Sendable {
     }
 }
 
-final class TextCleanupService {
+final class TextCleanupService: Sendable {
     static let shared = TextCleanupService()
     private init() {}
 

@@ -44,9 +44,28 @@ enum ASRModelVersion: String, CaseIterable, Identifiable, Sendable {
     var repositoryFolderName: String {
         switch self {
         case .v2:
-            return "parakeet-tdt-0.6b-v2-coreml"
+            return "parakeet-tdt-0.6b-v2"
         case .v3:
-            return "parakeet-tdt-0.6b-v3-coreml"
+            return "parakeet-tdt-0.6b-v3"
+        }
+    }
+
+    var requiredModelDirectoryNames: [String] {
+        switch self {
+        case .v2:
+            return [
+                "Preprocessor.mlmodelc",
+                "Encoder.mlmodelc",
+                "Decoder.mlmodelc",
+                "JointDecision.mlmodelc",
+            ]
+        case .v3:
+            return [
+                "Preprocessor.mlmodelc",
+                "Encoder.mlmodelc",
+                "Decoder.mlmodelc",
+                "JointDecisionv3.mlmodelc",
+            ]
         }
     }
 }

@@ -332,7 +332,7 @@ Kalam requires Parakeet TDT models for on-device transcription. Models are loade
    # Multilingual (v3) - 25 European languages
    hf download FluidInference/parakeet-tdt-0.6b-v3-coreml \
      --include "Preprocessor.mlmodelc/*" "Encoder.mlmodelc/*" \
-     "Decoder.mlmodelc/*" "JointDecision.mlmodelc/*" "parakeet_vocab.json" \
+     "Decoder.mlmodelc/*" "JointDecisionv3.mlmodelc/*" "parakeet_vocab.json" \
      --local-dir ~/Models/FluidAudio/parakeet-tdt-0.6b-v3-coreml
    ```
    
@@ -346,7 +346,7 @@ Each model folder must contain:
 - `Preprocessor.mlmodelc/`
 - `Encoder.mlmodelc/`
 - `Decoder.mlmodelc/`
-- `JointDecision.mlmodelc/`
+- `JointDecision.mlmodelc/` for v2, or `JointDecisionv3.mlmodelc/` for v3
 - `parakeet_vocab.json`
 
 ### Why Not the Full Repo?
