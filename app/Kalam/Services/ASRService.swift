@@ -3,6 +3,11 @@ import Foundation
 @preconcurrency import FluidAudio
 import OSLog
 
+private func privacySafeErrorSummary(_ error: Error) -> String {
+    let nsError = error as NSError
+    return "\(nsError.domain)#\(nsError.code)"
+}
+
 enum ASRError: LocalizedError, Sendable {
     case notInitialized
     case modelLibraryNotConfigured
@@ -128,7 +133,18 @@ actor ASRService {
             let models = try await ModelsConfiguration.withSecurityScopedAccess(to: modelLibraryURL) {
                 try await AsrModels.load(from: modelDirectory, version: version.fluidAudioVersion)
             }
-            let manager = AsrManager(config: .default, models: models)
+            
+            var asrConfig = ASRConfig.default
+            asrConfig = ASRConfig(
+                sampleRate: asrConfig.sampleRate,
+                tdtConfig: asrConfig.tdtConfig,
+                encoderHiddenSize: asrConfig.encoderHiddenSize,
+                parallelChunkConcurrency: 4, 
+                streamingEnabled: asrConfig.streamingEnabled,
+                streamingThreshold: asrConfig.streamingThreshold
+            )
+            
+            let manager = AsrManager(config: asrConfig, models: models)
             warmupTask?.cancel()
             self.asrManager = manager
             self.initialized = true
@@ -195,7 +211,7 @@ actor ASRService {
         } catch is CancellationError {
             return
         } catch {
-            logger.warning("ASR warm-up skipped or failed: \(error.localizedDescription, privacy: .public)")
+            logger.warning("ASR warm-up skipped or failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
         }
     }
 

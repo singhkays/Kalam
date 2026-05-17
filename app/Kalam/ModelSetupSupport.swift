@@ -60,7 +60,7 @@ enum ModelSetupSupport {
         return """
         hf download FluidInference/\(repo) \\
         \(includes)
-          --include "parakeet_vocab.json" \\
+          --include "*vocab.json" \\
           --local-dir \(basePath)/\(version.repositoryFolderName)
         """
     }
@@ -84,9 +84,6 @@ enum ModelSetupSupport {
     static func loadPersistedNormalizedSelectedModel(from defaults: UserDefaults = .standard) -> ModelsConfiguration {
         let loaded = ModelsConfiguration.load(from: defaults)
         let normalized = normalizedSelectedModel(in: loaded)
-        if normalized != loaded {
-            normalized.save(to: defaults)
-        }
         return normalized
     }
 

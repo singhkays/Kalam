@@ -327,13 +327,13 @@ Kalam requires Parakeet TDT models for on-device transcription. Models are loade
    hf download FluidInference/parakeet-tdt-0.6b-v2-coreml \
      --include "Preprocessor.mlmodelc/*" "Encoder.mlmodelc/*" \
      "Decoder.mlmodelc/*" "JointDecision.mlmodelc/*" "parakeet_vocab.json" \
-     --local-dir ~/Models/FluidAudio/parakeet-tdt-0.6b-v2-coreml
+     --local-dir ~/Models/FluidAudio/parakeet-tdt-0.6b-v2
    
    # Multilingual (v3) - 25 European languages
    hf download FluidInference/parakeet-tdt-0.6b-v3-coreml \
      --include "Preprocessor.mlmodelc/*" "Encoder.mlmodelc/*" \
      "Decoder.mlmodelc/*" "JointDecisionv3.mlmodelc/*" "parakeet_vocab.json" \
-     --local-dir ~/Models/FluidAudio/parakeet-tdt-0.6b-v3-coreml
+     --local-dir ~/Models/FluidAudio/parakeet-tdt-0.6b-v3
    ```
    
    The `--local-dir` path must match your chosen folder from Step 1.
@@ -357,11 +357,11 @@ The full Hugging Face repository is 2.6 GB, but Kalam only needs ~600 MB. The `-
 
 SwiftPM packages:
 
-- `FluidAudio` (ASR integration), pinned to `0.12.4` in `Kalam.xcodeproj/project.pbxproj`
+- `FluidAudio` (ASR integration), pinned to `0.14.5` in `Kalam.xcodeproj/project.pbxproj`
 - `HotKey` (global hotkeys), pinned to `0.2.1` in `Kalam.xcodeproj/project.pbxproj`
 - transitive packages pinned in `Kalam.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`
 
-Dependency updates should be deliberate: update the exact version in the Xcode project, resolve packages in Xcode, commit the regenerated `Package.resolved`, and run the documented test command before merging.
+Dependency updates should be deliberate: update the exact version in the Xcode project, resolve packages in Xcode, commit the regenerated `Package.resolved`, and require a full documented test pass before merging.
 
 System frameworks:
 

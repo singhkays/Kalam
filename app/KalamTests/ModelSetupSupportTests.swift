@@ -35,7 +35,7 @@ final class ModelSetupSupportTests: XCTestCase {
         let command = ModelSetupSupport.downloadCommand(for: .v2, config: config)
 
         XCTAssertTrue(command.contains("hf download FluidInference/parakeet-tdt-0.6b-v2-coreml"))
-        XCTAssertTrue(command.contains("--local-dir \(folderURL.path)/parakeet-tdt-0.6b-v2-coreml"))
+        XCTAssertTrue(command.contains("--local-dir \(folderURL.path)/parakeet-tdt-0.6b-v2"))
         XCTAssertTrue(command.contains("--include \"JointDecision.mlmodelc/*\""))
     }
 
@@ -55,7 +55,7 @@ final class ModelSetupSupportTests: XCTestCase {
     }
 
     func testSelectedModelRepoFolderVersionDetectsKnownRepoFolder() {
-        let repoURL = URL(fileURLWithPath: "/tmp/parakeet-tdt-0.6b-v3-coreml", isDirectory: true)
+        let repoURL = URL(fileURLWithPath: "/tmp/parakeet-tdt-0.6b-v3", isDirectory: true)
 
         XCTAssertEqual(ModelSetupSupport.selectedModelRepoFolderVersion(for: repoURL), .v3)
     }
@@ -85,6 +85,57 @@ final class ModelSetupSupportTests: XCTestCase {
 
         XCTAssertEqual(normalized.asrVersion, .v3)
         XCTAssertEqual(ModelsConfiguration.load(from: defaults).asrVersion, .v3)
+    }
+
+    func testLoadRefreshesStaleModelLibraryBookmark() throws {
+        let staleBookmark = Data([0x01, 0x02, 0x03])
+        let refreshedBookmark = Data([0x04, 0x05, 0x06])
+        let resolvedURL = URL(fileURLWithPath: "/tmp/kalam-models", isDirectory: true)
+        let config = ModelsConfiguration(
+            asrVersion: .v2,
+            modelLibraryBookmarkData: staleBookmark,
+            textCleanup: .defaults
+        )
+        config.save(to: defaults)
+
+        let loaded = ModelsConfiguration.load(
+            from: defaults,
+            resolveBookmark: { data in
+                XCTAssertEqual(data, staleBookmark)
+                return (resolvedURL, true)
+            },
+            makeBookmark: { url in
+                XCTAssertEqual(url, resolvedURL.standardizedFileURL)
+                return refreshedBookmark
+            }
+        )
+
+        XCTAssertEqual(loaded.modelLibraryBookmarkData, refreshedBookmark)
+        XCTAssertEqual(defaults.data(forKey: "models.modelLibraryBookmark"), refreshedBookmark)
+    }
+
+    func testLoadClearsUnresolvableModelLibraryBookmark() throws {
+        let invalidBookmark = Data([0x09, 0x08, 0x07])
+        let config = ModelsConfiguration(
+            asrVersion: .v2,
+            modelLibraryBookmarkData: invalidBookmark,
+            textCleanup: .defaults
+        )
+        config.save(to: defaults)
+
+        let loaded = ModelsConfiguration.load(
+            from: defaults,
+            resolveBookmark: { _ in
+                throw CocoaError(.fileNoSuchFile)
+            },
+            makeBookmark: { _ in
+                XCTFail("Unresolvable bookmarks should not be refreshed")
+                return Data()
+            }
+        )
+
+        XCTAssertNil(loaded.modelLibraryBookmarkData)
+        XCTAssertNil(defaults.data(forKey: "models.modelLibraryBookmark"))
     }
 
     func testSystemSettingsNavigatorPrefersLegacyAccessibilityDeepLink() {

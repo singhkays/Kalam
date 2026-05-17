@@ -10,6 +10,11 @@ import AudioToolbox
 import ServiceManagement
 import OSLog
 
+private func privacySafeErrorSummary(_ error: Error) -> String {
+    let nsError = error as NSError
+    return "\(nsError.domain)#\(nsError.code)"
+}
+
 // MARK: - Secure Memory Zeroing
 extension Array where Element == Float {
     mutating func secureZero() {
@@ -75,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let overlay = DictationOverlayController()
     private let hotkeys = HotkeyListener()
     private let paster = PasteService()
+    private let logger = Logger(subsystem: "singhkays.Kalam", category: "DictationRuntime")
 
     private enum RecordingTriggerMode {
         case hold
@@ -350,7 +356,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func currentOnboardingSnapshot() -> OnboardingStatusSnapshot {
-        let config = ModelSetupSupport.loadPersistedNormalizedSelectedModel()
+        let config = ModelsConfiguration.load()
         let onboardingConfig = OnboardingConfiguration.load()
         let hotkeyConfig = PTTHotkeyConfiguration.load()
         let installedModels = ModelSetupSupport.installedModelVersions(in: config)
@@ -556,7 +562,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if currentActivation != targetActivation {
             let activationApplied = NSApp.setActivationPolicy(targetActivation)
             if !activationApplied {
-                print("Failed to apply activation policy for showInDock=\(settings.showInDock); current=\(currentActivation.rawValue), target=\(targetActivation.rawValue)")
+                logger.warning("Failed to apply activation policy showInDock=\(settings.showInDock, privacy: .public) current=\(currentActivation.rawValue, privacy: .public) target=\(targetActivation.rawValue, privacy: .public)")
             }
         }
 
@@ -570,7 +576,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     try SMAppService.mainApp.unregister()
                 }
             } catch {
-                print("Failed to update launch-at-login: \(error.localizedDescription)")
+                logger.warning("Failed to update launch-at-login errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             }
         }
     }
@@ -598,12 +604,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let enabled = Self.isITNEnabled()
         let span = Self.itnSpanTokens()
         if NemoTextProcessing.isAvailable {
-            let smokeInput = "two hundred and five"
-            let smokeOutput = NemoTextProcessing.normalize(smokeInput)
             let version = NemoTextProcessing.version ?? "unknown"
-            print("ITN ready (enabled=\(enabled), span=\(span), version=\(version), smoke='\(smokeInput)' -> '\(smokeOutput)')")
+            logger.info("ITN ready enabled=\(enabled, privacy: .public) span=\(span, privacy: .public) version=\(version, privacy: .public)")
         } else {
-            print("ITN unavailable (enabled=\(enabled), span=\(span)). NemoTextProcessing framework/module not linked or not visible to target.")
+            logger.warning("ITN unavailable enabled=\(enabled, privacy: .public) span=\(span, privacy: .public)")
         }
     }
 
@@ -660,13 +664,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 isAudioReady = true
             } catch {
                 isAudioReady = false
-                print("Audio prepare failed: \(error.localizedDescription)")
+                logger.warning("Audio prepare failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             }
         } else {
             isAudioReady = false
         }
 
-        let config = ModelSetupSupport.loadPersistedNormalizedSelectedModel()
+        let config = ModelsConfiguration.load()
         let availability = config.availability(for: config.asrVersion)
         switch availability {
         case .installed:
@@ -680,7 +684,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 updateASRStatus(await asr.status)
             } catch {
                 updateASRStatus(await asr.status, forceReady: false)
-                print("ASR init failed: \(error.localizedDescription)")
+                logger.warning("ASR init failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             }
         case .modelLibraryNotConfigured, .missingModelFolder, .invalidModelFolder:
             isASRReady = false
@@ -812,7 +816,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try audio.prepare(preferredInputDeviceID: candidate.deviceID)
                 return candidate.uid
             } catch {
-                print("Audio input bind failed for \(candidate.name): \(error.localizedDescription)")
+                logger.warning("Audio input bind failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
                 continue
             }
         }
@@ -830,12 +834,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
         guard isAudioReady else {
-            print("⚠️ Audio input not ready yet, ignoring PTT press.")
+            logger.warning("PTT ignored because audio input is not ready")
             overlay.showError("Microphone not ready", action: .openMicrophoneSettings, autoHideAfter: 4.0)
             return false
         }
         guard isASRReady else {
-            print("⚠️ ASR not ready yet, ignoring PTT press.")
+            logger.warning("PTT ignored because ASR is not ready; setupIssue=\(self.isASRSetupIssue, privacy: .public)")
             if isASRSetupIssue {
                 showOnboardingWindow(mode: .repair)
                 overlay.showError(asrRecordingBlockMessage, action: nil, autoHideAfter: 4.0)
@@ -850,7 +854,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             selectedInputUID = pickedUID
             UserDefaults.standard.set(pickedUID, forKey: GeneralSettingsKeys.selectedInputUID)
         } catch {
-            print("⚠️ Audio input setup failed, ignoring PTT press: \(error.localizedDescription)")
+            logger.warning("Audio input setup failed before recording errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             overlay.showError("Microphone setup failed", action: .openMicrophoneSettings, autoHideAfter: 4.0)
             return false
         }
@@ -914,10 +918,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             func stageMark(_ label: String) {
                 guard stageTimingEnabled else { return }
                 let now = CFAbsoluteTimeGetCurrent()
-                print(String(format: "Latency stage [%@]: +%.0f ms (cum=%.0f ms)",
-                             label,
-                             (now - mark) * 1000.0,
-                             (now - pipelineStart) * 1000.0))
+                let deltaMs = Int((now - mark) * 1000.0)
+                let cumulativeMs = Int((now - pipelineStart) * 1000.0)
+                self.logger.info("Latency stage label=\(label, privacy: .public) deltaMs=\(deltaMs, privacy: .public) cumulativeMs=\(cumulativeMs, privacy: .public)")
                 mark = now
             }
             
@@ -938,15 +941,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let afterStop = CFAbsoluteTimeGetCurrent()
             let keyDownToUp = pttUp - pttDown
             let upToSamples = afterStop - keyUpToStopStart
-            print(String(format: "Timing: PTT down→up=%.0f ms (est. segment=%.0f ms), key-up→samples=%.0f ms (adaptive post-roll=%d ms)",
-                         keyDownToUp * 1000, Double(segmentEstimateMs), upToSamples * 1000, postRollMs))
+            self.logger.info("Recording timing holdMs=\(Int(keyDownToUp * 1000), privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public) keyUpToSamplesMs=\(Int(upToSamples * 1000), privacy: .public) postRollMs=\(postRollMs, privacy: .public)")
             stageMark("audio-stop+fetch")
             
             // Trim with hysteresis/hangover/padding + conservative fallback
             let trimmed = SilenceTrimmer.trim(samples: samples, sampleRate: 16_000)
             stageMark("trim")
             guard !trimmed.isEmpty else {
-                print("No speech detected (empty after trim).")
+                self.logger.info("No speech detected after trimming")
                 await MainActor.run {
                     self.overlay.showInfoAndAutoHide("No speech detected")
                 }
@@ -957,7 +959,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Normalize before ASR without spawning an extra child task; this keeps the
                 // transcription flow inside one actor-inherited task for Swift 6 safety.
                 let asrStart = CFAbsoluteTimeGetCurrent()
-                let normalized = SilenceTrimmer.normalizePeak(trimmed, targetDbFS: -3.0)
+                var normalized = SilenceTrimmer.normalizePeak(trimmed, targetDbFS: -3.0)
+                
+                // Ensure audio is at least 300ms (4800 samples at 16kHz) to avoid FluidAudio short-utterance rejection
+                if normalized.count < 4800 {
+                    normalized.append(contentsOf: [Float](repeating: 0.0, count: 4800 - normalized.count))
+                }
+                
                 let text = try await self.asr.transcribe(samples: normalized)
                 guard !Task.isCancelled else { return }
                 let asrEnd = CFAbsoluteTimeGetCurrent()
@@ -965,7 +973,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 
                 guard !trimmedText.isEmpty else {
-                    print("⚠️ Empty transcription; skipping paste.")
+                    self.logger.info("Empty transcription result; skipping paste")
                     await MainActor.run {
                         self.overlay.showInfoAndAutoHide("No speech detected")
                     }
@@ -981,7 +989,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Apply custom dictionary replacements (phrases first, then words)
                 let (postProcessed, replaceCount) = CustomDictionaryManager.shared.apply(to: itnResult.text)
                 stageMark("dictionary")
-                print("Transcription completed (len=\(postProcessed.count), ASR=\(String(format: "%.0f", (asrEnd - asrStart)*1000)) ms, cleanupEdits=\(cleanupResult.stats.totalEdits), cleanupMs=\(String(format: "%.0f", cleanupResult.stats.durationMs)), fillerMs=\(String(format: "%.0f", cleanupResult.stats.fillerMs)), backtrackMs=\(String(format: "%.0f", cleanupResult.stats.backtrackMs)), listMs=\(String(format: "%.0f", cleanupResult.stats.listMs)), punctuationMs=\(String(format: "%.0f", cleanupResult.stats.punctuationMs)), grammarMs=\(String(format: "%.0f", cleanupResult.stats.grammarMs)), grammarEdits=\(cleanupResult.stats.grammarEdits), grammarAttempted=\(cleanupResult.stats.grammarAttempted), grammarTimedOut=\(cleanupResult.stats.grammarTimedOut), grammarSkippedForLength=\(cleanupResult.stats.grammarSkippedForLength), itnEnabled=\(itnResult.enabled), itnAvailable=\(itnResult.available), itnSpan=\(itnResult.spanTokens), itnChanged=\(itnResult.changed), itnMs=\(String(format: "%.0f", itnResult.durationMs)), replacements=\(replaceCount), est.segment=\(segmentEstimateMs) ms)")
+                self.logger.info("Transcription completed outputLength=\(postProcessed.count, privacy: .public) asrMs=\(Int((asrEnd - asrStart) * 1000), privacy: .public) cleanupEdits=\(cleanupResult.stats.totalEdits, privacy: .public) cleanupMs=\(Int(cleanupResult.stats.durationMs), privacy: .public) grammarEdits=\(cleanupResult.stats.grammarEdits, privacy: .public) grammarAttempted=\(cleanupResult.stats.grammarAttempted, privacy: .public) grammarTimedOut=\(cleanupResult.stats.grammarTimedOut, privacy: .public) grammarSkippedForLength=\(cleanupResult.stats.grammarSkippedForLength, privacy: .public) itnEnabled=\(itnResult.enabled, privacy: .public) itnAvailable=\(itnResult.available, privacy: .public) itnChanged=\(itnResult.changed, privacy: .public) itnMs=\(Int(itnResult.durationMs), privacy: .public) replacements=\(replaceCount, privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public)")
 
                 // Adaptive paste delay: 50ms for short segments (<5s) or 80ms otherwise, to reduce end-to-end latency.
                 // Fallback on error: Retry after additional delay to approx. total 120ms.
@@ -1004,12 +1012,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     stageMark("paste-dispatch")
                     if stageTimingEnabled {
                         let totalMs = (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000.0
-                        print(String(format: "Latency summary: keyUp→paste-dispatch=%.0f ms (segment=%.0f ms, postRoll=%d ms, pasteDelay=%.0f ms)",
-                                     totalMs, Double(segmentEstimateMs), postRollMs, pasteDelayMs))
+                        self.logger.info("Latency summary pasteDispatchMs=\(Int(totalMs), privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public) postRollMs=\(postRollMs, privacy: .public) pasteDelayMs=\(Int(pasteDelayMs), privacy: .public)")
                     }
-                    print("✅ Pasted transcription into frontmost app (initial delay=\(String(format: "%.0f", pasteDelay*1000)) ms).")
+                    self.logger.info("Paste dispatched via initial path delayMs=\(Int(pasteDelay * 1000), privacy: .public)")
                 } catch {
-                    print("❌ Initial paste failed after \(String(format: "%.0f", pasteDelay*1000)) ms: \(error.localizedDescription). Falling back to longer delay...")
+                    self.logger.warning("Initial paste failed delayMs=\(Int(pasteDelay * 1000), privacy: .public) errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
                     try await Task.sleep(nanoseconds: UInt64(max(0, fallbackAdditionalDelay) * 1_000_000_000))
                     guard !Task.isCancelled else { return }
                     stageMark("paste-fallback-wait")
@@ -1022,12 +1029,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         stageMark("paste-fallback-dispatch")
                         if stageTimingEnabled {
                             let totalMs = (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000.0
-                            print(String(format: "Latency summary: keyUp→paste-fallback-dispatch=%.0f ms (segment=%.0f ms, postRoll=%d ms, fallbackTotal=%.0f ms)",
-                                         totalMs, Double(segmentEstimateMs), postRollMs, fallbackTotalMs))
+                            self.logger.info("Latency summary pasteFallbackDispatchMs=\(Int(totalMs), privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public) postRollMs=\(postRollMs, privacy: .public) fallbackTotalMs=\(Int(fallbackTotalMs), privacy: .public)")
                         }
-                        print("✅ Fallback paste succeeded (total delay ~\(String(format: "%.0f", (pasteDelay + fallbackAdditionalDelay)*1000)) ms).")
+                        self.logger.info("Fallback paste dispatched totalDelayMs=\(Int((pasteDelay + fallbackAdditionalDelay) * 1000), privacy: .public)")
                     } catch {
-                        print("❌ Fallback paste also failed: \(error.localizedDescription)")
+                        self.logger.warning("Fallback paste failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
                         await MainActor.run {
                             self.overlay.showError("Enable Accessibility to paste", action: .openAccessibilitySettings, autoHideAfter: 4.0)
                             AccessibilityHelper.explainAccessibilityIfNeeded()
@@ -1037,7 +1043,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch is CancellationError {
                 return
             } catch {
-                print("Transcription failed: \(error.localizedDescription)")
+                self.logger.warning("Transcription failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
                 await MainActor.run {
                     self.overlay.showError("Transcription failed", action: nil, autoHideAfter: 4.0)
                 }
@@ -2265,6 +2271,7 @@ enum AudioRecorderError: LocalizedError {
 }
 
 final class AudioRecorder: @unchecked Sendable {
+    private let logger = Logger(subsystem: "singhkays.Kalam", category: "AudioRecorder")
     private let engine = AVAudioEngine()
     private var converter: AVAudioConverter?
     private var converterInputSampleRate: Double = 0
@@ -2359,11 +2366,11 @@ final class AudioRecorder: @unchecked Sendable {
             throw AudioRecorderError.invalidInputFormat
         }
         
-        print("Input format from AVAudioEngine: \(inputFormat.sampleRate) Hz, \(inputFormat.channelCount) channels")
+        logger.info("Input format sampleRate=\(inputFormat.sampleRate, privacy: .public) channels=\(inputFormat.channelCount, privacy: .public)")
         
         // Prepare engine but don't start it yet - we'll start it when recording begins
         engine.prepare()
-        print("Audio engine prepared (not started yet). Tap bufferSize=\(tapBufferSizeFrames)")
+        logger.info("Audio engine prepared tapBufferSize=\(self.tapBufferSizeFrames, privacy: .public)")
         isPrepared = true
         preparedInputDeviceID = preferredInputDeviceID
     }
@@ -2373,13 +2380,13 @@ final class AudioRecorder: @unchecked Sendable {
         if !engine.isRunning {
             do {
                 try engine.start()
-                print("Audio engine started for recording")
+                logger.info("Audio engine started for recording")
                 let liveOutputFormat = engine.inputNode.outputFormat(forBus: 0)
                 let liveInputBusFormat = engine.inputNode.inputFormat(forBus: 0)
-                print("Live input node output format after engine start: \(liveOutputFormat.sampleRate) Hz, \(liveOutputFormat.channelCount) channels")
-                print("Live input node input-bus format after engine start: \(liveInputBusFormat.sampleRate) Hz, \(liveInputBusFormat.channelCount) channels")
+                logger.info("Live input output format sampleRate=\(liveOutputFormat.sampleRate, privacy: .public) channels=\(liveOutputFormat.channelCount, privacy: .public)")
+                logger.info("Live input bus format sampleRate=\(liveInputBusFormat.sampleRate, privacy: .public) channels=\(liveInputBusFormat.channelCount, privacy: .public)")
             } catch {
-                print("Failed to start audio engine: \(error.localizedDescription)")
+                logger.warning("Failed to start audio engine errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
                 return
             }
         }
@@ -2387,7 +2394,7 @@ final class AudioRecorder: @unchecked Sendable {
         if !tapInstalled {
             // For input node taps, AVAudioEngine expects the input bus hardware format.
             let tapFormat = engine.inputNode.inputFormat(forBus: 0)
-            print("Installing tap with input-bus format: \(tapFormat.sampleRate) Hz, \(tapFormat.channelCount) channels")
+            logger.info("Installing tap sampleRate=\(tapFormat.sampleRate, privacy: .public) channels=\(tapFormat.channelCount, privacy: .public)")
             engine.inputNode.installTap(onBus: 0, bufferSize: tapBufferSizeFrames, format: tapFormat) { [weak self] (buffer, _) in
                 self?.process(buffer: buffer)
             }
@@ -2401,7 +2408,7 @@ final class AudioRecorder: @unchecked Sendable {
             recentWaveformSamples.removeAll(keepingCapacity: true)
             // Do not reset converter here; keep across session until stop/drain to preserve internal filter state.
         }
-        print("Started collecting audio samples")
+        logger.info("Started collecting audio samples")
     }
     
     // Post-roll capture is applied before stopping and fetching samples.
@@ -2431,28 +2438,26 @@ final class AudioRecorder: @unchecked Sendable {
                 engine.stop()
             }
             let stopElapsed = (CFAbsoluteTimeGetCurrent() - stopStart) * 1000
-            print(String(format: "Audio engine stopped (%.1f ms) - system mic indicator should turn off", stopElapsed))
+            logger.info("Audio engine stopped stopMs=\(Int(stopElapsed), privacy: .public)")
         }
         
         // Drain any residual frames from the converter (resampler tail) and reset it
         let drainedTail = drainConverterRemainder()
         if !drainedTail.isEmpty {
-            print("Drained converter tail: \(drainedTail.count) samples (~\(String(format: "%.1f", Double(drainedTail.count)/16_000.0 * 1000)) ms)")
+            logger.info("Drained converter tail samples=\(drainedTail.count, privacy: .public) durationMs=\(Int(Double(drainedTail.count) / 16_000.0 * 1000), privacy: .public)")
         }
         
         out.append(contentsOf: drainedTail)
         
-        let seconds = out.isEmpty ? 0.0 : (Double(out.count) / 16_000.0)
-        let formattedSeconds = String(format: "%.2f", seconds)
+        let durationMs = out.isEmpty ? 0 : Int(Double(out.count) / 16_000.0 * 1000)
         let callbacks = bufferQueue.sync { callbackCount }
-        print("Stopped collecting. Buffer size: \(out.count) samples (\(formattedSeconds) s), callbacks: \(callbacks)")
+        logger.info("Stopped collecting samples=\(out.count, privacy: .public) durationMs=\(durationMs, privacy: .public) callbacks=\(callbacks, privacy: .public)")
         
         // Debug: Check non-zero and max amplitude
         let nonZeroCount = out.lazy.filter { abs($0) > 0.0001 }.count
-        print("Non-zero samples: \(nonZeroCount) out of \(out.count)")
+        logger.info("Audio sample summary nonZeroSamples=\(nonZeroCount, privacy: .public) totalSamples=\(out.count, privacy: .public)")
         if let maxAmplitude = out.map({ abs($0) }).max() {
-            let formattedAmplitude = String(format: "%.5f", maxAmplitude)
-            print("Max amplitude: \(formattedAmplitude)")
+            logger.info("Audio sample maxAmplitude=\(maxAmplitude, privacy: .public)")
         }
         return out
     }
@@ -2474,7 +2479,7 @@ final class AudioRecorder: @unchecked Sendable {
 
             if needsConverterRebuild {
                 guard let rebuilt = AVAudioConverter(from: inputFormat, to: self.targetFormat) else {
-                    print("Failed to create AVAudioConverter for input format \(inputFormat.sampleRate) Hz, \(inputFormat.channelCount) channels")
+                    self.logger.warning("Failed to create AVAudioConverter inputSampleRate=\(inputFormat.sampleRate, privacy: .public) channels=\(inputFormat.channelCount, privacy: .public)")
                     return
                 }
                 self.converter = rebuilt
@@ -2487,7 +2492,7 @@ final class AudioRecorder: @unchecked Sendable {
             let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 64.0)
             
             guard let outBuffer = AVAudioPCMBuffer(pcmFormat: self.targetFormat, frameCapacity: capacity) else {
-                print("Failed to create output buffer")
+                self.logger.warning("Failed to create output buffer")
                 return
             }
             
@@ -2501,9 +2506,9 @@ final class AudioRecorder: @unchecked Sendable {
             
             if status == .error {
                 if let e = convError {
-                    print("Conversion error: \(e.localizedDescription); using PCM fallback")
+                    self.logger.warning("Conversion error; using PCM fallback errorSummary=\(privacySafeErrorSummary(e), privacy: .public)")
                 } else {
-                    print("Conversion error: unknown; using PCM fallback")
+                    self.logger.warning("Conversion error unknown; using PCM fallback")
                 }
                 self.appendPCMBufferFallback(buffer)
                 return
@@ -2512,7 +2517,7 @@ final class AudioRecorder: @unchecked Sendable {
             let frames = Int(outBuffer.frameLength)
             if frames > 0 {
                 guard let channel = outBuffer.floatChannelData?[0] else {
-                    print("No float channel data available; using PCM fallback")
+                    self.logger.warning("No float channel data available; using PCM fallback")
                     self.appendPCMBufferFallback(buffer)
                     return
                 }
@@ -2636,7 +2641,7 @@ final class AudioRecorder: @unchecked Sendable {
         }
         sampleBuffer.secureZero()
         recentWaveformSamples.secureZero()
-        print("AudioRecorder deinitialized - engine stopped and tap removed")
+        logger.info("AudioRecorder deinitialized; engine stopped and tap removed")
     }
 }
 
@@ -2645,6 +2650,8 @@ final class AudioRecorder: @unchecked Sendable {
 // MARK: - Silence Trimmer (robust energy-based endpointer with hysteresis)
 
 enum SilenceTrimmer {
+    private static let logger = Logger(subsystem: "singhkays.Kalam", category: "SilenceTrimmer")
+
     // Main entry. Defaults tuned for dense speech with very little silence.
     static func trim(
         samples: [Float],
@@ -2660,10 +2667,10 @@ enum SilenceTrimmer {
         guard !samples.isEmpty else { return samples }
         
         let maxAmplitude = samples.map { abs($0) }.max() ?? 0
-        print(String(format: "Trimming audio - Max amplitude: %.5f", maxAmplitude))
+        logger.info("Trimming audio maxAmplitude=\(maxAmplitude, privacy: .public)")
         
         if maxAmplitude < 0.00001 {
-            print("Audio is completely silent (max amplitude < 1e-5)")
+            logger.info("Audio is silent below amplitude threshold")
             return []
         }
         
@@ -2699,8 +2706,7 @@ enum SilenceTrimmer {
         let noiseFloorDb = percentile(energiesDb, p: 0.05)
         let startThresholdDb = noiseFloorDb + startMarginDb
         let stopThresholdDb = noiseFloorDb + stopMarginDb
-        print(String(format: "Noise floor: %.1f dB, startThr: %.1f dB, stopThr: %.1f dB",
-                     noiseFloorDb, startThresholdDb, stopThresholdDb))
+        logger.info("Silence thresholds noiseFloorDb=\(noiseFloorDb, privacy: .public) startThresholdDb=\(startThresholdDb, privacy: .public) stopThresholdDb=\(stopThresholdDb, privacy: .public)")
         
         // Scan the buffer to extract multiple speech segments, dropping long silences
         let padWins = max(0, (padMs + windowMs - 1) / windowMs)
@@ -2740,10 +2746,10 @@ enum SilenceTrimmer {
         }
         
         if segments.isEmpty {
-            print("No speech detected after endpointing")
+            logger.info("No speech detected after endpointing")
             // Conservative fallback: send full audio if it looks speech-y
             if maxAmplitude > 0.001 {
-                print("Returning full audio for ASR to process (fallback)")
+                logger.info("Returning full audio for ASR fallback")
                 return samples
             }
             return []
@@ -2801,17 +2807,15 @@ enum SilenceTrimmer {
             dynamicMinKeepRatio = fallbackMinKeepRatio
         }
         
-        print(String(format: "Trim decision: %d segments, padWins=%d -> kept=%d (%.2fs), original=%.2fs, keepRatio=%.0f%%",
-                     segments.count, padWins, trimmedCount, trimmedDur, originalDur, keepRatio*100.0))
-        print(String(format: "Trim fallback thresholds (dynamic): minSeconds=%.2f, minKeepRatio=%.0f%%",
-                     dynamicMinSeconds, dynamicMinKeepRatio * 100.0))
+        logger.info("Trim decision segments=\(segments.count, privacy: .public) padWins=\(padWins, privacy: .public) keptSamples=\(trimmedCount, privacy: .public) trimmedMs=\(Int(trimmedDur * 1000), privacy: .public) originalMs=\(Int(originalDur * 1000), privacy: .public) keepRatioPercent=\(Int(keepRatio * 100), privacy: .public)")
+        logger.info("Trim fallback thresholds minMs=\(Int(dynamicMinSeconds * 1000), privacy: .public) minKeepRatioPercent=\(Int(dynamicMinKeepRatio * 100), privacy: .public)")
         
         let shouldFallback =
         (originalDur >= 1.2 && trimmedDur < dynamicMinSeconds) ||
         (keepRatio < dynamicMinKeepRatio)
         
         if trimmedCount <= 0 || shouldFallback {
-            print("Fallback to full clip (conservative).")
+            logger.info("Falling back to full audio clip")
             return samples
         }
         
@@ -3115,6 +3119,8 @@ struct CompiledReplacementEngine {
 }
 
 enum ReplacementCompiler {
+    private static let logger = Logger(subsystem: "singhkays.Kalam", category: "CustomDictionary")
+
     static func compile(entries: [DictionaryEntry]) -> CompiledReplacementEngine {
         // Filter invalid/empty triggers AND disabled entries
         let cleaned = entries
@@ -3159,7 +3165,8 @@ enum ReplacementCompiler {
             }
         }
         
-        print("CustomDictionary: compiled \(phraseRules.count) phrase rules, \(wordRules.count) word rules from \(entries.filter{$0.isEnabled}.count) enabled entries")
+        let enabledCount = entries.filter(\.isEnabled).count
+        Self.logger.info("Custom dictionary compiled phraseRules=\(phraseRules.count, privacy: .public) wordRules=\(wordRules.count, privacy: .public) enabledEntries=\(enabledCount, privacy: .public)")
         return CompiledReplacementEngine(phraseRules: phraseRules, wordRules: wordRules)
     }
     
@@ -3403,7 +3410,7 @@ final class CustomDictionaryManager: ObservableObject {
             entries = decoded.filter { $0.userAdded }  // New: Filter non-user (samples) on first launch
             logger.info("Custom dictionary loaded entries=\(decoded.count), userEntries=\(self.entries.count)")
         } catch {
-            logger.warning("Custom dictionary load failed: \(error.localizedDescription, privacy: .public)")
+            logger.warning("Custom dictionary load failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             entries = []
         }
     }
@@ -3414,7 +3421,7 @@ final class CustomDictionaryManager: ObservableObject {
             try data.write(to: appSupportURL, options: .atomic)
             logger.info("Custom dictionary saved entries=\(self.entries.count)")
         } catch {
-            logger.warning("Custom dictionary save failed: \(error.localizedDescription, privacy: .public)")
+            logger.warning("Custom dictionary save failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
         }
     }
     

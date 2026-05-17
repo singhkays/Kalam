@@ -898,7 +898,7 @@ struct SettingsView: View {
                         Spacer()
                     }
                     
-                    Text("Top-level folder example:\n~/Models/FluidAudio/\n  ├─ parakeet-tdt-0.6b-v2-coreml/\n  └─ parakeet-tdt-0.6b-v3-coreml/\n\nEach model folder must contain:\n• Preprocessor.mlmodelc/\n• Encoder.mlmodelc/\n• Decoder.mlmodelc/\n• JointDecision.mlmodelc/ for v2 or JointDecisionv3.mlmodelc/ for v3\n• parakeet_vocab.json")
+                    Text("Top-level folder example:\n~/Models/FluidAudio/\n  ├─ parakeet-tdt-0.6b-v2/\n  └─ parakeet-tdt-0.6b-v3/\n\nEach model folder must contain:\n• Preprocessor.mlmodelc/\n• Encoder.mlmodelc/\n• Decoder.mlmodelc/\n• JointDecision.mlmodelc/ for v2 or JointDecisionv3.mlmodelc/ for v3\n• parakeet_vocab.json")
                         .font(KalamTheme.footnoteFont)
                         .foregroundColor(KalamTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
