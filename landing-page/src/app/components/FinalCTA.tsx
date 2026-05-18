@@ -183,7 +183,7 @@ export function FinalCTA() {
 
         <div className="final-cta-actions">
           <a
-            href="https://github.com/singhkays/Kalam/releases/tag/v1.0"
+            href="https://github.com/singhkays/Kalam/releases/latest"
             target="_blank"
             rel="noreferrer noopener"
             className="final-cta-button"

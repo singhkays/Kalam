@@ -1,10 +1,8 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 import UniformTypeIdentifiers
 
 // MARK: - Settings UI (SwiftUI)
-
-
 
 struct SettingsView: View {
     @EnvironmentObject var manager: CustomDictionaryManager
@@ -20,6 +18,7 @@ struct SettingsView: View {
         case keyboardControls
         case refine
         case models
+        case updates
 
         var navTitle: String {
             switch self {
@@ -28,20 +27,22 @@ struct SettingsView: View {
             case .keyboardControls: return "Hotkey"
             case .refine: return "Cleanup"
             case .models: return "Models"
+            case .updates: return "Updates"
             }
         }
 
         var icon: String {
             switch self {
-                case .general: return "gearshape"
-                case .wordReplacement: return "text.word.spacing"
-                case .keyboardControls: return "keyboard"
+            case .general: return "gearshape"
+            case .wordReplacement: return "text.word.spacing"
+            case .keyboardControls: return "keyboard"
             case .refine: return "wand.and.stars"
             case .models: return "cpu"
+            case .updates: return "arrow.down.circle"
             }
         }
     }
-    
+
     // MARK: - State Properties
     @State private var selectedTab: SettingsTab
     @State private var isInitializingSettingsState = true
@@ -64,7 +65,7 @@ struct SettingsView: View {
     init(initialTab: SettingsTab = .general) {
         _selectedTab = State(initialValue: initialTab)
     }
-    
+
     // MARK: - Computed Properties
     var selectedShortcutLabel: String {
         if hotkeyDraft.keyCombination == .notSpecified {
@@ -89,6 +90,8 @@ struct SettingsView: View {
     private var mainContent: some View {
         if selectedTab == .general {
             generalContent
+        } else if selectedTab == .updates {
+            updatesContent
         } else if selectedTab == .wordReplacement {
             WordReplacementView()
         } else if selectedTab == .keyboardControls {
@@ -111,7 +114,7 @@ struct SettingsView: View {
                     .fill(KalamTheme.contentBackground)
                 NoiseView()
                     .blendMode(.overlay)
-                
+
                 mainContent
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
@@ -186,7 +189,9 @@ struct SettingsView: View {
                     refreshMicrophoneRows()
                 }
             }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            .onReceive(
+                NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            ) { _ in
                 if selectedTab == .models {
                     modelAvailabilityRefreshID = UUID()
                 } else if selectedTab == .general {
@@ -201,7 +206,9 @@ struct SettingsView: View {
                     modelsConfig.textCleanup.grammarMode = previousGrammarModeSelection
                 }
             } message: {
-                Text("Full mode can increase paste delay variability and may over-correct names or technical terms. Use Full only if you prefer extra polish over consistent low-latency output.")
+                Text(
+                    "Full mode can increase paste delay variability and may over-correct names or technical terms. Use Full only if you prefer extra polish over consistent low-latency output."
+                )
             }
     }
 
@@ -226,10 +233,12 @@ struct SettingsView: View {
                         .foregroundColor(KalamTheme.textPrimary)
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Reopen the setup flow if you want to review permissions or reconfigure your local dictation model.")
-                            .font(KalamTheme.calloutFont)
-                            .foregroundColor(KalamTheme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        Text(
+                            "Reopen the setup flow if you want to review permissions or reconfigure your local dictation model."
+                        )
+                        .font(KalamTheme.calloutFont)
+                        .foregroundColor(KalamTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
 
                         Button("Run Setup Again…") {
                             NotificationCenter.default.post(name: .openSetupFlow, object: nil)
@@ -247,13 +256,21 @@ struct SettingsView: View {
                         .foregroundColor(KalamTheme.textPrimary)
 
                     VStack(spacing: 0) {
-                        behaviorToggleRow(icon: "power", title: "Launch at login", isOn: $generalConfig.launchAtLogin)
+                        behaviorToggleRow(
+                            icon: "power", title: "Launch at login",
+                            isOn: $generalConfig.launchAtLogin)
                         Divider().overlay(KalamTheme.strokeSubtle)
-                        behaviorToggleRow(icon: "dock.rectangle", title: "Show in Dock", isOn: $generalConfig.showInDock)
+                        behaviorToggleRow(
+                            icon: "dock.rectangle", title: "Show in Dock",
+                            isOn: $generalConfig.showInDock)
                         Divider().overlay(KalamTheme.strokeSubtle)
-                        behaviorToggleRow(icon: "escape", title: "Use Escape to cancel recording", isOn: $generalConfig.escapeCancelsRecording)
+                        behaviorToggleRow(
+                            icon: "escape", title: "Use Escape to cancel recording",
+                            isOn: $generalConfig.escapeCancelsRecording)
                         Divider().overlay(KalamTheme.strokeSubtle)
-                        behaviorToggleRow(icon: "speaker.slash", title: "Mute while recording", isOn: $generalConfig.muteWhileRecording)
+                        behaviorToggleRow(
+                            icon: "speaker.slash", title: "Mute while recording",
+                            isOn: $generalConfig.muteWhileRecording)
                         Divider().overlay(KalamTheme.strokeSubtle)
                         indicatorPlacementRow
                     }
@@ -268,7 +285,8 @@ struct SettingsView: View {
                         .foregroundColor(KalamTheme.textPrimary)
 
                     VStack(spacing: 0) {
-                        ForEach(Array(microphoneRows.enumerated()), id: \.element.uid) { index, device in
+                        ForEach(Array(microphoneRows.enumerated()), id: \.element.uid) {
+                            index, device in
                             HStack(spacing: 10) {
                                 Image(systemName: "line.3.horizontal")
                                     .foregroundColor(KalamTheme.textSecondary)
@@ -281,7 +299,10 @@ struct SettingsView: View {
 
                                 Text(device.name)
                                     .font(KalamTheme.bodyStrongFont)
-                                    .foregroundColor(device.isAvailable ? KalamTheme.textPrimary : KalamTheme.textSecondary)
+                                    .foregroundColor(
+                                        device.isAvailable
+                                            ? KalamTheme.textPrimary : KalamTheme.textSecondary
+                                    )
                                     .lineLimit(1)
                                     .truncationMode(.tail)
 
@@ -315,11 +336,13 @@ struct SettingsView: View {
                             .padding(.vertical, 12)
                             .contentShape(Rectangle())
                             .onDrag { NSItemProvider(object: NSString(string: device.uid)) }
-                            .onDrop(of: [.text], delegate: MicrophoneRowDropDelegate(
-                                item: device,
-                                listData: $microphoneRows,
-                                onReorder: syncPriorityConfigFromRows
-                            ))
+                            .onDrop(
+                                of: [.text],
+                                delegate: MicrophoneRowDropDelegate(
+                                    item: device,
+                                    listData: $microphoneRows,
+                                    onReorder: syncPriorityConfigFromRows
+                                ))
 
                             if index < microphoneRows.count - 1 {
                                 Divider().overlay(KalamTheme.strokeSubtle)
@@ -333,6 +356,73 @@ struct SettingsView: View {
                         .font(KalamTheme.calloutFont)
                         .foregroundColor(KalamTheme.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+            .padding(.bottom, 14)
+            .frame(maxWidth: KalamTheme.contentMaxWidth, alignment: .center)
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+    }
+
+    private var updatesContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Updates")
+                        .font(KalamTheme.pageTitleFont)
+                        .foregroundColor(KalamTheme.textPrimary)
+                    Text("Stay current with the latest Kalam release.")
+                        .font(KalamTheme.calloutFont)
+                        .foregroundColor(KalamTheme.textSecondary)
+                }
+                .padding(.top, 4)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Latest Release")
+                        .font(KalamTheme.sectionTitleFont)
+                        .foregroundColor(KalamTheme.textPrimary)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 10) {
+                            Text("Installed version")
+                                .font(KalamTheme.bodyStrongFont)
+                                .foregroundColor(KalamTheme.textPrimary)
+
+                            Spacer()
+
+                            Text(KalamAppVersion.displayString)
+                                .font(KalamTheme.bodyStrongFont)
+                                .foregroundColor(KalamTheme.textSecondary)
+                                .monospacedDigit()
+                        }
+                        .padding(.vertical, 2)
+
+                        Divider().overlay(KalamTheme.strokeSubtle)
+
+                        Text("Kalam is intentionally built with ")
+                            .font(KalamTheme.calloutFont)
+                            .foregroundColor(KalamTheme.textSecondary)
+                            + Text("zero network access")
+                            .font(KalamTheme.calloutFont.bold())
+                            .foregroundColor(KalamTheme.textSecondary)
+                            + Text(
+                                ". It will not check for updates or download models automatically. To see the latest release, click View Latest Release… and compare it with your installed version."
+                            )
+                            .font(KalamTheme.calloutFont)
+                            .foregroundColor(KalamTheme.textSecondary)
+
+                        Button("View Latest Release…") {
+                            KalamExternalLinks.openLatestRelease()
+                        }
+                        .buttonStyle(OnboardingPremiumButtonStyle(isCompact: true))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 12)
+                    .settingsCardSurface()
                 }
 
                 Spacer()
@@ -391,7 +481,6 @@ struct SettingsView: View {
         .padding(.vertical, 7)
     }
 
-    
     /// The content for the Shortcut tab.
     private var keyboardControlsContent: some View {
         ScrollView {
@@ -407,104 +496,105 @@ struct SettingsView: View {
                 }
                 .padding(.top, 4)
 
-                    VStack(alignment: .leading, spacing: 14) {
-                        // Activation mode + key combination selectors, inline
-                        HStack(spacing: 8) {
-                            Text("Activation")
-                                .font(KalamTheme.calloutFont)
-                                .foregroundColor(KalamTheme.textSecondary)
+                VStack(alignment: .leading, spacing: 14) {
+                    // Activation mode + key combination selectors, inline
+                    HStack(spacing: 8) {
+                        Text("Activation")
+                            .font(KalamTheme.calloutFont)
+                            .foregroundColor(KalamTheme.textSecondary)
 
-                            // Activation Mode
-                            Menu {
-                                ForEach(ActivationMode.allCases) { mode in
-                                    Button {
-                                        hotkeyDraft.activationMode = mode
-                                    } label: {
-                                        HStack {
-                                            Text(mode.displayName)
-                                            if hotkeyDraft.activationMode == mode {
-                                                Image(systemName: "checkmark")
-                                            }
-                                        }
-                                    }
-                                }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Text(hotkeyDraft.activationMode.displayName)
-                                        .font(KalamTheme.bodyStrongFont)
-                                    Image(systemName: "chevron.up.chevron.down")
-                                        .font(KalamTheme.captionFont)
-                                }
-                                .foregroundColor(KalamTheme.textPrimary)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 7)
-                                .background(KalamTheme.controlTint)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(KalamTheme.strokeSubtle, lineWidth: 1)
-                                )
-                            }
-                            .menuStyle(.button)
-                            .buttonStyle(.plain)
-
-                            Spacer()
-
-                            Text("Hotkey")
-                                .font(KalamTheme.calloutFont)
-                                .foregroundColor(KalamTheme.textSecondary)
-
-                            // Key Combination
-                            Menu {
+                        // Activation Mode
+                        Menu {
+                            ForEach(ActivationMode.allCases) { mode in
                                 Button {
-                                    hotkeyDraft.keyCombination = .notSpecified
+                                    hotkeyDraft.activationMode = mode
                                 } label: {
                                     HStack {
-                                        Text(KeyCombination.notSpecified.displayName)
-                                        if hotkeyDraft.keyCombination == .notSpecified {
+                                        Text(mode.displayName)
+                                        if hotkeyDraft.activationMode == mode {
                                             Image(systemName: "checkmark")
                                         }
                                     }
                                 }
-                                ForEach(KeyCombination.allCases.filter { $0 != .notSpecified }) { combo in
-                                    Button {
-                                        hotkeyDraft.apply(keyCombination: combo)
-                                    } label: {
-                                        HStack {
-                                            Text(combo.displayName)
-                                            if hotkeyDraft.keyCombination == combo {
-                                                Image(systemName: "checkmark")
-                                            }
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(hotkeyDraft.activationMode.displayName)
+                                    .font(KalamTheme.bodyStrongFont)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(KalamTheme.captionFont)
+                            }
+                            .foregroundColor(KalamTheme.textPrimary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(KalamTheme.controlTint)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(KalamTheme.strokeSubtle, lineWidth: 1)
+                            )
+                        }
+                        .menuStyle(.button)
+                        .buttonStyle(.plain)
+
+                        Spacer()
+
+                        Text("Hotkey")
+                            .font(KalamTheme.calloutFont)
+                            .foregroundColor(KalamTheme.textSecondary)
+
+                        // Key Combination
+                        Menu {
+                            Button {
+                                hotkeyDraft.keyCombination = .notSpecified
+                            } label: {
+                                HStack {
+                                    Text(KeyCombination.notSpecified.displayName)
+                                    if hotkeyDraft.keyCombination == .notSpecified {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                            ForEach(KeyCombination.allCases.filter { $0 != .notSpecified }) {
+                                combo in
+                                Button {
+                                    hotkeyDraft.apply(keyCombination: combo)
+                                } label: {
+                                    HStack {
+                                        Text(combo.displayName)
+                                        if hotkeyDraft.keyCombination == combo {
+                                            Image(systemName: "checkmark")
                                         }
                                     }
                                 }
-                                Divider()
-                                Button("Record shortcut...") {
-                                    showingShortcutRecorder = true
-                                }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Text(selectedShortcutLabel)
-                                        .font(KalamTheme.bodyStrongFont)
-                                    Image(systemName: "chevron.up.chevron.down")
-                                        .font(KalamTheme.captionFont)
-                                }
-                                .foregroundColor(KalamTheme.textPrimary)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 7)
-                                .background(KalamTheme.controlTint)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(KalamTheme.strokeSubtle, lineWidth: 1)
-                                )
                             }
-                            .menuStyle(.button)
-                            .buttonStyle(.plain)
+                            Divider()
+                            Button("Record shortcut...") {
+                                showingShortcutRecorder = true
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(selectedShortcutLabel)
+                                    .font(KalamTheme.bodyStrongFont)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(KalamTheme.captionFont)
+                            }
+                            .foregroundColor(KalamTheme.textPrimary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(KalamTheme.controlTint)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(KalamTheme.strokeSubtle, lineWidth: 1)
+                            )
                         }
+                        .menuStyle(.button)
+                        .buttonStyle(.plain)
                     }
-                    .padding(14)
-                    .settingsCardSurface()
+                }
+                .padding(14)
+                .settingsCardSurface()
 
                 Rectangle()
                     .fill(KalamTheme.strokeSubtle)
@@ -518,10 +608,18 @@ struct SettingsView: View {
                         .foregroundColor(KalamTheme.textPrimary)
 
                     VStack(alignment: .leading, spacing: 12) {
-                        instructionRow(icon: "arrow.triangle.2.circlepath", title: "Hold or Toggle", desc: "Intelligently auto-detects behavior")
-                        instructionRow(icon: "hand.tap", title: "Toggle", desc: "Tap to start, tap again to stop")
-                        instructionRow(icon: "hand.raised.fill", title: "Hold", desc: "Record only while key is pressed")
-                        instructionRow(icon: "square.2.layers.3d", title: "Double Tap", desc: "Start recording by tapping twice quickly")
+                        instructionRow(
+                            icon: "arrow.triangle.2.circlepath", title: "Hold or Toggle",
+                            desc: "Intelligently auto-detects behavior")
+                        instructionRow(
+                            icon: "hand.tap", title: "Toggle",
+                            desc: "Tap to start, tap again to stop")
+                        instructionRow(
+                            icon: "hand.raised.fill", title: "Hold",
+                            desc: "Record only while key is pressed")
+                        instructionRow(
+                            icon: "square.2.layers.3d", title: "Double Tap",
+                            desc: "Start recording by tapping twice quickly")
 
                         Text("Right-side presets (Right ⌘/⌥/⇧/⌃) require the right physical key.")
                             .font(KalamTheme.footnoteFont)
@@ -543,7 +641,6 @@ struct SettingsView: View {
         }
     }
 
-
     @ViewBuilder
     private func instructionRow(icon: String, title: String, desc: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
@@ -552,7 +649,7 @@ struct SettingsView: View {
                 .foregroundColor(KalamTheme.accent)
                 .frame(width: 20, alignment: .center)
                 .padding(.top, 1)
-            
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(KalamTheme.bodyStrongFont)
@@ -563,7 +660,7 @@ struct SettingsView: View {
             }
         }
     }
-    
+
     /// The content for the Models tab.
     private var modelsContent: some View {
         let selectedAvailability = modelsConfig.availability(for: modelsConfig.asrVersion)
@@ -572,7 +669,8 @@ struct SettingsView: View {
         let step1Complete = modelsConfig.modelLibraryURL != nil
         let step2Complete = hasInstalledModels
         let step3Complete = selectedAvailability.isInstalled
-        let selectedSingleModelFolder = ModelSetupSupport.selectedModelRepoFolderVersion(for: modelsConfig.modelLibraryURL)
+        let selectedSingleModelFolder = ModelSetupSupport.selectedModelRepoFolderVersion(
+            for: modelsConfig.modelLibraryURL)
 
         return ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -580,9 +678,11 @@ struct SettingsView: View {
                     Text("Speech Recognition Model")
                         .font(KalamTheme.pageTitleFont)
                         .foregroundColor(KalamTheme.textPrimary)
-                    Text("Follow these 3 steps once. After setup, you can switch between installed models instantly.")
-                        .font(KalamTheme.calloutFont)
-                        .foregroundColor(KalamTheme.textSecondary)
+                    Text(
+                        "Follow these 3 steps once. After setup, you can switch between installed models instantly."
+                    )
+                    .font(KalamTheme.calloutFont)
+                    .foregroundColor(KalamTheme.textSecondary)
                 }
                 .padding(.top, 4)
 
@@ -655,9 +755,11 @@ struct SettingsView: View {
 
                                 if let selectedSingleModelFolder {
                                     VStack(alignment: .leading, spacing: 6) {
-                                        Text("You selected a single model repo folder (\(selectedSingleModelFolder.displayName)).")
-                                            .font(KalamTheme.footnoteFont)
-                                            .foregroundColor(KalamTheme.textSecondary)
+                                        Text(
+                                            "You selected a single model repo folder (\(selectedSingleModelFolder.displayName))."
+                                        )
+                                        .font(KalamTheme.footnoteFont)
+                                        .foregroundColor(KalamTheme.textSecondary)
                                         Button("Use Parent Folder Instead") {
                                             useParentFolderForSelectedModelRepo()
                                         }
@@ -748,7 +850,7 @@ struct SettingsView: View {
                                         ForEach(ASRModelVersion.allCases) { version in
                                             Text(version.displayName).tag(version)
                                         }
-                                    } 
+                                    }
                                     .pickerStyle(.segmented)
                                     .labelsHidden()
 
@@ -785,14 +887,18 @@ struct SettingsView: View {
                                                 }
                                             }
                                         }
-                                        Text("Downloads only required files instead of full 2.6 GB repo.")
-                                            .font(KalamTheme.footnoteFont)
-                                            .foregroundColor(KalamTheme.textTertiary)
+                                        Text(
+                                            "Downloads only required files instead of full 2.6 GB repo."
+                                        )
+                                        .font(KalamTheme.footnoteFont)
+                                        .foregroundColor(KalamTheme.textTertiary)
                                     }
                                 } else {
-                                    Text("Select a folder in Step 1 first to see download commands.")
-                                        .font(KalamTheme.footnoteFont)
-                                        .foregroundColor(KalamTheme.textSecondary)
+                                    Text(
+                                        "Select a folder in Step 1 first to see download commands."
+                                    )
+                                    .font(KalamTheme.footnoteFont)
+                                    .foregroundColor(KalamTheme.textSecondary)
                                 }
                             }
                             .padding(.horizontal, 16)
@@ -831,9 +937,11 @@ struct SettingsView: View {
                         if !step3Complete || step3Expanded {
                             VStack(alignment: .leading, spacing: 10) {
                                 if hasInstalledModels {
-                                    Text("Available in selected folder: \(installedModels.map(\.displayName).joined(separator: ", "))")
-                                        .font(KalamTheme.footnoteFont)
-                                        .foregroundColor(KalamTheme.textSecondary)
+                                    Text(
+                                        "Available in selected folder: \(installedModels.map(\.displayName).joined(separator: ", "))"
+                                    )
+                                    .font(KalamTheme.footnoteFont)
+                                    .foregroundColor(KalamTheme.textSecondary)
                                 } else {
                                     Text("No valid models detected in the selected folder yet.")
                                         .font(KalamTheme.footnoteFont)
@@ -897,11 +1005,13 @@ struct SettingsView: View {
                             .foregroundColor(KalamTheme.textPrimary)
                         Spacer()
                     }
-                    
-                    Text("Top-level folder example:\n~/Models/FluidAudio/\n  ├─ parakeet-tdt-0.6b-v2/\n  └─ parakeet-tdt-0.6b-v3/\n\nEach model folder must contain:\n• Preprocessor.mlmodelc/\n• Encoder.mlmodelc/\n• Decoder.mlmodelc/\n• JointDecision.mlmodelc/ for v2 or JointDecisionv3.mlmodelc/ for v3\n• parakeet_vocab.json")
-                        .font(KalamTheme.footnoteFont)
-                        .foregroundColor(KalamTheme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(
+                        "Top-level folder example:\n~/Models/FluidAudio/\n  ├─ parakeet-tdt-0.6b-v2/\n  └─ parakeet-tdt-0.6b-v3/\n\nEach model folder must contain:\n• Preprocessor.mlmodelc/\n• Encoder.mlmodelc/\n• Decoder.mlmodelc/\n• JointDecision.mlmodelc/ for v2 or JointDecisionv3.mlmodelc/ for v3\n• parakeet_vocab.json"
+                    )
+                    .font(KalamTheme.footnoteFont)
+                    .foregroundColor(KalamTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(14)
                 .background(Color(nsColor: .controlBackgroundColor))
@@ -910,7 +1020,7 @@ struct SettingsView: View {
                     RoundedRectangle(cornerRadius: 14)
                         .stroke(KalamTheme.accent.opacity(0.25), lineWidth: 1)
                 )
-                
+
                 Spacer()
             }
             .padding(.horizontal, 16)
@@ -952,28 +1062,32 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             refineOption(
                                 title: "Remove filler words",
-                                helper: "\"um I think we should ship\" -> \"I think we should ship\"",
+                                helper:
+                                    "\"um I think we should ship\" -> \"I think we should ship\"",
                                 binding: $modelsConfig.textCleanup.removeFillers,
                                 isEnabled: modelsConfig.textCleanup.enabled
                             )
 
                             refineOption(
                                 title: "Handle backtracks (e.g. \"scratch that\")",
-                                helper: "\"send this now scratch that send it tomorrow\" -> \"send it tomorrow\"",
+                                helper:
+                                    "\"send this now scratch that send it tomorrow\" -> \"send it tomorrow\"",
                                 binding: $modelsConfig.textCleanup.backtrack,
                                 isEnabled: modelsConfig.textCleanup.enabled
                             )
 
                             refineOption(
                                 title: "Format spoken numbered lists",
-                                helper: "\"one/1 gather logs two/2 isolate bug\" -> \"1. gather logs\n2. isolate bug\"",
+                                helper:
+                                    "\"one/1 gather logs two/2 isolate bug\" -> \"1. gather logs\n2. isolate bug\"",
                                 binding: $modelsConfig.textCleanup.listFormatting,
                                 isEnabled: modelsConfig.textCleanup.enabled
                             )
 
                             refineOption(
                                 title: "Normalize punctuation and spacing",
-                                helper: "\"hello ,world!!this is fine\" -> \"hello, world! this is fine\"",
+                                helper:
+                                    "\"hello ,world!!this is fine\" -> \"hello, world! this is fine\"",
                                 binding: $modelsConfig.textCleanup.punctuation,
                                 isEnabled: modelsConfig.textCleanup.enabled
                             )
@@ -1029,7 +1143,9 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
-    private func refineOption(title: String, helper: String, binding: Binding<Bool>, isEnabled: Bool) -> some View {
+    private func refineOption(
+        title: String, helper: String, binding: Binding<Bool>, isEnabled: Bool
+    ) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Toggle(isOn: binding) {
                 Text(title)
@@ -1080,7 +1196,7 @@ struct SettingsView: View {
             knownDeviceNames: names
         )
     }
-    
+
     // MARK: - Actions & Event Handlers
 
     private func applyRecordedShortcut(key: PTTHotkeyKey, modifiers: NSEvent.ModifierFlags) {
@@ -1094,7 +1210,7 @@ struct SettingsView: View {
         updated.control = relevantModifiers.contains(.control)
         hotkeyDraft = updated
     }
-    
+
     private func onAppear() {
         if manager.isFirstLaunch {
             manager.entries.removeAll { !$0.userAdded }
@@ -1111,14 +1227,14 @@ struct SettingsView: View {
         let currentGeneral = GeneralSettingsConfiguration.load()
         generalConfig = currentGeneral
 
-        let currentPriority = MicrophoneDeviceService.normalize(config: MicrophonePriorityConfiguration.load())
+        let currentPriority = MicrophoneDeviceService.normalize(
+            config: MicrophonePriorityConfiguration.load())
         micPriorityConfig = currentPriority
         refreshMicrophoneRows()
         DispatchQueue.main.async {
             isInitializingSettingsState = false
         }
     }
-
 
     private func persistHotkeyConfigurationIfNeeded() {
         guard !isInitializingSettingsState else { return }
@@ -1128,13 +1244,15 @@ struct SettingsView: View {
             hotkeyDraft = safeHotkey
             return
         }
-        NotificationCenter.default.post(name: Notification.Name.pttHotkeyConfigurationDidChange, object: nil)
+        NotificationCenter.default.post(
+            name: Notification.Name.pttHotkeyConfigurationDidChange, object: nil)
     }
 
     private func persistModelsConfigurationIfNeeded() {
         guard !isInitializingSettingsState else { return }
         modelsConfig.save()
-        NotificationCenter.default.post(name: Notification.Name.modelsConfigurationDidChange, object: nil)
+        NotificationCenter.default.post(
+            name: Notification.Name.modelsConfigurationDidChange, object: nil)
     }
 
     private func persistMicrophonePriorityIfNeeded() {
@@ -1168,13 +1286,17 @@ struct SettingsView: View {
     }
 
     private func useParentFolderForSelectedModelRepo() {
-        guard ModelSetupSupport.selectedModelRepoFolderVersion(for: modelsConfig.modelLibraryURL) != nil,
-              let currentURL = modelsConfig.modelLibraryURL?.standardizedFileURL else { return }
+        guard
+            ModelSetupSupport.selectedModelRepoFolderVersion(for: modelsConfig.modelLibraryURL)
+                != nil,
+            let currentURL = modelsConfig.modelLibraryURL?.standardizedFileURL
+        else { return }
         setModelLibraryFolder(currentURL.deletingLastPathComponent())
     }
 
     private func chooseModelLibraryFolder() {
-        ModelSetupSupport.chooseModelLibraryFolder(currentURL: modelsConfig.modelLibraryURL) { url in
+        ModelSetupSupport.chooseModelLibraryFolder(currentURL: modelsConfig.modelLibraryURL) {
+            url in
             guard let url else { return }
             setModelLibraryFolder(url)
         }
@@ -1191,15 +1313,15 @@ struct SettingsView: View {
 
     private func setModelLibraryFolder(_ folderURL: URL?) {
         do {
-            modelsConfig = try ModelSetupSupport.applyingModelLibraryFolder(folderURL, to: modelsConfig)
+            modelsConfig = try ModelSetupSupport.applyingModelLibraryFolder(
+                folderURL, to: modelsConfig)
         } catch {
             let alert = NSAlert(error: error)
             alert.messageText = "Unable to Use Folder"
             alert.runModal()
         }
     }
-    
-    
+
 }
 
 private struct ShortcutRecorderSheet: View {
@@ -1242,7 +1364,7 @@ private struct ShortcutRecorderSheet: View {
                                 LinearGradient(
                                     colors: [
                                         KalamTheme.controlTint,
-                                        KalamTheme.controlTint.opacity(0.7)
+                                        KalamTheme.controlTint.opacity(0.7),
                                     ],
                                     startPoint: .top,
                                     endPoint: .bottom
@@ -1347,7 +1469,7 @@ private struct ShortcutRecorderSheet: View {
     private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
         guard !captured else { return nil }
 
-        if event.keyCode == 53 { // ESC
+        if event.keyCode == 53 {  // ESC
             cancel()
             return nil
         }
@@ -1405,7 +1527,7 @@ private struct ShortcutRecorderSheet: View {
 
 struct WordReplacementView: View {
     @EnvironmentObject var manager: CustomDictionaryManager
-    
+
     @State private var search: String = ""
     @State private var showingDeleteConfirmation = false
     @State private var entryToDelete: UUID?
@@ -1418,11 +1540,11 @@ struct WordReplacementView: View {
         let s = search.trimmingCharacters(in: .whitespacesAndNewlines)
         if s.isEmpty { return manager.entries }
         return manager.entries.filter {
-            $0.trigger.localizedCaseInsensitiveContains(s) ||
-            $0.replacement.localizedCaseInsensitiveContains(s)
+            $0.trigger.localizedCaseInsensitiveContains(s)
+                || $0.replacement.localizedCaseInsensitiveContains(s)
         }
     }
-    
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -1445,7 +1567,7 @@ struct WordReplacementView: View {
                     delete(id: id)
                 }
             }
-            Button("Cancel", role: .cancel) { }
+            Button("Cancel", role: .cancel) {}
         } message: {
             Text("This action cannot be undone.")
         }
@@ -1530,10 +1652,12 @@ struct WordReplacementView: View {
             Text("Your Dictionary is Empty")
                 .font(.title2.weight(.semibold))
                 .foregroundColor(KalamTheme.textPrimary)
-            Text("Add replacements for common ASR mistakes to make dictation faster and more accurate.")
-                .foregroundColor(KalamTheme.textSecondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 400)
+            Text(
+                "Add replacements for common ASR mistakes to make dictation faster and more accurate."
+            )
+            .foregroundColor(KalamTheme.textSecondary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 400)
             Button("Add First Entry") {
                 addNew()
             }
@@ -1542,7 +1666,7 @@ struct WordReplacementView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-    
+
     private var noResultsState: some View {
         ContentUnavailableView {
             Label("No Results", systemImage: "magnifyingglass")
@@ -1550,7 +1674,7 @@ struct WordReplacementView: View {
             Text("Try a different search term")
         }
     }
-    
+
     private var entryList: some View {
         ScrollView {
             LazyVStack(spacing: 8) {
@@ -1568,24 +1692,26 @@ struct WordReplacementView: View {
             .padding(.bottom, 14)
         }
     }
-    
+
     private func binding(for entry: DictionaryEntry) -> Binding<DictionaryEntry> {
         Binding(
             get: {
                 manager.entries.first(where: { $0.id == entry.id }) ?? entry
             },
             set: { newValue in
-                guard let index = manager.entries.firstIndex(where: { $0.id == entry.id }) else { return }
+                guard let index = manager.entries.firstIndex(where: { $0.id == entry.id }) else {
+                    return
+                }
                 manager.entries[index] = newValue
             }
         )
     }
-    
+
     private func addNew() {
         let new = DictionaryEntry(trigger: "", replacement: "", userAdded: true)
         manager.addEntry(new)
     }
-    
+
     private func delete(id: UUID) {
         manager.removeEntries(withIds: [id])
         entryToDelete = nil
@@ -1597,16 +1723,16 @@ struct WordReplacementView: View {
 struct EditableRow: View {
     @Binding var entry: DictionaryEntry
     let onDelete: () -> Void
-    
+
     @State private var isExpanded = false
     @State private var showAdvanced = false
     @State private var isHovered = false
-    
+
     // Case handling options
     enum CaseMatchingMode: String, CaseIterable {
         case smart = "Smart Match"
         case literal = "Literal"
-        
+
         static func from(entry: DictionaryEntry) -> CaseMatchingMode {
             return (entry.caseInsensitive || entry.preserveCase) ? .smart : .literal
         }
@@ -1621,9 +1747,9 @@ struct EditableRow: View {
             }
         }
     }
-    
+
     @State private var matchingMode: CaseMatchingMode = .smart
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
@@ -1631,34 +1757,40 @@ struct EditableRow: View {
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .scaleEffect(0.86)
-                
+
                 HStack(spacing: 8) {
                     Text(entry.trigger.isEmpty ? "Spoken phrase" : entry.trigger)
                         .font(KalamTheme.bodyStrongFont)
-                        .foregroundColor(entry.isEnabled ? KalamTheme.textPrimary : KalamTheme.textSecondary)
+                        .foregroundColor(
+                            entry.isEnabled ? KalamTheme.textPrimary : KalamTheme.textSecondary
+                        )
                         .lineLimit(1)
-                    
+
                     Image(systemName: "arrow.right")
                         .font(KalamTheme.calloutFont)
                         .foregroundColor(KalamTheme.textTertiary)
-                    
+
                     Text(entry.replacement.isEmpty ? "Replacement" : entry.replacement)
                         .font(KalamTheme.bodyStrongFont)
                         .foregroundColor(KalamTheme.accent)
                         .opacity(entry.isEnabled ? 1.0 : 0.6)
                         .lineLimit(1)
                 }
-                
+
                 Spacer()
-                
+
                 Text(matchingMode.rawValue)
                     .font(KalamTheme.captionStrongFont)
-                    .foregroundColor(matchingMode == .smart ? KalamTheme.accent : KalamTheme.textSecondary)
+                    .foregroundColor(
+                        matchingMode == .smart ? KalamTheme.accent : KalamTheme.textSecondary
+                    )
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
-                    .background(KalamTheme.controlTint.opacity(matchingMode == .smart ? 0.95 : 0.72))
+                    .background(
+                        KalamTheme.controlTint.opacity(matchingMode == .smart ? 0.95 : 0.72)
+                    )
                     .clipShape(RoundedRectangle(cornerRadius: 7))
-                
+
                 Button(action: { withAnimation(.easeOut(duration: 0.2)) { isExpanded.toggle() } }) {
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(KalamTheme.calloutFont)
@@ -1666,7 +1798,7 @@ struct EditableRow: View {
                 .buttonStyle(.plain)
                 .foregroundColor(KalamTheme.textSecondary)
                 .frame(width: 24, height: 24)
-                
+
                 Button(action: onDelete) {
                     Image(systemName: "trash")
                         .font(KalamTheme.calloutFont)
@@ -1683,18 +1815,18 @@ struct EditableRow: View {
             .onTapGesture {
                 withAnimation(.easeOut(duration: 0.2)) { isExpanded.toggle() }
             }
-            
+
             if isExpanded {
                 VStack(alignment: .leading, spacing: 14) {
                     Divider().overlay(KalamTheme.strokeSubtle)
                         .padding(.horizontal, -10)
-                    
+
                     HStack(alignment: .top, spacing: 14) {
                         VStack(alignment: .leading, spacing: 8) {
                             Label("Spoken phrase", systemImage: "mouth.fill")
                                 .font(KalamTheme.captionStrongFont)
                                 .foregroundColor(KalamTheme.textSecondary)
-                            
+
                             TextField("e.g. apple", text: $entry.trigger)
                                 .textFieldStyle(.plain)
                                 .font(KalamTheme.bodyFont)
@@ -1703,14 +1835,16 @@ struct EditableRow: View {
                                 .frame(height: 40)
                                 .background(KalamTheme.controlTint)
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
-                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(KalamTheme.strokeSubtle, lineWidth: 1))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8).stroke(
+                                        KalamTheme.strokeSubtle, lineWidth: 1))
                         }
-                        
+
                         VStack(alignment: .leading, spacing: 8) {
                             Label("Replacement", systemImage: "pencil")
                                 .font(KalamTheme.captionStrongFont)
                                 .foregroundColor(KalamTheme.textSecondary)
-                            
+
                             TextField("e.g. orange", text: $entry.replacement)
                                 .textFieldStyle(.plain)
                                 .font(KalamTheme.bodyFont)
@@ -1719,24 +1853,30 @@ struct EditableRow: View {
                                 .frame(height: 40)
                                 .background(KalamTheme.controlTint)
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
-                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(KalamTheme.strokeSubtle, lineWidth: 1))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8).stroke(
+                                        KalamTheme.strokeSubtle, lineWidth: 1))
                         }
                     }
-                    
+
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(alignment: .firstTextBaseline, spacing: 4) {
                             Text("Covers:")
                                 .font(KalamTheme.captionStrongFont)
                                 .foregroundColor(KalamTheme.textSecondary)
-                            
-                            Text(entry.exampleMatches.isEmpty ? "Start typing to see examples" : entry.exampleMatches.joined(separator: ", "))
-                                .font(KalamTheme.captionFont)
-                                .foregroundColor(KalamTheme.textSecondary)
-                                .opacity(entry.exampleMatches.isEmpty ? 0.5 : 1.0)
+
+                            Text(
+                                entry.exampleMatches.isEmpty
+                                    ? "Start typing to see examples"
+                                    : entry.exampleMatches.joined(separator: ", ")
+                            )
+                            .font(KalamTheme.captionFont)
+                            .foregroundColor(KalamTheme.textSecondary)
+                            .opacity(entry.exampleMatches.isEmpty ? 0.5 : 1.0)
                         }
                         .lineLimit(3)
                     }
-                    
+
                     HStack {
                         HStack(spacing: 8) {
                             Picker("Matching", selection: $matchingMode) {
@@ -1750,7 +1890,7 @@ struct EditableRow: View {
                             .onChange(of: matchingMode) { _, newValue in
                                 newValue.apply(to: &entry)
                             }
-                            
+
                             Button {
                                 showAdvanced.toggle()
                             } label: {
@@ -1763,16 +1903,18 @@ struct EditableRow: View {
                                 VStack(alignment: .leading, spacing: 12) {
                                     Text("Smart Match")
                                         .font(.headline)
-                                    
-                                    Text("Automatically handles capitalization, plurals, and possessives of your spoken words.")
-                                        .font(KalamTheme.calloutFont)
-                                        .foregroundColor(KalamTheme.textSecondary)
+
+                                    Text(
+                                        "Automatically handles capitalization, plurals, and possessives of your spoken words."
+                                    )
+                                    .font(KalamTheme.calloutFont)
+                                    .foregroundColor(KalamTheme.textSecondary)
                                 }
                                 .padding()
                                 .frame(width: 220)
                             }
                         }
-                        
+
                         Spacer()
                     }
                 }
@@ -1856,7 +1998,7 @@ struct ModelSelectionRow: View {
             return "xmark.octagon.fill"
         }
     }
-    
+
     var body: some View {
         Button(action: onSelect) {
             HStack(spacing: 12) {
@@ -1864,20 +2006,20 @@ struct ModelSelectionRow: View {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
                     .foregroundColor(isSelected ? KalamTheme.accent : KalamTheme.textTertiary)
-                
+
                 // Model info
                 VStack(alignment: .leading, spacing: 4) {
                     Text(version.displayName)
                         .font(isSelected ? KalamTheme.bodyStrongFont : KalamTheme.bodyFont)
                         .foregroundColor(KalamTheme.textPrimary)
-                    
+
                     Text(version.description)
                         .font(KalamTheme.footnoteFont)
                         .foregroundColor(KalamTheme.textSecondary)
                 }
-                
+
                 Spacer()
-                
+
                 VStack(alignment: .trailing, spacing: 6) {
                     HStack(spacing: 4) {
                         Image(systemName: availabilityIcon)
@@ -1906,11 +2048,15 @@ struct ModelSelectionRow: View {
         .buttonStyle(.plain)
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1.0 : 0.65)
-        .background(isSelected ? KalamTheme.accent.opacity(0.10) : KalamTheme.controlTint.opacity(0.72))
+        .background(
+            isSelected ? KalamTheme.accent.opacity(0.10) : KalamTheme.controlTint.opacity(0.72)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(isSelected ? KalamTheme.accent.opacity(0.40) : KalamTheme.strokeSubtle, lineWidth: 1)
+                .stroke(
+                    isSelected ? KalamTheme.accent.opacity(0.40) : KalamTheme.strokeSubtle,
+                    lineWidth: 1)
         )
     }
 }
@@ -1927,10 +2073,13 @@ private struct MicrophoneRowDropDelegate: DropDelegate {
             let uid = value as String
             DispatchQueue.main.async {
                 guard let fromIndex = listData.firstIndex(where: { $0.uid == uid }),
-                      let toIndex = listData.firstIndex(of: item),
-                      fromIndex != toIndex else { return }
+                    let toIndex = listData.firstIndex(of: item),
+                    fromIndex != toIndex
+                else { return }
                 withAnimation {
-                    listData.move(fromOffsets: IndexSet(integer: fromIndex), toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex)
+                    listData.move(
+                        fromOffsets: IndexSet(integer: fromIndex),
+                        toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex)
                 }
                 onReorder()
             }
@@ -1970,8 +2119,10 @@ private struct PreferenceRow<Label: View, Content: View>: View {
     }
 }
 
-private extension View {
-    func settingsCardSurface(cornerRadius: CGFloat = KalamTheme.wellCornerRadius) -> some View {
+extension View {
+    fileprivate func settingsCardSurface(cornerRadius: CGFloat = KalamTheme.wellCornerRadius)
+        -> some View
+    {
         self
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius)
@@ -1986,10 +2137,11 @@ private extension View {
                 Rectangle()
                     .fill(KalamTheme.cardTopHighlight)
                     .frame(height: 1)
-                    .clipShape(.rect(
-                        topLeadingRadius: cornerRadius,
-                        topTrailingRadius: cornerRadius
-                    ))
+                    .clipShape(
+                        .rect(
+                            topLeadingRadius: cornerRadius,
+                            topTrailingRadius: cornerRadius
+                        ))
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
     }

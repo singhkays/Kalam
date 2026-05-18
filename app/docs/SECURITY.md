@@ -37,6 +37,7 @@ Runtime behavior still depends on macOS permission grants and target-app support
 - **Library Validation**: Prevents malicious dynamic library injection
 - **Memory Security**: Kalam clears owned audio buffers after transcription where possible; it does not claim that every downstream framework/runtime copy is cryptographically wiped
 - **Network Security**: Kalam is built with **zero network entitlements** in the Xcode project sandbox. This is a deliberate design choice; even if the app tried to make a network request, it would be blocked at the OS level. ASR models are user-provisioned and loaded from local disk only.
+- **Update Discovery**: Kalam does not auto-check for updates. The **View Latest Release…** action is user-initiated and opens GitHub in the user's browser; Kalam itself still has no outgoing network entitlement.
 
 ## Third-Party Components
 

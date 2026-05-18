@@ -45,16 +45,41 @@ jobs:
           chmod +x build.sh
           ./build.sh
 
+      - name: Generate checksum and release notes
+        run: |
+          shasum -a 256 build/Kalam.dmg > build/Kalam.dmg.sha256
+          RELEASE_DATE="$(date -u +'%Y-%m-%d')"
+          cat > build/release-notes.md <<EOF
+          Kalam ${{ github.ref_name }}
+
+          Released: ${RELEASE_DATE}
+
+          ## Download
+
+          - Kalam.dmg
+          - SHA-256: see \`Kalam.dmg.sha256\`
+
+          To verify:
+
+          \`\`\`bash
+          shasum -a 256 Kalam.dmg
+          \`\`\`
+
+          ## Changes
+
+          - Add release highlights here.
+          - Add fixes here.
+          - Add known user-facing notes here.
+          EOF
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: build/Kalam.dmg
-          body: |
-            Kalam macOS Release. 
-            
-            > [!WARNING]
-            > **Unsigned Release**: Since this binary is not signed with an Apple Developer certificate, you will need to right-click the app and choose "Open" the first time you run it, or allow it in System Settings > Privacy & Security.
+          files: |
+            build/Kalam.dmg
+            build/Kalam.dmg.sha256
+          body_path: build/release-notes.md
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

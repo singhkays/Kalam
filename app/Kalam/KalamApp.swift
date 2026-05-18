@@ -31,6 +31,26 @@ extension Array where Element == Float {
 // MARK: - App
 private let pasteKeyCode: CGKeyCode = 9 // 'V' key (ANSI V) for Command+V
 
+enum KalamExternalLinks {
+    static let latestReleaseURL = URL(string: "https://github.com/singhkays/Kalam/releases/latest")!
+
+    @MainActor
+    @discardableResult
+    static func openLatestRelease() -> Bool {
+        NSWorkspace.shared.open(latestReleaseURL)
+    }
+}
+
+enum KalamAppVersion {
+    static var displayString: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        if let version, !version.isEmpty {
+            return version
+        }
+        return "Unknown"
+    }
+}
+
 // MARK: - App
 @main
 struct KalamApp: App {
@@ -164,6 +184,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+        let latestReleaseItem = NSMenuItem(title: "View Latest Release…", action: #selector(openLatestRelease), keyEquivalent: "")
+        latestReleaseItem.target = self
+        menu.addItem(latestReleaseItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Kalam", action: #selector(quit), keyEquivalent: "q"))
         statusItem.menu = menu
@@ -304,6 +327,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     
     @objc private func openSettings() {
         openSettingsWindow(selectModelsTab: false)
+    }
+
+    @objc private func openLatestRelease() {
+        KalamExternalLinks.openLatestRelease()
     }
 
     @objc private func openSetup() {
@@ -1210,12 +1237,12 @@ final class SystemAudioDucker {
             mElement: kAudioObjectPropertyElementMain
         )
         
-        guard AudioHardwareServiceHasProperty(deviceID, &propertyAddress) else {
+        guard AudioObjectHasProperty(deviceID, &propertyAddress) else {
             logger.info("Device does not support VirtualMainVolume")
             return nil
         }
         
-        let status = AudioHardwareServiceGetPropertyData(
+        let status = AudioObjectGetPropertyData(
             deviceID,
             &propertyAddress,
             0, nil,
@@ -1239,9 +1266,9 @@ final class SystemAudioDucker {
             mElement: kAudioObjectPropertyElementMain
         )
         
-        guard AudioHardwareServiceHasProperty(deviceID, &propertyAddress) else { return }
+        guard AudioObjectHasProperty(deviceID, &propertyAddress) else { return }
         
-        let status = AudioHardwareServiceSetPropertyData(
+        let status = AudioObjectSetPropertyData(
             deviceID,
             &propertyAddress,
             0, nil,
@@ -1534,7 +1561,9 @@ final class DictationOverlayController {
             context.duration = fadeDuration
             w.animator().alphaValue = 0.0
         } completionHandler: {
-            w.orderOut(nil)
+            MainActor.assumeIsolated {
+                w.orderOut(nil)
+            }
         }
     }
 

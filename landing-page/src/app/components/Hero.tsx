@@ -247,7 +247,7 @@ export function Hero() {
           <div className="hero-cta-group">
             <div className="hero-primary-group">
               <a
-                href="https://github.com/singhkays/Kalam/releases/tag/v1.0"
+                href="https://github.com/singhkays/Kalam/releases/latest"
                 target="_blank"
                 rel="noreferrer noopener"
                 className="hero-button"
