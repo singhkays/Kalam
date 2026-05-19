@@ -846,13 +846,11 @@ struct SettingsView: View {
                                         .font(KalamTheme.footnoteFont)
                                         .foregroundColor(KalamTheme.textSecondary)
 
-                                    Picker("Model", selection: $selectedDownloadVersion) {
-                                        ForEach(ASRModelVersion.allCases) { version in
-                                            Text(version.displayName).tag(version)
-                                        }
-                                    }
-                                    .pickerStyle(.segmented)
-                                    .labelsHidden()
+                                    SetupDropdownField(
+                                        selection: $selectedDownloadVersion,
+                                        options: ASRModelVersion.allCases,
+                                        label: { $0.shortDisplayName }
+                                    )
 
                                     let command = downloadCommand(for: selectedDownloadVersion)
                                     Text(command)
@@ -948,19 +946,20 @@ struct SettingsView: View {
                                         .foregroundColor(KalamTheme.textSecondary)
                                 }
 
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Model version")
-                                        .font(KalamTheme.calloutFont)
-
-                                    SetupDropdownField(
-                                        selection: $modelsConfig.asrVersion,
-                                        options: ASRModelVersion.allCases,
-                                        label: { $0.shortDisplayName }
-                                    )
-
-                                    Text(modelsConfig.asrVersion.description)
-                                        .font(KalamTheme.footnoteFont)
-                                        .foregroundColor(KalamTheme.textSecondary)
+                                VStack(spacing: 12) {
+                                    ForEach(ASRModelVersion.allCases) { version in
+                                        let availability = modelsConfig.availability(for: version)
+                                        ModelSelectionRow(
+                                            version: version,
+                                            availability: availability,
+                                            isSelected: modelsConfig.asrVersion == version,
+                                            isEnabled: availability.isInstalled,
+                                            onSelect: {
+                                                guard availability.isInstalled else { return }
+                                                modelsConfig.asrVersion = version
+                                            }
+                                        )
+                                    }
                                 }
                             }
                             .padding(.horizontal, 16)

@@ -20,7 +20,6 @@ public enum ASRModelVersion: String, CaseIterable, Identifiable, Sendable {
             return "Parakeet TDT-CTC 110M (Lightweight)"
         }
     }
-
     /// Short name used in dropdowns and compact UI
     public var shortDisplayName: String {
         switch self {
@@ -30,7 +29,8 @@ public enum ASRModelVersion: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-
+    
+    
     public var description: String {
         switch self {
         case .v2:
