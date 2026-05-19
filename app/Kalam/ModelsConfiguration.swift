@@ -1,57 +1,94 @@
 import Foundation
-import FluidAudio
+@preconcurrency import FluidAudio
 
 // MARK: - ASR Model Version
 
-enum ASRModelVersion: String, CaseIterable, Identifiable {
+public enum ASRModelVersion: String, CaseIterable, Identifiable, Sendable {
     case v2 = "v2"
     case v3 = "v3"
+    case tdtCtc110m = "110m"
     
-    var id: String { rawValue }
+    public var id: String { rawValue }
     
-    var displayName: String {
+    public var displayName: String {
         switch self {
         case .v2:
             return "Parakeet TDT v2 (English-only)"
         case .v3:
             return "Parakeet TDT v3 (Multilingual - 25+ languages)"
+        case .tdtCtc110m:
+            return "Parakeet TDT-CTC 110M (Lightweight)"
         }
     }
     
     
-    var description: String {
+    public var description: String {
         switch self {
         case .v2:
             return "English only • Highest accuracy • 2.1% WER"
         case .v3:
             return "25 European languages • 2.5% WER"
+        case .tdtCtc110m:
+            return "Fastest • Lower memory usage • 3.6% WER"
         }
     }
     
-    var fluidAudioVersion: AsrModelVersion {
+    public var fluidAudioVersion: AsrModelVersion {
         switch self {
         case .v2:
             return .v2
         case .v3:
             return .v3
+        case .tdtCtc110m:
+            return .tdtCtc110m
         }
     }
     
-    var modelSize: String {
-        "~600 MB"
+    public var modelSize: String {
+        switch self {
+        case .v2, .v3: return "~600 MB"
+        case .tdtCtc110m: return "~110 MB"
+        }
     }
 
     var repositoryFolderName: String {
         switch self {
         case .v2:
-            return "parakeet-tdt-0.6b-v2-coreml"
+            return "parakeet-tdt-0.6b-v2"
         case .v3:
-            return "parakeet-tdt-0.6b-v3-coreml"
+            return "parakeet-tdt-0.6b-v3"
+        case .tdtCtc110m:
+            return "parakeet-tdt-110m"
+        }
+    }
+
+    public var requiredModelDirectoryNames: [String] {
+        switch self {
+        case .v2:
+            return [
+                "Preprocessor.mlmodelc",
+                "Encoder.mlmodelc",
+                "Decoder.mlmodelc",
+                "JointDecision.mlmodelc",
+            ]
+        case .v3:
+            return [
+                "Preprocessor.mlmodelc",
+                "Encoder.mlmodelc",
+                "Decoder.mlmodelc",
+                "JointDecisionv3.mlmodelc",
+            ]
+        case .tdtCtc110m:
+            return [
+                "Preprocessor.mlmodelc",
+                "Decoder.mlmodelc",
+                "JointDecision.mlmodelc",
+            ]
         }
     }
 }
 
-enum ASRModelAvailability: Equatable {
+enum ASRModelAvailability: Equatable, Sendable {
     case modelLibraryNotConfigured
     case missingModelFolder(expectedPath: String)
     case invalidModelFolder(expectedPath: String)
@@ -80,7 +117,10 @@ enum ASRModelAvailability: Equatable {
 
 // MARK: - Models Configuration
 
-struct ModelsConfiguration: Equatable {
+struct ModelsConfiguration: Equatable, Sendable {
+    typealias BookmarkResolver = (Data) throws -> (url: URL, isStale: Bool)
+    typealias BookmarkCreator = (URL) throws -> Data
+
     static let defaults = ModelsConfiguration(
         asrVersion: .v2,
         modelLibraryBookmarkData: nil,
@@ -94,10 +134,30 @@ struct ModelsConfiguration: Equatable {
     private static let userDefaultsASRVersionKey = "models.asrVersion"
     private static let userDefaultsModelLibraryBookmarkKey = "models.modelLibraryBookmark"
     
-    static func load(from defaults: UserDefaults = .standard) -> ModelsConfiguration {
+    static func load(
+        from defaults: UserDefaults = .standard,
+        resolveBookmark: BookmarkResolver = Self.resolveSecurityScopedBookmark,
+        makeBookmark: BookmarkCreator = Self.makeSecurityScopedBookmark
+    ) -> ModelsConfiguration {
         let versionRaw = defaults.string(forKey: userDefaultsASRVersionKey)
         let version = versionRaw.flatMap(ASRModelVersion.init(rawValue:)) ?? Self.defaults.asrVersion
-        let modelLibraryBookmarkData = defaults.data(forKey: userDefaultsModelLibraryBookmarkKey)
+        let storedBookmarkData = defaults.data(forKey: userDefaultsModelLibraryBookmarkKey)
+        let modelLibraryBookmarkData: Data?
+        if let resolvedBookmark = resolvedModelLibraryBookmark(
+            from: storedBookmarkData,
+            resolveBookmark: resolveBookmark,
+            makeBookmark: makeBookmark
+        ) {
+            modelLibraryBookmarkData = resolvedBookmark.bookmarkData
+            if resolvedBookmark.bookmarkData != storedBookmarkData {
+                defaults.set(resolvedBookmark.bookmarkData, forKey: userDefaultsModelLibraryBookmarkKey)
+            }
+        } else {
+            modelLibraryBookmarkData = nil
+            if storedBookmarkData != nil {
+                defaults.removeObject(forKey: userDefaultsModelLibraryBookmarkKey)
+            }
+        }
         
         return ModelsConfiguration(
             asrVersion: version,
@@ -157,20 +217,48 @@ struct ModelsConfiguration: Equatable {
     }
 
     static func resolveModelLibraryURL(from bookmarkData: Data?) -> URL? {
+        resolvedModelLibraryBookmark(from: bookmarkData)?.url
+    }
+
+    struct ResolvedModelLibraryBookmark: Equatable {
+        let url: URL
+        let bookmarkData: Data
+    }
+
+    static func resolvedModelLibraryBookmark(
+        from bookmarkData: Data?,
+        resolveBookmark: BookmarkResolver = Self.resolveSecurityScopedBookmark,
+        makeBookmark: BookmarkCreator = Self.makeSecurityScopedBookmark
+    ) -> ResolvedModelLibraryBookmark? {
         guard let bookmarkData else { return nil }
 
-        var stale = false
         do {
-            let url = try URL(
-                resolvingBookmarkData: bookmarkData,
-                options: [.withSecurityScope],
-                relativeTo: nil,
-                bookmarkDataIsStale: &stale
-            )
-            return url.standardizedFileURL
+            let resolved = try resolveBookmark(bookmarkData)
+            let url = resolved.url.standardizedFileURL
+            let bookmarkData = resolved.isStale ? try makeBookmark(url) : bookmarkData
+            return ResolvedModelLibraryBookmark(url: url, bookmarkData: bookmarkData)
         } catch {
             return nil
         }
+    }
+
+    private static func resolveSecurityScopedBookmark(_ bookmarkData: Data) throws -> (url: URL, isStale: Bool) {
+        var stale = false
+        let url = try URL(
+            resolvingBookmarkData: bookmarkData,
+            options: [.withSecurityScope],
+            relativeTo: nil,
+            bookmarkDataIsStale: &stale
+        )
+        return (url, stale)
+    }
+
+    private static func makeSecurityScopedBookmark(for url: URL) throws -> Data {
+        try url.standardizedFileURL.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
     }
 
     static func withSecurityScopedAccess<T>(to url: URL, _ operation: () throws -> T) rethrows -> T {

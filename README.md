@@ -37,6 +37,12 @@ Kalam runs **entirely on your Mac** with zero external dependencies during opera
 - **Secure Memory**: Audio buffers are securely zeroed immediately after processing.
 - **Zero Logging**: Dictation content is never written to disk or recorded.
 
+## Updates
+
+Kalam does not auto-check for updates because the app has no network permission. To get the latest release, use **View Latest Release…** from Kalam's status bar menu or visit the [GitHub Releases](https://github.com/singhkays/Kalam/releases/latest) page in your browser.
+
+To receive release notifications without changing Kalam's privacy posture, open the repository on GitHub and choose **Watch → Custom → Releases**.
+
 ## Model Setup
 
 While most users will use the guided onboarding, you can manually manage models:

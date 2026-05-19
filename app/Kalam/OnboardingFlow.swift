@@ -166,6 +166,10 @@ struct OnboardingStatusSnapshot: Equatable {
         completedRequirements == 4 && isAudioReady && isASRReady
     }
 
+    var isStartDictatingDisabled: Bool {
+        !canStartDictating
+    }
+
     var runtimePreparationMessage: String? {
         guard completedRequirements == 4 else { return nil }
         if !isAudioReady {
@@ -272,6 +276,34 @@ struct OnboardingStatusSnapshot: Equatable {
         )
     }
 
+    func updatingModelStatus(version: ASRModelVersion, availability: ASRModelAvailability) -> OnboardingStatusSnapshot {
+        let newModelStatus: OnboardingRequirementStatus
+        switch availability {
+        case .installed:
+            newModelStatus = .ready(message: "Downloaded and ready")
+        case .modelLibraryNotConfigured:
+            newModelStatus = .actionRequired(message: "Set up your local speech model for on-device dictation.")
+        case .missingModelFolder, .invalidModelFolder:
+            newModelStatus = .notDetermined(message: "Finish setting up your local speech model.")
+        }
+        
+        return OnboardingStatusSnapshot(
+            mode: mode,
+            microphoneStatus: microphoneStatus,
+            accessibilityStatus: accessibilityStatus,
+            hotkeyStatus: hotkeyStatus,
+            storageFolderStatus: storageFolderStatus,
+            modelStatus: newModelStatus,
+            selectedMicrophoneName: selectedMicrophoneName,
+            selectedHotkeyDisplay: selectedHotkeyDisplay,
+            selectedModelVersion: version,
+            installedModelVersions: installedModelVersions,
+            modelAvailability: availability,
+            modelLibraryURL: modelLibraryURL,
+            isAudioReady: isAudioReady,
+            isASRReady: false // Reset ASR readiness as we switched models
+        )
+    }
 }
 
 @MainActor
@@ -281,6 +313,26 @@ final class OnboardingFlowController: ObservableObject {
         didSet {
             if oldValue != selectedDownloadVersion {
                 downloadCommandCopied = false
+                
+                // Update global configuration so availability checks and download 
+                // commands reflect the newly selected version.
+                var config = ModelsConfiguration.load()
+                if config.asrVersion != selectedDownloadVersion {
+                    config.asrVersion = selectedDownloadVersion
+                    config.save()
+                    
+                    // Locally update the snapshot for immediate UI feedback.
+                    // This ensures the checkmarks and status messages update instantly.
+                    let availability = config.availability(for: selectedDownloadVersion)
+                    self.snapshot = snapshot.updatingModelStatus(
+                        version: selectedDownloadVersion,
+                        availability: availability
+                    )
+
+                    // Notify the app that the configuration changed. 
+                    // This triggers prepareRuntimeIfPossible and refreshOnboardingState in KalamApp.
+                    NotificationCenter.default.post(name: .modelsConfigurationDidChange, object: nil)
+                }
             }
         }
     }
@@ -690,7 +742,7 @@ struct OnboardingView: View {
                 controller.startDictating()
             }
             .buttonStyle(OnboardingPremiumButtonStyle())
-            .disabled(controller.snapshot.completedRequirements < 4)
+            .disabled(controller.snapshot.isStartDictatingDisabled)
             .keyboardShortcut(.defaultAction)
 
             ZStack {
@@ -1035,10 +1087,10 @@ struct OnboardingView: View {
                     onCopyDownloadCommand: controller.copyDownloadCommand,
                     onCopyInstallCommand: controller.copyInstallCommand
                 )
-            case .needsModel:
+            case .needsModel(_, _, let statusMessage):
                 ModelAcquisitionPanel(
                     folderURL: controller.snapshot.modelLibraryURL,
-                    statusMessage: "No compatible model found in this folder.",
+                    statusMessage: statusMessage,
                     wizardState: controller.modelSetupWizardState,
                     selectedVersion: $controller.selectedDownloadVersion,
                     downloadCommand: controller.downloadCommand,
@@ -1053,10 +1105,10 @@ struct OnboardingView: View {
                     onCopyDownloadCommand: controller.copyDownloadCommand,
                     onCopyInstallCommand: controller.copyInstallCommand
                 )
-            case .repoFolderSelected(_, let selectedRepo, _, _):
+            case .repoFolderSelected(_, let selectedRepo, _, let statusMessage):
                 ModelAcquisitionPanel(
                     folderURL: controller.snapshot.modelLibraryURL,
-                    statusMessage: "No compatible model found in this folder.",
+                    statusMessage: statusMessage,
                     wizardState: controller.modelSetupWizardState,
                     selectedVersion: $controller.selectedDownloadVersion,
                     downloadCommand: controller.downloadCommand,
@@ -1073,8 +1125,24 @@ struct OnboardingView: View {
                     onCopyDownloadCommand: controller.copyDownloadCommand,
                     onCopyInstallCommand: controller.copyInstallCommand
                 )
-            case .ready:
-                EmptyView()
+            case .ready(_, _, let statusMessage):
+                ModelAcquisitionPanel(
+                    folderURL: controller.snapshot.modelLibraryURL,
+                    statusMessage: statusMessage,
+                    wizardState: controller.modelSetupWizardState,
+                    selectedVersion: $controller.selectedDownloadVersion,
+                    downloadCommand: controller.downloadCommand,
+                    downloadCommandCopied: controller.downloadCommandCopied,
+                    installCommand: ModelSetupSupport.huggingFaceInstallCommand,
+                    installCommandCopied: controller.installCommandCopied,
+                    onChooseFolder: controller.chooseModelFolder,
+                    onChangeFolder: controller.chooseModelFolder,
+                    onOpenInFinder: controller.openModelFolderInFinder,
+                    onClearFolder: controller.clearModelFolder,
+                    onConfirmCLIInstalled: controller.confirmHFCLIInstalled,
+                    onCopyDownloadCommand: controller.copyDownloadCommand,
+                    onCopyInstallCommand: controller.copyInstallCommand
+                )
             }
         }
         .padding(12)

@@ -245,4 +245,38 @@ From Star Trek in 1966 to Siri in 2011 we have come far.
             "draft hiring plan"
         ]
     }
+    func testConfigurationPersistsGrammarTimeoutRoundTrip() {
+        let suiteName = "TextCleanupConfigurationTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            XCTFail("Unable to create isolated defaults suite")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        var configuration = TextCleanupConfiguration.defaults
+        configuration.grammarMode = .full
+        configuration.grammarTimeoutMs = 175
+        configuration.save(to: defaults)
+
+        let loaded = TextCleanupConfiguration.load(from: defaults)
+        XCTAssertEqual(loaded.grammarMode, .full)
+        XCTAssertEqual(loaded.grammarTimeoutMs, 175)
+    }
+
+    func testConfigurationSavesBoundedGrammarTimeout() {
+        let suiteName = "TextCleanupConfigurationTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            XCTFail("Unable to create isolated defaults suite")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        var configuration = TextCleanupConfiguration.defaults
+        configuration.grammarTimeoutMs = 1_000
+        configuration.save(to: defaults)
+
+        let loaded = TextCleanupConfiguration.load(from: defaults)
+        XCTAssertEqual(loaded.grammarTimeoutMs, 400)
+    }
+
 }

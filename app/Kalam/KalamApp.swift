@@ -1,13 +1,19 @@
 import SwiftUI
 import AppKit
-import AVFoundation
-import FluidAudio
+@preconcurrency import AVFoundation
+@preconcurrency import FluidAudio
 import Foundation
 import HotKey
 import ApplicationServices
 import CoreAudio
 import AudioToolbox
 import ServiceManagement
+import OSLog
+
+private func privacySafeErrorSummary(_ error: Error) -> String {
+    let nsError = error as NSError
+    return "\(nsError.domain)#\(nsError.code)"
+}
 
 // MARK: - Secure Memory Zeroing
 extension Array where Element == Float {
@@ -24,6 +30,26 @@ extension Array where Element == Float {
 // Some AX attributes aren't exposed in Swift headers, add them manually.
 // MARK: - App
 private let pasteKeyCode: CGKeyCode = 9 // 'V' key (ANSI V) for Command+V
+
+enum KalamExternalLinks {
+    static let latestReleaseURL = URL(string: "https://github.com/singhkays/Kalam/releases/latest")!
+
+    @MainActor
+    @discardableResult
+    static func openLatestRelease() -> Bool {
+        NSWorkspace.shared.open(latestReleaseURL)
+    }
+}
+
+enum KalamAppVersion {
+    static var displayString: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        if let version, !version.isEmpty {
+            return version
+        }
+        return "Unknown"
+    }
+}
 
 // MARK: - App
 @main
@@ -74,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let overlay = DictationOverlayController()
     private let hotkeys = HotkeyListener()
     private let paster = PasteService()
+    private let logger = Logger(subsystem: "singhkays.Kalam", category: "DictationRuntime")
 
     private enum RecordingTriggerMode {
         case hold
@@ -82,6 +109,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     
     private var isRecording = false
     private var isASRReady = false
+    private var isASRSetupIssue = false
+    private var asrRecordingBlockMessage = "Model loading..."
     private var isAudioReady = false
     private var pttDownTime: CFAbsoluteTime = 0
     private var pttUpTime: CFAbsoluteTime = 0
@@ -155,6 +184,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+        let latestReleaseItem = NSMenuItem(title: "View Latest Release…", action: #selector(openLatestRelease), keyEquivalent: "")
+        latestReleaseItem.target = self
+        menu.addItem(latestReleaseItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Kalam", action: #selector(quit), keyEquivalent: "q"))
         statusItem.menu = menu
@@ -297,6 +329,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openSettingsWindow(selectModelsTab: false)
     }
 
+    @objc private func openLatestRelease() {
+        KalamExternalLinks.openLatestRelease()
+    }
+
     @objc private func openSetup() {
         showOnboardingWindow(mode: currentOnboardingSnapshot().mode)
     }
@@ -347,7 +383,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func currentOnboardingSnapshot() -> OnboardingStatusSnapshot {
-        let config = ModelSetupSupport.loadPersistedNormalizedSelectedModel()
+        let config = ModelsConfiguration.load()
         let onboardingConfig = OnboardingConfiguration.load()
         let hotkeyConfig = PTTHotkeyConfiguration.load()
         let installedModels = ModelSetupSupport.installedModelVersions(in: config)
@@ -553,7 +589,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if currentActivation != targetActivation {
             let activationApplied = NSApp.setActivationPolicy(targetActivation)
             if !activationApplied {
-                print("Failed to apply activation policy for showInDock=\(settings.showInDock); current=\(currentActivation.rawValue), target=\(targetActivation.rawValue)")
+                logger.warning("Failed to apply activation policy showInDock=\(settings.showInDock, privacy: .public) current=\(currentActivation.rawValue, privacy: .public) target=\(targetActivation.rawValue, privacy: .public)")
             }
         }
 
@@ -567,7 +603,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     try SMAppService.mainApp.unregister()
                 }
             } catch {
-                print("Failed to update launch-at-login: \(error.localizedDescription)")
+                logger.warning("Failed to update launch-at-login errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             }
         }
     }
@@ -595,12 +631,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let enabled = Self.isITNEnabled()
         let span = Self.itnSpanTokens()
         if NemoTextProcessing.isAvailable {
-            let smokeInput = "two hundred and five"
-            let smokeOutput = NemoTextProcessing.normalize(smokeInput)
             let version = NemoTextProcessing.version ?? "unknown"
-            print("ITN ready (enabled=\(enabled), span=\(span), version=\(version), smoke='\(smokeInput)' -> '\(smokeOutput)')")
+            logger.info("ITN ready enabled=\(enabled, privacy: .public) span=\(span, privacy: .public) version=\(version, privacy: .public)")
         } else {
-            print("ITN unavailable (enabled=\(enabled), span=\(span)). NemoTextProcessing framework/module not linked or not visible to target.")
+            logger.warning("ITN unavailable enabled=\(enabled, privacy: .public) span=\(span, privacy: .public)")
         }
     }
 
@@ -657,30 +691,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 isAudioReady = true
             } catch {
                 isAudioReady = false
-                print("Audio prepare failed: \(error.localizedDescription)")
+                logger.warning("Audio prepare failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             }
         } else {
             isAudioReady = false
         }
 
-        let config = ModelSetupSupport.loadPersistedNormalizedSelectedModel()
+        let config = ModelsConfiguration.load()
         let availability = config.availability(for: config.asrVersion)
         switch availability {
         case .installed:
             do {
-                if asr.isReady {
+                let status = await asr.status
+                if status.isReady {
                     try await asr.reinitializeIfNeeded()
                 } else {
                     try await asr.initialize()
                 }
-                isASRReady = asr.isReady
+                updateASRStatus(await asr.status)
             } catch {
-                isASRReady = false
-                print("ASR init failed: \(error.localizedDescription)")
+                updateASRStatus(await asr.status, forceReady: false)
+                logger.warning("ASR init failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             }
         case .modelLibraryNotConfigured, .missingModelFolder, .invalidModelFolder:
             isASRReady = false
+            isASRSetupIssue = true
+            asrRecordingBlockMessage = "Set model folder in Settings"
         }
+    }
+
+    private func updateASRStatus(_ status: ASRServiceStatus, forceReady: Bool? = nil) {
+        isASRReady = forceReady ?? status.isReady
+        isASRSetupIssue = status.isSetupIssue
+        asrRecordingBlockMessage = status.recordingBlockMessage
     }
 
     private func handleHotkeyEvent(isDown: Bool) {
@@ -800,7 +843,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try audio.prepare(preferredInputDeviceID: candidate.deviceID)
                 return candidate.uid
             } catch {
-                print("Audio input bind failed for \(candidate.name): \(error.localizedDescription)")
+                logger.warning("Audio input bind failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
                 continue
             }
         }
@@ -818,17 +861,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
         guard isAudioReady else {
-            print("⚠️ Audio input not ready yet, ignoring PTT press.")
+            logger.warning("PTT ignored because audio input is not ready")
             overlay.showError("Microphone not ready", action: .openMicrophoneSettings, autoHideAfter: 4.0)
             return false
         }
         guard isASRReady else {
-            print("⚠️ ASR not ready yet, ignoring PTT press.")
-            if asr.isSetupIssue {
+            logger.warning("PTT ignored because ASR is not ready; setupIssue=\(self.isASRSetupIssue, privacy: .public)")
+            if isASRSetupIssue {
                 showOnboardingWindow(mode: .repair)
-                overlay.showError(asr.recordingBlockMessage, action: nil, autoHideAfter: 4.0)
+                overlay.showError(asrRecordingBlockMessage, action: nil, autoHideAfter: 4.0)
             } else {
-                overlay.showInfoAndAutoHide(asr.recordingBlockMessage)
+                overlay.showInfoAndAutoHide(asrRecordingBlockMessage)
             }
             return false
         }
@@ -838,7 +881,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             selectedInputUID = pickedUID
             UserDefaults.standard.set(pickedUID, forKey: GeneralSettingsKeys.selectedInputUID)
         } catch {
-            print("⚠️ Audio input setup failed, ignoring PTT press: \(error.localizedDescription)")
+            logger.warning("Audio input setup failed before recording errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             overlay.showError("Microphone setup failed", action: .openMicrophoneSettings, autoHideAfter: 4.0)
             return false
         }
@@ -853,8 +896,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if UserDefaults.standard.bool(forKey: "duckEnabled") {
             duckingStartWorkItem?.cancel()
             let workItem = DispatchWorkItem { [weak self] in
-                guard let self, self.isRecording else { return }
-                SystemAudioDucker.shared.startDucking()
+                Task { @MainActor [weak self] in
+                    guard let self, self.isRecording else { return }
+                    SystemAudioDucker.shared.startDucking()
+                }
             }
             duckingStartWorkItem = workItem
             let delay = max(0.12, min(0.6, chimeDuration))
@@ -887,8 +932,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         transcriptionTask?.cancel()
         
-        // Keep heavy work off the MainActor. Add post-roll to preserve trailing phonemes.
-        transcriptionTask = Task.detached(priority: .userInitiated) { [weak self, pttDown, pttUp] in
+        // Run as an actor-inherited task instead of Task.detached so Swift 6 does not
+        // send MainActor app state into an unisolated closure. Add post-roll to preserve trailing phonemes.
+        transcriptionTask = Task(priority: .userInitiated) { [weak self, pttDown, pttUp] in
             guard let self = self else { return }
             guard !Task.isCancelled else { return }
             let defaults = UserDefaults.standard
@@ -899,10 +945,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             func stageMark(_ label: String) {
                 guard stageTimingEnabled else { return }
                 let now = CFAbsoluteTimeGetCurrent()
-                print(String(format: "Latency stage [%@]: +%.0f ms (cum=%.0f ms)",
-                             label,
-                             (now - mark) * 1000.0,
-                             (now - pipelineStart) * 1000.0))
+                let deltaMs = Int((now - mark) * 1000.0)
+                let cumulativeMs = Int((now - pipelineStart) * 1000.0)
+                self.logger.info("Latency stage label=\(label, privacy: .public) deltaMs=\(deltaMs, privacy: .public) cumulativeMs=\(cumulativeMs, privacy: .public)")
                 mark = now
             }
             
@@ -916,21 +961,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let configuredPostRollMax = max(configuredPostRollMin, min(500, defaults.integer(forKey: LatencyTuningOptions.postRollMaxMsKey)))
             let postRollMs = min(configuredPostRollMax, max(configuredPostRollMin, segmentEstimateMs))
             
+            let audio = self.audio
             let keyUpToStopStart = CFAbsoluteTimeGetCurrent()
-            let samples = await self.audio.stopAndFetchSamples(postRollMs: postRollMs)
+            let samples = await audio.stopAndFetchSamples(postRollMs: postRollMs)
             guard !Task.isCancelled else { return }
             let afterStop = CFAbsoluteTimeGetCurrent()
             let keyDownToUp = pttUp - pttDown
             let upToSamples = afterStop - keyUpToStopStart
-            print(String(format: "Timing: PTT down→up=%.0f ms (est. segment=%.0f ms), key-up→samples=%.0f ms (adaptive post-roll=%d ms)",
-                         keyDownToUp * 1000, Double(segmentEstimateMs), upToSamples * 1000, postRollMs))
+            self.logger.info("Recording timing holdMs=\(Int(keyDownToUp * 1000), privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public) keyUpToSamplesMs=\(Int(upToSamples * 1000), privacy: .public) postRollMs=\(postRollMs, privacy: .public)")
             stageMark("audio-stop+fetch")
             
             // Trim with hysteresis/hangover/padding + conservative fallback
             let trimmed = SilenceTrimmer.trim(samples: samples, sampleRate: 16_000)
             stageMark("trim")
             guard !trimmed.isEmpty else {
-                print("No speech detected (empty after trim).")
+                self.logger.info("No speech detected after trimming")
                 await MainActor.run {
                     self.overlay.showInfoAndAutoHide("No speech detected")
                 }
@@ -938,28 +983,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             
             do {
-                // Parallelize lightweight peak normalization (~5ms for 10s) in a concurrent Task.
-                // Await before ASR due to input dependency (normalized samples required for transcription).
-                // Structure uses async let for "parallel" invocation; enables future overlap (e.g., with post-ASR steps).
-                // Rationale: Overlaps micro-delays in serial chain (trim → normalize → ASR); negligible CPU on Apple Silicon.
-                // Expected: 10-20ms savings per plan. Real-app pattern: Final Cut Pro/Whisper.cpp batch audio pipelines.
-                // Low confidence: True parallelism limited by dependency; test on long segments for gains.
+                // Normalize before ASR without spawning an extra child task; this keeps the
+                // transcription flow inside one actor-inherited task for Swift 6 safety.
                 let asrStart = CFAbsoluteTimeGetCurrent()
-                let normalizedTask = Task {
-                    SilenceTrimmer.normalizePeak(trimmed, targetDbFS: -3.0)
+                var normalized = SilenceTrimmer.normalizePeak(trimmed, targetDbFS: -3.0)
+                
+                // Ensure audio is at least 300ms (4800 samples at 16kHz) to avoid FluidAudio short-utterance rejection
+                if normalized.count < 4800 {
+                    normalized.append(contentsOf: [Float](repeating: 0.0, count: 4800 - normalized.count))
                 }
-                async let asrText: String = {
-                    let normalized = await normalizedTask.value
-                    return try await self.asr.transcribe(samples: normalized)
-                }()
-                let text = try await asrText
+                
+                let text = try await self.asr.transcribe(samples: normalized)
                 guard !Task.isCancelled else { return }
                 let asrEnd = CFAbsoluteTimeGetCurrent()
                 stageMark("asr")
                 let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 
                 guard !trimmedText.isEmpty else {
-                    print("⚠️ Empty transcription; skipping paste.")
+                    self.logger.info("Empty transcription result; skipping paste")
                     await MainActor.run {
                         self.overlay.showInfoAndAutoHide("No speech detected")
                     }
@@ -975,7 +1016,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Apply custom dictionary replacements (phrases first, then words)
                 let (postProcessed, replaceCount) = CustomDictionaryManager.shared.apply(to: itnResult.text)
                 stageMark("dictionary")
-                print("Transcription completed (len=\(postProcessed.count), ASR=\(String(format: "%.0f", (asrEnd - asrStart)*1000)) ms, cleanupEdits=\(cleanupResult.stats.totalEdits), cleanupMs=\(String(format: "%.0f", cleanupResult.stats.durationMs)), fillerMs=\(String(format: "%.0f", cleanupResult.stats.fillerMs)), backtrackMs=\(String(format: "%.0f", cleanupResult.stats.backtrackMs)), listMs=\(String(format: "%.0f", cleanupResult.stats.listMs)), punctuationMs=\(String(format: "%.0f", cleanupResult.stats.punctuationMs)), grammarMs=\(String(format: "%.0f", cleanupResult.stats.grammarMs)), grammarEdits=\(cleanupResult.stats.grammarEdits), grammarAttempted=\(cleanupResult.stats.grammarAttempted), grammarTimedOut=\(cleanupResult.stats.grammarTimedOut), grammarSkippedForLength=\(cleanupResult.stats.grammarSkippedForLength), itnEnabled=\(itnResult.enabled), itnAvailable=\(itnResult.available), itnSpan=\(itnResult.spanTokens), itnChanged=\(itnResult.changed), itnMs=\(String(format: "%.0f", itnResult.durationMs)), replacements=\(replaceCount), est.segment=\(segmentEstimateMs) ms)")
+                self.logger.info("Transcription completed outputLength=\(postProcessed.count, privacy: .public) asrMs=\(Int((asrEnd - asrStart) * 1000), privacy: .public) cleanupEdits=\(cleanupResult.stats.totalEdits, privacy: .public) cleanupMs=\(Int(cleanupResult.stats.durationMs), privacy: .public) grammarEdits=\(cleanupResult.stats.grammarEdits, privacy: .public) grammarAttempted=\(cleanupResult.stats.grammarAttempted, privacy: .public) grammarTimedOut=\(cleanupResult.stats.grammarTimedOut, privacy: .public) grammarSkippedForLength=\(cleanupResult.stats.grammarSkippedForLength, privacy: .public) itnEnabled=\(itnResult.enabled, privacy: .public) itnAvailable=\(itnResult.available, privacy: .public) itnChanged=\(itnResult.changed, privacy: .public) itnMs=\(Int(itnResult.durationMs), privacy: .public) replacements=\(replaceCount, privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public)")
 
                 // Adaptive paste delay: 50ms for short segments (<5s) or 80ms otherwise, to reduce end-to-end latency.
                 // Fallback on error: Retry after additional delay to approx. total 120ms.
@@ -998,12 +1039,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     stageMark("paste-dispatch")
                     if stageTimingEnabled {
                         let totalMs = (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000.0
-                        print(String(format: "Latency summary: keyUp→paste-dispatch=%.0f ms (segment=%.0f ms, postRoll=%d ms, pasteDelay=%.0f ms)",
-                                     totalMs, Double(segmentEstimateMs), postRollMs, pasteDelayMs))
+                        self.logger.info("Latency summary pasteDispatchMs=\(Int(totalMs), privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public) postRollMs=\(postRollMs, privacy: .public) pasteDelayMs=\(Int(pasteDelayMs), privacy: .public)")
                     }
-                    print("✅ Pasted transcription into frontmost app (initial delay=\(String(format: "%.0f", pasteDelay*1000)) ms).")
+                    self.logger.info("Paste dispatched via initial path delayMs=\(Int(pasteDelay * 1000), privacy: .public)")
                 } catch {
-                    print("❌ Initial paste failed after \(String(format: "%.0f", pasteDelay*1000)) ms: \(error.localizedDescription). Falling back to longer delay...")
+                    self.logger.warning("Initial paste failed delayMs=\(Int(pasteDelay * 1000), privacy: .public) errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
                     try await Task.sleep(nanoseconds: UInt64(max(0, fallbackAdditionalDelay) * 1_000_000_000))
                     guard !Task.isCancelled else { return }
                     stageMark("paste-fallback-wait")
@@ -1016,12 +1056,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         stageMark("paste-fallback-dispatch")
                         if stageTimingEnabled {
                             let totalMs = (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000.0
-                            print(String(format: "Latency summary: keyUp→paste-fallback-dispatch=%.0f ms (segment=%.0f ms, postRoll=%d ms, fallbackTotal=%.0f ms)",
-                                         totalMs, Double(segmentEstimateMs), postRollMs, fallbackTotalMs))
+                            self.logger.info("Latency summary pasteFallbackDispatchMs=\(Int(totalMs), privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public) postRollMs=\(postRollMs, privacy: .public) fallbackTotalMs=\(Int(fallbackTotalMs), privacy: .public)")
                         }
-                        print("✅ Fallback paste succeeded (total delay ~\(String(format: "%.0f", (pasteDelay + fallbackAdditionalDelay)*1000)) ms).")
+                        self.logger.info("Fallback paste dispatched totalDelayMs=\(Int((pasteDelay + fallbackAdditionalDelay) * 1000), privacy: .public)")
                     } catch {
-                        print("❌ Fallback paste also failed: \(error.localizedDescription)")
+                        self.logger.warning("Fallback paste failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
                         await MainActor.run {
                             self.overlay.showError("Enable Accessibility to paste", action: .openAccessibilitySettings, autoHideAfter: 4.0)
                             AccessibilityHelper.explainAccessibilityIfNeeded()
@@ -1031,7 +1070,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch is CancellationError {
                 return
             } catch {
-                print("Transcription failed: \(error.localizedDescription)")
+                self.logger.warning("Transcription failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
                 await MainActor.run {
                     self.overlay.showError("Transcription failed", action: nil, autoHideAfter: 4.0)
                 }
@@ -1053,9 +1092,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         playRecordingChime()
 
         transcriptionTask?.cancel()
-        transcriptionTask = Task.detached(priority: .userInitiated) { [weak self] in
+        let audio = self.audio
+        transcriptionTask = Task(priority: .userInitiated) { [weak self, audio] in
             guard let self else { return }
-            await self.audio.cancelCapture()
+            await audio.cancelCapture()
             await MainActor.run {
                 self.overlay.showInfoAndAutoHide("Recording canceled")
             }
@@ -1113,15 +1153,25 @@ private extension Float {
 
 import CoreAudio
 
+@MainActor
 final class SystemAudioDucker {
     static let shared = SystemAudioDucker()
-    private init() {}
+    private let logger = Logger(subsystem: "singhkays.Kalam", category: "SystemAudioDucker")
+    private let capabilitiesProvider: () -> RuntimeCapabilities
+
+    private init(capabilitiesProvider: @escaping () -> RuntimeCapabilities = RuntimeCapabilities.current) {
+        self.capabilitiesProvider = capabilitiesProvider
+    }
     
     private var duckingActive = false
     private var preDuckingVolume: Float? = nil
     
     func initialize() {
-        // We will mute/unmute on demand.
+        let capabilities = capabilitiesProvider()
+        logger.info("Runtime capabilities: sandbox=\(capabilities.appSandbox), audioInput=\(capabilities.audioInput), accessibility=\(capabilities.accessibility), outgoingNetwork=\(capabilities.outgoingNetworkClient)")
+        if let caveat = capabilities.sandboxedAudioCaveat {
+            logger.warning("Manual CoreAudio ducking may be unavailable: \(caveat, privacy: .public)")
+        }
     }
     
     func startDucking() {
@@ -1129,7 +1179,7 @@ final class SystemAudioDucker {
         guard GeneralSettingsConfiguration.load().muteWhileRecording else { return }
         
         duckingActive = true
-        print("🔻 Muting system volume")
+        logger.info("Muting system volume for recording")
         
         let deviceID = getDefaultOutputDevice()
         guard deviceID != kAudioObjectUnknown else { return }
@@ -1143,7 +1193,7 @@ final class SystemAudioDucker {
     func stopDucking(cancelOnly: Bool = false) {
         guard duckingActive else { return }
         duckingActive = false
-        print("🔊 Restoring system volume")
+        logger.info("Restoring system volume after recording")
         
         guard let savedVolume = preDuckingVolume else { return }
         let deviceID = getDefaultOutputDevice()
@@ -1173,7 +1223,7 @@ final class SystemAudioDucker {
         )
         
         if status != noErr {
-            print("Error getting default output device: \\(status)")
+            logger.warning("Error getting default output device: \(status)")
         }
         return deviceID
     }
@@ -1187,12 +1237,12 @@ final class SystemAudioDucker {
             mElement: kAudioObjectPropertyElementMain
         )
         
-        guard AudioHardwareServiceHasProperty(deviceID, &propertyAddress) else {
-            print("Device does not support VirtualMainVolume")
+        guard AudioObjectHasProperty(deviceID, &propertyAddress) else {
+            logger.info("Device does not support VirtualMainVolume")
             return nil
         }
         
-        let status = AudioHardwareServiceGetPropertyData(
+        let status = AudioObjectGetPropertyData(
             deviceID,
             &propertyAddress,
             0, nil,
@@ -1201,7 +1251,7 @@ final class SystemAudioDucker {
         )
         
         if status != noErr {
-            print("Error getting volume: \\(status)")
+            logger.warning("Error getting volume: \(status)")
             return nil
         }
         return volume
@@ -1216,9 +1266,9 @@ final class SystemAudioDucker {
             mElement: kAudioObjectPropertyElementMain
         )
         
-        guard AudioHardwareServiceHasProperty(deviceID, &propertyAddress) else { return }
+        guard AudioObjectHasProperty(deviceID, &propertyAddress) else { return }
         
-        let status = AudioHardwareServiceSetPropertyData(
+        let status = AudioObjectSetPropertyData(
             deviceID,
             &propertyAddress,
             0, nil,
@@ -1227,7 +1277,7 @@ final class SystemAudioDucker {
         )
         
         if status != noErr {
-            print("Error setting volume: \\(status)")
+            logger.warning("Error setting volume: \(status)")
         }
     }
 }
@@ -1430,6 +1480,7 @@ final class HotkeyListener {
 }
 
 // MARK: - Dictation Overlay
+@MainActor
 final class DictationOverlayController {
     private enum Metrics {
         static let overlayWidth: CGFloat = 290
@@ -1510,7 +1561,9 @@ final class DictationOverlayController {
             context.duration = fadeDuration
             w.animator().alphaValue = 0.0
         } completionHandler: {
-            w.orderOut(nil)
+            MainActor.assumeIsolated {
+                w.orderOut(nil)
+            }
         }
     }
 
@@ -2246,7 +2299,8 @@ enum AudioRecorderError: LocalizedError {
     }
 }
 
-final class AudioRecorder {
+final class AudioRecorder: @unchecked Sendable {
+    private let logger = Logger(subsystem: "singhkays.Kalam", category: "AudioRecorder")
     private let engine = AVAudioEngine()
     private var converter: AVAudioConverter?
     private var converterInputSampleRate: Double = 0
@@ -2341,11 +2395,11 @@ final class AudioRecorder {
             throw AudioRecorderError.invalidInputFormat
         }
         
-        print("Input format from AVAudioEngine: \(inputFormat.sampleRate) Hz, \(inputFormat.channelCount) channels")
+        logger.info("Input format sampleRate=\(inputFormat.sampleRate, privacy: .public) channels=\(inputFormat.channelCount, privacy: .public)")
         
         // Prepare engine but don't start it yet - we'll start it when recording begins
         engine.prepare()
-        print("Audio engine prepared (not started yet). Tap bufferSize=\(tapBufferSizeFrames)")
+        logger.info("Audio engine prepared tapBufferSize=\(self.tapBufferSizeFrames, privacy: .public)")
         isPrepared = true
         preparedInputDeviceID = preferredInputDeviceID
     }
@@ -2355,13 +2409,13 @@ final class AudioRecorder {
         if !engine.isRunning {
             do {
                 try engine.start()
-                print("Audio engine started for recording")
+                logger.info("Audio engine started for recording")
                 let liveOutputFormat = engine.inputNode.outputFormat(forBus: 0)
                 let liveInputBusFormat = engine.inputNode.inputFormat(forBus: 0)
-                print("Live input node output format after engine start: \(liveOutputFormat.sampleRate) Hz, \(liveOutputFormat.channelCount) channels")
-                print("Live input node input-bus format after engine start: \(liveInputBusFormat.sampleRate) Hz, \(liveInputBusFormat.channelCount) channels")
+                logger.info("Live input output format sampleRate=\(liveOutputFormat.sampleRate, privacy: .public) channels=\(liveOutputFormat.channelCount, privacy: .public)")
+                logger.info("Live input bus format sampleRate=\(liveInputBusFormat.sampleRate, privacy: .public) channels=\(liveInputBusFormat.channelCount, privacy: .public)")
             } catch {
-                print("Failed to start audio engine: \(error.localizedDescription)")
+                logger.warning("Failed to start audio engine errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
                 return
             }
         }
@@ -2369,7 +2423,7 @@ final class AudioRecorder {
         if !tapInstalled {
             // For input node taps, AVAudioEngine expects the input bus hardware format.
             let tapFormat = engine.inputNode.inputFormat(forBus: 0)
-            print("Installing tap with input-bus format: \(tapFormat.sampleRate) Hz, \(tapFormat.channelCount) channels")
+            logger.info("Installing tap sampleRate=\(tapFormat.sampleRate, privacy: .public) channels=\(tapFormat.channelCount, privacy: .public)")
             engine.inputNode.installTap(onBus: 0, bufferSize: tapBufferSizeFrames, format: tapFormat) { [weak self] (buffer, _) in
                 self?.process(buffer: buffer)
             }
@@ -2383,7 +2437,7 @@ final class AudioRecorder {
             recentWaveformSamples.removeAll(keepingCapacity: true)
             // Do not reset converter here; keep across session until stop/drain to preserve internal filter state.
         }
-        print("Started collecting audio samples")
+        logger.info("Started collecting audio samples")
     }
     
     // Post-roll capture is applied before stopping and fetching samples.
@@ -2407,33 +2461,32 @@ final class AudioRecorder {
         // Stop the engine on the main thread to turn off the microphone indicator
         if engine.isRunning {
             let stopStart = CFAbsoluteTimeGetCurrent()
+            let engine = self.engine
             // Ensure engine.stop is done on main to avoid CoreAudio surprises
             await MainActor.run {
-                self.engine.stop()
+                engine.stop()
             }
             let stopElapsed = (CFAbsoluteTimeGetCurrent() - stopStart) * 1000
-            print(String(format: "Audio engine stopped (%.1f ms) - system mic indicator should turn off", stopElapsed))
+            logger.info("Audio engine stopped stopMs=\(Int(stopElapsed), privacy: .public)")
         }
         
         // Drain any residual frames from the converter (resampler tail) and reset it
         let drainedTail = drainConverterRemainder()
         if !drainedTail.isEmpty {
-            print("Drained converter tail: \(drainedTail.count) samples (~\(String(format: "%.1f", Double(drainedTail.count)/16_000.0 * 1000)) ms)")
+            logger.info("Drained converter tail samples=\(drainedTail.count, privacy: .public) durationMs=\(Int(Double(drainedTail.count) / 16_000.0 * 1000), privacy: .public)")
         }
         
         out.append(contentsOf: drainedTail)
         
-        let seconds = out.isEmpty ? 0.0 : (Double(out.count) / 16_000.0)
-        let formattedSeconds = String(format: "%.2f", seconds)
+        let durationMs = out.isEmpty ? 0 : Int(Double(out.count) / 16_000.0 * 1000)
         let callbacks = bufferQueue.sync { callbackCount }
-        print("Stopped collecting. Buffer size: \(out.count) samples (\(formattedSeconds) s), callbacks: \(callbacks)")
+        logger.info("Stopped collecting samples=\(out.count, privacy: .public) durationMs=\(durationMs, privacy: .public) callbacks=\(callbacks, privacy: .public)")
         
         // Debug: Check non-zero and max amplitude
         let nonZeroCount = out.lazy.filter { abs($0) > 0.0001 }.count
-        print("Non-zero samples: \(nonZeroCount) out of \(out.count)")
+        logger.info("Audio sample summary nonZeroSamples=\(nonZeroCount, privacy: .public) totalSamples=\(out.count, privacy: .public)")
         if let maxAmplitude = out.map({ abs($0) }).max() {
-            let formattedAmplitude = String(format: "%.5f", maxAmplitude)
-            print("Max amplitude: \(formattedAmplitude)")
+            logger.info("Audio sample maxAmplitude=\(maxAmplitude, privacy: .public)")
         }
         return out
     }
@@ -2455,7 +2508,7 @@ final class AudioRecorder {
 
             if needsConverterRebuild {
                 guard let rebuilt = AVAudioConverter(from: inputFormat, to: self.targetFormat) else {
-                    print("Failed to create AVAudioConverter for input format \(inputFormat.sampleRate) Hz, \(inputFormat.channelCount) channels")
+                    self.logger.warning("Failed to create AVAudioConverter inputSampleRate=\(inputFormat.sampleRate, privacy: .public) channels=\(inputFormat.channelCount, privacy: .public)")
                     return
                 }
                 self.converter = rebuilt
@@ -2468,7 +2521,7 @@ final class AudioRecorder {
             let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 64.0)
             
             guard let outBuffer = AVAudioPCMBuffer(pcmFormat: self.targetFormat, frameCapacity: capacity) else {
-                print("Failed to create output buffer")
+                self.logger.warning("Failed to create output buffer")
                 return
             }
             
@@ -2482,9 +2535,9 @@ final class AudioRecorder {
             
             if status == .error {
                 if let e = convError {
-                    print("Conversion error: \(e.localizedDescription); using PCM fallback")
+                    self.logger.warning("Conversion error; using PCM fallback errorSummary=\(privacySafeErrorSummary(e), privacy: .public)")
                 } else {
-                    print("Conversion error: unknown; using PCM fallback")
+                    self.logger.warning("Conversion error unknown; using PCM fallback")
                 }
                 self.appendPCMBufferFallback(buffer)
                 return
@@ -2493,7 +2546,7 @@ final class AudioRecorder {
             let frames = Int(outBuffer.frameLength)
             if frames > 0 {
                 guard let channel = outBuffer.floatChannelData?[0] else {
-                    print("No float channel data available; using PCM fallback")
+                    self.logger.warning("No float channel data available; using PCM fallback")
                     self.appendPCMBufferFallback(buffer)
                     return
                 }
@@ -2617,389 +2670,17 @@ final class AudioRecorder {
         }
         sampleBuffer.secureZero()
         recentWaveformSamples.secureZero()
-        print("AudioRecorder deinitialized - engine stopped and tap removed")
+        logger.info("AudioRecorder deinitialized; engine stopped and tap removed")
     }
 }
 
 // MARK: - ASR (FluidAudio Parakeet TDT v3)
 
-enum ASRError: LocalizedError {
-    case notInitialized
-    case modelLibraryNotConfigured
-    case modelFolderMissing(version: ASRModelVersion, expectedPath: String)
-    case invalidModelFiles(version: ASRModelVersion, expectedPath: String)
-    
-    var errorDescription: String? {
-        switch self {
-        case .notInitialized:
-            return "ASR not initialized yet."
-        case .modelLibraryNotConfigured:
-            return "No model library folder selected. Open Settings > Models and choose your model library folder."
-        case .modelFolderMissing(let version, let expectedPath):
-            return "Missing \(version.displayName) model folder at \(expectedPath)."
-        case .invalidModelFiles(let version, let expectedPath):
-            return "Incomplete or invalid files for \(version.displayName) at \(expectedPath)."
-        }
-    }
-
-    var isSetupRelated: Bool {
-        switch self {
-        case .modelLibraryNotConfigured, .modelFolderMissing, .invalidModelFiles:
-            return true
-        case .notInitialized:
-            return false
-        }
-    }
-
-    var recordingBlockMessage: String {
-        switch self {
-        case .modelLibraryNotConfigured:
-            return "Set model folder in Settings"
-        case .modelFolderMissing:
-            return "Selected model is missing"
-        case .invalidModelFiles:
-            return "Selected model files are invalid"
-        case .notInitialized:
-            return "Model loading..."
-        }
-    }
-}
-
-final class ASRService {
-    private var asrManager: AsrManager?
-    private var initialized = false
-    private var currentModelVersion: ASRModelVersion?
-    private var currentModelDirectoryPath: String?
-    private(set) var lastInitializationErrorDescription: String?
-    private(set) var isSetupIssue = false
-    private var lastASRError: ASRError?
-    
-    // Public read-only property for readiness check
-    var isReady: Bool {
-        asrManager != nil && initialized
-    }
-
-    var recordingBlockMessage: String {
-        if let lastASRError {
-            return lastASRError.recordingBlockMessage
-        }
-        if let lastInitializationErrorDescription, !lastInitializationErrorDescription.isEmpty {
-            return "Model initialization failed"
-        }
-        return "Model loading..."
-    }
-    
-    func initialize() async throws {
-        try await initialize(using: ModelSetupSupport.loadPersistedNormalizedSelectedModel())
-    }
-    
-    func initialize(with version: ASRModelVersion) async throws {
-        var config = ModelsConfiguration.load()
-        config.asrVersion = version
-        try await initialize(using: config)
-    }
-
-    private func initialize(using config: ModelsConfiguration) async throws {
-        do {
-            let version = config.asrVersion
-            let availability = config.availability(for: version)
-            let modelDirectory: URL
-            let modelLibraryURL: URL
-
-            switch availability {
-            case .modelLibraryNotConfigured:
-                throw ASRError.modelLibraryNotConfigured
-            case .missingModelFolder(let expectedPath):
-                throw ASRError.modelFolderMissing(version: version, expectedPath: expectedPath)
-            case .invalidModelFolder(let expectedPath):
-                throw ASRError.invalidModelFiles(version: version, expectedPath: expectedPath)
-            case .installed(let path):
-                modelDirectory = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
-                guard let libraryURL = config.modelLibraryURL else {
-                    throw ASRError.modelLibraryNotConfigured
-                }
-                modelLibraryURL = libraryURL.standardizedFileURL
-            }
-
-            if initialized && currentModelVersion == version && currentModelDirectoryPath == modelDirectory.path {
-                return
-            }
-
-            let models = try await ModelsConfiguration.withSecurityScopedAccess(to: modelLibraryURL) {
-                try await AsrModels.load(from: modelDirectory, version: version.fluidAudioVersion)
-            }
-            let manager = AsrManager(config: .default)
-            try await manager.initialize(models: models)
-            self.asrManager = manager
-            self.initialized = true
-            self.currentModelVersion = version
-            self.currentModelDirectoryPath = modelDirectory.path
-            self.lastInitializationErrorDescription = nil
-            self.isSetupIssue = false
-            self.lastASRError = nil
-            
-            print("ASR initialized with model: \(version.displayName) from \(modelDirectory.path)")
-            
-            // Warm-up: run inference with model-expected shape (15s) to compile/allocate graph and avoid shape mismatches.
-            Task.detached(priority: .utility) { [weak self] in
-                guard let self = self, let asrManager = self.asrManager else { return }
-                do {
-                    let warm = [Float](repeating: 0.0, count: 240_000)  // 15s at 16kHz to match [1, 240000] shape and min requirements
-                    _ = try await asrManager.transcribe(warm, source: .system)
-                    print("ASR warm-up completed.")
-                } catch {
-                    print("ASR warm-up skipped/failed (possible shape issue): \(error.localizedDescription)")
-                }
-            }
-        } catch {
-            self.asrManager = nil
-            self.initialized = false
-            self.currentModelVersion = nil
-            self.currentModelDirectoryPath = nil
-            self.lastInitializationErrorDescription = error.localizedDescription
-            if let asrError = error as? ASRError {
-                self.isSetupIssue = asrError.isSetupRelated
-                self.lastASRError = asrError
-            } else {
-                self.isSetupIssue = true
-                self.lastASRError = nil
-            }
-            throw error
-        }
-    }
-    
-    func reinitializeIfNeeded() async throws {
-        let config = ModelsConfiguration.load()
-        let version = config.asrVersion
-        let targetPath = config.modelDirectoryURL(for: version)?.standardizedFileURL.path
-
-        if !initialized || currentModelVersion != version || currentModelDirectoryPath != targetPath {
-            print("ASR model configuration changed. Reinitializing...")
-            asrManager = nil
-            initialized = false
-            try await initialize(using: config)
-        }
-    }
-    
-    func transcribe(samples: [Float]) async throws -> String {
-        let config = ModelsConfiguration.load()
-        let targetPath = config.modelDirectoryURL(for: config.asrVersion)?.standardizedFileURL.path
-        if !initialized || currentModelVersion != config.asrVersion || currentModelDirectoryPath != targetPath {
-            try await reinitializeIfNeeded()
-        }
-        
-        guard let asrManager = asrManager, initialized else {
-            throw ASRError.notInitialized
-        }
-        // Parakeet TDT expects 16kHz mono Float32
-        let result = try await asrManager.transcribe(samples, source: .system)
-        return result.text
-    }
-}
-
-// MARK: - Paste into focused app
-
-enum PasteServiceError: LocalizedError {
-    case accessibilityNotTrusted
-    case pasteExecutionFailed(reason: String)
-    
-    var errorDescription: String? {
-        switch self {
-        case .accessibilityNotTrusted:
-            return "Accessibility permission is required to insert text."
-        case .pasteExecutionFailed(let reason):
-            return "Failed to insert text via Accessibility: \(reason)"
-        }
-    }
-}
-
-final class PasteService {
-    private let logPrefix = "[PasteService]"
-
-    private struct PasteboardSnapshot {
-        let items: [[String: Data]]
-
-        init(pasteboard: NSPasteboard) {
-            var saved: [[String: Data]] = []
-            for item in pasteboard.pasteboardItems ?? [] {
-                var itemDict: [String: Data] = [:]
-                for type in item.types {
-                    if let data = item.data(forType: type) {
-                        itemDict[type.rawValue] = data
-                    }
-                }
-                saved.append(itemDict)
-            }
-            self.items = saved
-        }
-
-        func restore(to pasteboard: NSPasteboard) {
-            pasteboard.clearContents()
-            for itemDict in items {
-                let item = NSPasteboardItem()
-                for (type, data) in itemDict {
-                    item.setData(data, forType: NSPasteboard.PasteboardType(rawValue: type))
-                }
-                pasteboard.writeObjects([item])
-            }
-        }
-    }
-
-    func paste(_ text: String) throws {
-        // Check Accessibility without prompting in the hot path.
-        guard AXIsProcessTrusted() else {
-            print("\(logPrefix) Accessibility not trusted; aborting paste.")
-            throw PasteServiceError.accessibilityNotTrusted
-        }
-
-        if postUnicodeTextIfPossible(text) {
-            print("\(logPrefix) Paste succeeded via CGEvent unicode.")
-            return
-        }
-
-        let pasteboard = NSPasteboard.general
-        let snapshot = PasteboardSnapshot(pasteboard: pasteboard)
-        let targetChangeCount = writeAndTrackChangeCount(pasteboard: pasteboard, text: text)
-        _ = waitForPasteboardCommit(targetChangeCount: targetChangeCount)
-
-        if postCmdV() {
-            print("\(logPrefix) Paste succeeded via Cmd+V.")
-            restoreClipboardIfNeeded(snapshot)
-            return
-        }
-
-        if let error = insertTextViaAccessibility(text) {
-            print("\(logPrefix) Paste failed after AX fallback: \(error)")
-            throw PasteServiceError.pasteExecutionFailed(reason: error)
-        }
-
-        print("\(logPrefix) Paste succeeded via Accessibility.")
-        restoreClipboardIfNeeded(snapshot)
-    }
-
-    private func restoreClipboardIfNeeded(_ snapshot: PasteboardSnapshot) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            snapshot.restore(to: NSPasteboard.general)
-            print("\(self.logPrefix) Clipboard restored.")
-        }
-    }
-
-    private func writeAndTrackChangeCount(pasteboard: NSPasteboard, text: String) -> Int {
-        let before = pasteboard.changeCount
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        let after = pasteboard.changeCount
-        if after == before {
-            return after + 1
-        }
-        return after
-    }
-
-    private func waitForPasteboardCommit(
-        targetChangeCount: Int,
-        timeoutSeconds: TimeInterval = 0.15,
-        pollIntervalSeconds: TimeInterval = 0.005
-    ) -> Bool {
-        if targetChangeCount <= NSPasteboard.general.changeCount {
-            return true
-        }
-        let deadline = Date().addingTimeInterval(timeoutSeconds)
-        while Date() < deadline {
-            if NSPasteboard.general.changeCount >= targetChangeCount {
-                return true
-            }
-            usleep(useconds_t(pollIntervalSeconds * 1_000_000))
-        }
-        return false
-    }
-
-    private func postCmdV() -> Bool {
-        let source = CGEventSource(stateID: .combinedSessionState)
-        let cmdKey: CGKeyCode = 55
-        let vKey: CGKeyCode = 9
-        guard let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: cmdKey, keyDown: true),
-              let vDown = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true),
-              let vUp = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false),
-              let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: cmdKey, keyDown: false)
-        else {
-            print("\(logPrefix) Failed to create Cmd+V CGEvents.")
-            return false
-        }
-
-        vDown.flags = .maskCommand
-        vUp.flags = .maskCommand
-
-        cmdDown.post(tap: .cghidEventTap)
-        vDown.post(tap: .cghidEventTap)
-        vUp.post(tap: .cghidEventTap)
-        cmdUp.post(tap: .cghidEventTap)
-        return true
-    }
-
-    private func postUnicodeTextIfPossible(_ text: String) -> Bool {
-        let utf16Array = Array(text.utf16)
-        if utf16Array.isEmpty {
-            return false
-        }
-        if utf16Array.count > 200 {
-            print("\(logPrefix) CGEvent unicode skipped (len=\(utf16Array.count) > 200).")
-            return false
-        }
-
-        guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
-              let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
-        else {
-            print("\(logPrefix) Failed to create CGEvent unicode events.")
-            return false
-        }
-
-        keyDown.keyboardSetUnicodeString(stringLength: utf16Array.count, unicodeString: utf16Array)
-        keyUp.keyboardSetUnicodeString(stringLength: utf16Array.count, unicodeString: utf16Array)
-
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
-        return true
-    }
-
-    private func insertTextViaAccessibility(_ text: String) -> String? {
-        guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
-            return "No frontmost application found"
-        }
-
-        let resolution: AccessibilityFocusedElementResolution
-        switch AccessibilityFocusResolver.resolveFocusedElement(frontmostApp: frontmostApp) {
-        case .success(let focusedElementResolution):
-            resolution = focusedElementResolution
-        case .failure(let error):
-            return error.reason
-        }
-
-        let insertResult = AXUIElementSetAttributeValue(
-            resolution.element,
-            kAXSelectedTextAttribute as CFString,
-            text as CFTypeRef
-        )
-        if insertResult == .success {
-            return nil
-        }
-
-        let valueResult = AXUIElementSetAttributeValue(
-            resolution.element,
-            kAXValueAttribute as CFString,
-            text as CFTypeRef
-        )
-        if valueResult == .success {
-            return nil
-        }
-
-        return "Resolved focused element in \(resolution.appName) via \(resolution.strategy), "
-            + "but kAXSelectedTextAttribute failed with \(insertResult.debugName) and "
-            + "kAXValueAttribute failed with \(valueResult.debugName)."
-    }
-}
 // MARK: - Silence Trimmer (robust energy-based endpointer with hysteresis)
 
 enum SilenceTrimmer {
+    private static let logger = Logger(subsystem: "singhkays.Kalam", category: "SilenceTrimmer")
+
     // Main entry. Defaults tuned for dense speech with very little silence.
     static func trim(
         samples: [Float],
@@ -3015,10 +2696,10 @@ enum SilenceTrimmer {
         guard !samples.isEmpty else { return samples }
         
         let maxAmplitude = samples.map { abs($0) }.max() ?? 0
-        print(String(format: "Trimming audio - Max amplitude: %.5f", maxAmplitude))
+        logger.info("Trimming audio maxAmplitude=\(maxAmplitude, privacy: .public)")
         
         if maxAmplitude < 0.00001 {
-            print("Audio is completely silent (max amplitude < 1e-5)")
+            logger.info("Audio is silent below amplitude threshold")
             return []
         }
         
@@ -3054,8 +2735,7 @@ enum SilenceTrimmer {
         let noiseFloorDb = percentile(energiesDb, p: 0.05)
         let startThresholdDb = noiseFloorDb + startMarginDb
         let stopThresholdDb = noiseFloorDb + stopMarginDb
-        print(String(format: "Noise floor: %.1f dB, startThr: %.1f dB, stopThr: %.1f dB",
-                     noiseFloorDb, startThresholdDb, stopThresholdDb))
+        logger.info("Silence thresholds noiseFloorDb=\(noiseFloorDb, privacy: .public) startThresholdDb=\(startThresholdDb, privacy: .public) stopThresholdDb=\(stopThresholdDb, privacy: .public)")
         
         // Scan the buffer to extract multiple speech segments, dropping long silences
         let padWins = max(0, (padMs + windowMs - 1) / windowMs)
@@ -3095,10 +2775,10 @@ enum SilenceTrimmer {
         }
         
         if segments.isEmpty {
-            print("No speech detected after endpointing")
+            logger.info("No speech detected after endpointing")
             // Conservative fallback: send full audio if it looks speech-y
             if maxAmplitude > 0.001 {
-                print("Returning full audio for ASR to process (fallback)")
+                logger.info("Returning full audio for ASR fallback")
                 return samples
             }
             return []
@@ -3156,17 +2836,15 @@ enum SilenceTrimmer {
             dynamicMinKeepRatio = fallbackMinKeepRatio
         }
         
-        print(String(format: "Trim decision: %d segments, padWins=%d -> kept=%d (%.2fs), original=%.2fs, keepRatio=%.0f%%",
-                     segments.count, padWins, trimmedCount, trimmedDur, originalDur, keepRatio*100.0))
-        print(String(format: "Trim fallback thresholds (dynamic): minSeconds=%.2f, minKeepRatio=%.0f%%",
-                     dynamicMinSeconds, dynamicMinKeepRatio * 100.0))
+        logger.info("Trim decision segments=\(segments.count, privacy: .public) padWins=\(padWins, privacy: .public) keptSamples=\(trimmedCount, privacy: .public) trimmedMs=\(Int(trimmedDur * 1000), privacy: .public) originalMs=\(Int(originalDur * 1000), privacy: .public) keepRatioPercent=\(Int(keepRatio * 100), privacy: .public)")
+        logger.info("Trim fallback thresholds minMs=\(Int(dynamicMinSeconds * 1000), privacy: .public) minKeepRatioPercent=\(Int(dynamicMinKeepRatio * 100), privacy: .public)")
         
         let shouldFallback =
         (originalDur >= 1.2 && trimmedDur < dynamicMinSeconds) ||
         (keepRatio < dynamicMinKeepRatio)
         
         if trimmedCount <= 0 || shouldFallback {
-            print("Fallback to full clip (conservative).")
+            logger.info("Falling back to full audio clip")
             return samples
         }
         
@@ -3205,7 +2883,7 @@ enum AccessibilityHelper {
     
     @discardableResult
     static func ensureTrusted(prompt: Bool) -> Bool {
-        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt] as CFDictionary
+        let opts = ["AXTrustedCheckOptionPrompt": prompt] as CFDictionary
         let trusted = AXIsProcessTrustedWithOptions(opts)
         if !trusted {
             explainAccessibilityIfNeeded()
@@ -3470,6 +3148,8 @@ struct CompiledReplacementEngine {
 }
 
 enum ReplacementCompiler {
+    private static let logger = Logger(subsystem: "singhkays.Kalam", category: "CustomDictionary")
+
     static func compile(entries: [DictionaryEntry]) -> CompiledReplacementEngine {
         // Filter invalid/empty triggers AND disabled entries
         let cleaned = entries
@@ -3514,7 +3194,8 @@ enum ReplacementCompiler {
             }
         }
         
-        print("CustomDictionary: compiled \(phraseRules.count) phrase rules, \(wordRules.count) word rules from \(entries.filter{$0.isEnabled}.count) enabled entries")
+        let enabledCount = entries.filter(\.isEnabled).count
+        Self.logger.info("Custom dictionary compiled phraseRules=\(phraseRules.count, privacy: .public) wordRules=\(wordRules.count, privacy: .public) enabledEntries=\(enabledCount, privacy: .public)")
         return CompiledReplacementEngine(phraseRules: phraseRules, wordRules: wordRules)
     }
     
@@ -3660,8 +3341,10 @@ enum CaseHelper {
 }
 
 // Persistence + Manager
+@MainActor
 final class CustomDictionaryManager: ObservableObject {
     static let shared = CustomDictionaryManager()
+    private let logger = Logger(subsystem: "singhkays.Kalam", category: "CustomDictionary")
     private init() {}
     
     @Published var entries: [DictionaryEntry] = []
@@ -3678,7 +3361,6 @@ final class CustomDictionaryManager: ObservableObject {
         return dir.appendingPathComponent(fileName)
     }
     
-    private let queue = DispatchQueue(label: "Kalam.CustomDictionary", attributes: .concurrent)
     private var compiled: CompiledReplacementEngine = .empty
     
     private var debounceWork: DispatchWorkItem?
@@ -3691,75 +3373,73 @@ final class CustomDictionaryManager: ObservableObject {
     }
     
     func bootstrap() {
-        print("[\(Date())] CustomDictionaryManager: Bootstrapping - loading from \(appSupportURL.path)")
+        logger.info("Custom dictionary bootstrap started")
         load()
         recompile()
-        print("[\(Date())] CustomDictionaryManager: Bootstrap complete. Loaded \(entries.count) entries, first launch: \(isFirstLaunch)")
+        logger.info("Custom dictionary bootstrap complete: entries=\(self.entries.count), firstLaunch=\(self.isFirstLaunch)")
     }
     
     func apply(to text: String) -> (String, Int) {
-        var engine: CompiledReplacementEngine = .empty
-        queue.sync { engine = self.compiled }
-        let (out, count) = engine.apply(to: text)
+        let (out, count) = compiled.apply(to: text)
         if count > 0 {
-            print("[\(Date())] CustomDictionary: applied \(count) replacement(s). Output length: \(out.count)")
+            logger.info("Custom dictionary applied replacements=\(count), outputLength=\(out.count)")
         }
         return (out, count)
     }
     
     func addEntry(_ entry: DictionaryEntry) {
-        print("[\(Date())] CustomDictionaryManager: Adding entry (ID: \(entry.id), trigger: '\(entry.trigger)'). Previous count: \(entries.count)")
+        logger.info("Custom dictionary adding entry; previousCount=\(self.entries.count)")
         entries.append(entry)
-        print("[\(Date())] CustomDictionaryManager: Added entry. New count: \(entries.count)")
+        logger.info("Custom dictionary entry added; count=\(self.entries.count)")
         entriesDidChange()
     }
     
     func removeEntries(withIds ids: [UUID]) {
         guard !ids.isEmpty else { return }
-        print("[\(Date())] CustomDictionaryManager: Removing \(ids.count) entries (IDs: \(ids)). Previous count: \(entries.count)")
+        logger.info("Custom dictionary removing entries=\(ids.count), previousCount=\(self.entries.count)")
         let beforeCount = entries.count
         entries.removeAll { ids.contains($0.id) }
-        print("[\(Date())] CustomDictionaryManager: Removed entries. New count: \(entries.count) (removed \(beforeCount - entries.count))")
+        logger.info("Custom dictionary removed entries; count=\(self.entries.count), removed=\(beforeCount - self.entries.count)")
         entriesDidChange()
     }
     
     func sortEntriesByTrigger() {
-        print("[\(Date())] CustomDictionaryManager: Sorting \(entries.count) entries by trigger")
+        logger.info("Custom dictionary sorting entries=\(self.entries.count)")
         entries.sort { $0.trigger.localizedCaseInsensitiveCompare($1.trigger) == .orderedAscending }
         entriesDidChange()
     }
     
     func importJSON(from url: URL) throws {
-        print("[\(Date())] CustomDictionaryManager: Importing from \(url.path)")
+        logger.info("Custom dictionary import started")
         let data = try Data(contentsOf: url)
         let decoded = try JSONDecoder().decode([DictionaryEntry].self, from: data)
         entries = decoded
-        print("[\(Date())] CustomDictionaryManager: Import complete. Loaded \(entries.count) entries")
+        logger.info("Custom dictionary import complete; count=\(self.entries.count)")
         save()
         recompile()
     }
     
     func exportJSON(to url: URL) throws {
-        print("[\(Date())] CustomDictionaryManager: Exporting \(entries.count) entries to \(url.path)")
+        logger.info("Custom dictionary export started; count=\(self.entries.count)")
         let data = try JSONEncoder().encode(entries)
         try data.write(to: url, options: .atomic)
-        print("[\(Date())] CustomDictionaryManager: Export complete")
+        logger.info("Custom dictionary export complete")
     }
     
     private func load() {
         let url = appSupportURL
         guard FileManager.default.fileExists(atPath: url.path) else {
             entries = []
-            print("[\(Date())] CustomDictionaryManager: No saved file found, starting empty (first launch)")
+            logger.info("Custom dictionary file missing; starting empty")
             return
         }
         do {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode([DictionaryEntry].self, from: data)
             entries = decoded.filter { $0.userAdded }  // New: Filter non-user (samples) on first launch
-            print("[\(Date())] CustomDictionaryManager: Loaded \(decoded.count) entries from \(url.path), showing \(entries.count) user entries")
+            logger.info("Custom dictionary loaded entries=\(decoded.count), userEntries=\(self.entries.count)")
         } catch {
-            print("[\(Date())] CustomDictionaryManager: Load failed: \(error.localizedDescription)")
+            logger.warning("Custom dictionary load failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             entries = []
         }
     }
@@ -3768,9 +3448,9 @@ final class CustomDictionaryManager: ObservableObject {
         do {
             let data = try JSONEncoder().encode(entries)
             try data.write(to: appSupportURL, options: .atomic)
-            print("[\(Date())] CustomDictionaryManager: Saved \(entries.count) entries to \(appSupportURL.path)")
+            logger.info("Custom dictionary saved entries=\(self.entries.count)")
         } catch {
-            print("[\(Date())] CustomDictionaryManager: Save failed: \(error.localizedDescription)")
+            logger.warning("Custom dictionary save failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
         }
     }
     
@@ -3780,7 +3460,7 @@ final class CustomDictionaryManager: ObservableObject {
         debounceWork = nil
         save()
         recompile()
-        print("[\(Date())] CustomDictionaryManager: Immediate save triggered")
+        logger.info("Custom dictionary immediate save triggered")
     }
     
     func entriesDidChange() {
@@ -3794,10 +3474,7 @@ final class CustomDictionaryManager: ObservableObject {
     }
     
     private func recompile() {
-        let engine = ReplacementCompiler.compile(entries: entries)
-        queue.async(flags: .barrier) { [weak self] in
-            self?.compiled = engine
-        }
+        compiled = ReplacementCompiler.compile(entries: entries)
     }
     
     func reloadFromDisk() {

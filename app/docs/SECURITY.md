@@ -4,27 +4,28 @@
 
 Kalam is a privacy-first local dictation application. All audio processing, transcription, and text processing happens entirely on your device. No audio data, transcriptions, or personal information is ever transmitted to external servers.
 
-## App Sandbox Compatibility (Design Constraint)
+## App Sandbox, Entitlements, And Runtime Capabilities
 
-Kalam currently operates outside of the App Sandbox to prioritize "brute force", hardware-precise functionality over restrictive containment. However, this is a **Fixable Implementation Detail**, and the app *can* be sandboxed for Mac App Store distribution by adopting Apple's higher-level APIs:
+Kalam treats App Sandbox as the intended security posture. The checked-in entitlement file enables `com.apple.security.app-sandbox`, `com.apple.security.device.audio-input`, and `com.apple.security.accessibility`, while deliberately omitting `com.apple.security.network.client`. Outgoing network access is therefore disabled for the sandboxed app.
 
-- **Global Hotkey Detection**: The app currently monitors system-wide modifier key combinations to detect PTT triggers. Moving fully to the older Carbon HotKey API (`RegisterEventHotkey`) makes this fully sandbox-compatible, at the cost of some custom hotkey flexibility.
-- **Text Injection**: The app attempts CGEvent unicode insertion first, then writes the transcript to the system pasteboard and triggers Cmd+V via `CGEvent`, and finally falls back to the Accessibility API (`AXUIElementSetAttributeValue`) for direct insertion if needed. This requires Accessibility permission and avoids Apple Events.
-- **System Audio Ducking**: The app manually modifies system output volume via low-level CoreAudio HAL properties during recording. Doing this in the sandbox is fundamentally prohibited. A sandboxed version would instead use macOS 11's `AVAudioSession.sharedInstance().setCategory(.playAndRecord, options: [.duckOthers])`, allowing the system to perform ducking safely on the app's behalf.
+Runtime behavior still depends on macOS permission grants and target-app support:
 
-Therefore, the lack of App Sandbox is currently an optimization for maximum capability and precision, not a fundamental OS limitation. Notarization-only distribution requires no additional sandbox entitlements, but documentation clarity benefits from explicitly stating intention regarding `com.apple.security.device.audio-input`.
+- **Global Hotkey Detection** uses the sandbox-compatible Carbon HotKey path where possible.
+- **Text Injection** attempts CGEvent unicode insertion, then a pasteboard + Cmd+V path, then Accessibility insertion. Accessibility permission and target-app behavior must be verified at runtime.
+- **System Audio Ducking** uses manual CoreAudio output-volume changes. The app now inspects runtime entitlements and logs capability status because sandboxed/manual CoreAudio behavior can vary by OS and output device. If ducking cannot be performed safely, recording continues without ducking.
+- **Models** are user-provisioned from a local folder selected by the user. The app does not download models itself in the sandboxed runtime.
 
 ## Data Privacy
 
 ### Audio Data
 - Recorded audio is held temporarily in memory only during transcription
-- Audio buffers are cryptographically zeroed after use
+- Audio sample arrays are cleared after use on best-effort Kalam-owned buffers; downstream framework/runtime copies are governed by their normal memory lifetimes
 - Audio is never written to disk or transmitted over the network
 
 ### Transcription Data
 - Transcribed text is processed entirely locally
 - Text may be temporarily placed on the system pasteboard for injection
-- Original pasteboard contents are preserved and restored on successful paste
+- Original pasteboard contents are restored only if the pasteboard still contains Kalam's inserted text and the pasteboard change count has not advanced
 
 ### Logging
 - The app logs timing and performance metrics for debugging
@@ -34,8 +35,9 @@ Therefore, the lack of App Sandbox is currently an optimization for maximum capa
 
 - **Hardened Runtime**: Enabled to prevent code injection and tampering
 - **Library Validation**: Prevents malicious dynamic library injection
-- **Memory Security**: Audio buffers are securely zeroed after transcription
+- **Memory Security**: Kalam clears owned audio buffers after transcription where possible; it does not claim that every downstream framework/runtime copy is cryptographically wiped
 - **Network Security**: Kalam is built with **zero network entitlements** in the Xcode project sandbox. This is a deliberate design choice; even if the app tried to make a network request, it would be blocked at the OS level. ASR models are user-provisioned and loaded from local disk only.
+- **Update Discovery**: Kalam does not auto-check for updates. The **View Latest Release…** action is user-initiated and opens GitHub in the user's browser; Kalam itself still has no outgoing network entitlement.
 
 ## Third-Party Components
 
@@ -84,4 +86,4 @@ We will acknowledge receipt within 48 hours and provide a timeline for the fix.
 
 ---
 
-Last updated: March 9, 2026
+Last updated: May 9, 2026

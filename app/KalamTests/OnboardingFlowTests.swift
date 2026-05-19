@@ -61,7 +61,7 @@ final class OnboardingFlowTests: XCTestCase {
             hasAttemptedAccessibilitySetup: false,
             selectedModelVersion: .v2,
             modelLibraryURL: URL(fileURLWithPath: "/tmp/models", isDirectory: true),
-            selectedModelAvailability: .installed(path: "/tmp/models/parakeet-tdt-0.6b-v2-coreml"),
+            selectedModelAvailability: .installed(path: "/tmp/models/parakeet-tdt-0.6b-v2"),
             installedModelVersions: [.v2],
             hasCompletedRequiredSetup: true,
             isAudioReady: true,
@@ -82,7 +82,7 @@ final class OnboardingFlowTests: XCTestCase {
             hasAttemptedAccessibilitySetup: false,
             selectedModelVersion: .v2,
             modelLibraryURL: URL(fileURLWithPath: "/tmp/models", isDirectory: true),
-            selectedModelAvailability: .installed(path: "/tmp/models/parakeet-tdt-0.6b-v2-coreml"),
+            selectedModelAvailability: .installed(path: "/tmp/models/parakeet-tdt-0.6b-v2"),
             installedModelVersions: [.v2],
             hasCompletedRequiredSetup: false,
             isAudioReady: false,
@@ -92,6 +92,7 @@ final class OnboardingFlowTests: XCTestCase {
 
         XCTAssertEqual(baseSnapshot.completedRequirements, 4)
         XCTAssertFalse(baseSnapshot.canStartDictating)
+        XCTAssertTrue(baseSnapshot.isStartDictatingDisabled)
         XCTAssertEqual(baseSnapshot.runtimePreparationMessage, "Preparing microphone…")
 
         let readySnapshot = makeSnapshot(
@@ -100,7 +101,7 @@ final class OnboardingFlowTests: XCTestCase {
             hasAttemptedAccessibilitySetup: false,
             selectedModelVersion: .v2,
             modelLibraryURL: URL(fileURLWithPath: "/tmp/models", isDirectory: true),
-            selectedModelAvailability: .installed(path: "/tmp/models/parakeet-tdt-0.6b-v2-coreml"),
+            selectedModelAvailability: .installed(path: "/tmp/models/parakeet-tdt-0.6b-v2"),
             installedModelVersions: [.v2],
             hasCompletedRequiredSetup: false,
             isAudioReady: true,
@@ -109,6 +110,7 @@ final class OnboardingFlowTests: XCTestCase {
         )
 
         XCTAssertTrue(readySnapshot.canStartDictating)
+        XCTAssertFalse(readySnapshot.isStartDictatingDisabled)
         XCTAssertNil(readySnapshot.runtimePreparationMessage)
     }
 
@@ -119,7 +121,7 @@ final class OnboardingFlowTests: XCTestCase {
             hasAttemptedAccessibilitySetup: false,
             selectedModelVersion: .v3,
             modelLibraryURL: URL(fileURLWithPath: "/tmp/models", isDirectory: true),
-            selectedModelAvailability: .invalidModelFolder(expectedPath: "/tmp/models/parakeet-tdt-0.6b-v3-coreml"),
+            selectedModelAvailability: .invalidModelFolder(expectedPath: "/tmp/models/parakeet-tdt-0.6b-v3"),
             installedModelVersions: [],
             hasCompletedRequiredSetup: true,
             isAudioReady: true,
@@ -257,7 +259,7 @@ final class OnboardingFlowTests: XCTestCase {
             hasAttemptedAccessibilitySetup: false,
             selectedModelVersion: .v2,
             modelLibraryURL: URL(fileURLWithPath: "/tmp/models", isDirectory: true),
-            selectedModelAvailability: .installed(path: "/tmp/models/parakeet-tdt-0.6b-v2-coreml"),
+            selectedModelAvailability: .installed(path: "/tmp/models/parakeet-tdt-0.6b-v2"),
             installedModelVersions: [.v2],
             hasCompletedRequiredSetup: false,
             isAudioReady: true,
@@ -273,7 +275,7 @@ final class OnboardingFlowTests: XCTestCase {
             hasAttemptedAccessibilitySetup: false,
             selectedModelVersion: .v2,
             modelLibraryURL: URL(fileURLWithPath: "/tmp/models", isDirectory: true),
-            selectedModelAvailability: .missingModelFolder(expectedPath: "/tmp/models/parakeet-tdt-0.6b-v2-coreml"),
+            selectedModelAvailability: .missingModelFolder(expectedPath: "/tmp/models/parakeet-tdt-0.6b-v2"),
             installedModelVersions: [],
             hasCompletedRequiredSetup: false,
             isAudioReady: true,

@@ -16,6 +16,7 @@ final class KalamEngineIntegrationTests: XCTestCase {
         UserDefaults.standard.removeObject(forKey: "internal.itn.enabled")
     }
     
+    @MainActor
     func testGoldenCases() throws {
         let bundle = Bundle(for: type(of: self))
         guard let url = bundle.url(forResource: "engine_golden_tests", withExtension: "json") else {
@@ -47,6 +48,7 @@ final class KalamEngineIntegrationTests: XCTestCase {
         }
     }
 
+    @MainActor
     func testITNDefaultsToEnabledWhenUnset() throws {
         guard NemoTextProcessing.isAvailable else {
             throw XCTSkip("NemoTextProcessing is not linked in this test environment.")
@@ -77,6 +79,7 @@ final class KalamEngineIntegrationTests: XCTestCase {
         XCTAssertEqual(result.final, "205")
     }
 
+    @MainActor
     func testAudioSmokeFixtureWhenProvided() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let fixturePath = environment["KALAM_AUDIO_SMOKE_FIXTURE"], !fixturePath.isEmpty else {

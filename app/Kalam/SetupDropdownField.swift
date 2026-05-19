@@ -36,6 +36,7 @@ struct SetupDropdownField<T: Equatable & Identifiable>: View {
                     .stroke(Color.white.opacity(0.12), lineWidth: 1)
             )
         }
-        .buttonStyle(.plain)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
     }
 }
