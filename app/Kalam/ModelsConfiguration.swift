@@ -58,7 +58,7 @@ public enum ASRModelVersion: String, CaseIterable, Identifiable, Sendable {
         case .v3:
             return "parakeet-tdt-0.6b-v3"
         case .tdtCtc110m:
-            return "parakeet-tdt-110m"
+            return "parakeet-tdt-ctc-110m"
         }
     }
 
