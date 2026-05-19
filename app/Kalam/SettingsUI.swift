@@ -950,12 +950,12 @@ struct SettingsView: View {
 
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text("Model version")
-                                        .font(KalamTheme.subheadlineFont)
+                                        .font(KalamTheme.calloutFont)
 
                                     SetupDropdownField(
-                                        selection: \$modelsConfig.asrVersion,
+                                        selection: $modelsConfig.asrVersion,
                                         options: ASRModelVersion.allCases,
-                                        label: { \$0.shortDisplayName }
+                                        label: { $0.shortDisplayName }
                                     )
 
                                     Text(modelsConfig.asrVersion.description)
