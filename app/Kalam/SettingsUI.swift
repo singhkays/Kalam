@@ -948,20 +948,19 @@ struct SettingsView: View {
                                         .foregroundColor(KalamTheme.textSecondary)
                                 }
 
-                                VStack(spacing: 12) {
-                                    ForEach(ASRModelVersion.allCases) { version in
-                                        let availability = modelsConfig.availability(for: version)
-                                        ModelSelectionRow(
-                                            version: version,
-                                            availability: availability,
-                                            isSelected: modelsConfig.asrVersion == version,
-                                            isEnabled: availability.isInstalled,
-                                            onSelect: {
-                                                guard availability.isInstalled else { return }
-                                                modelsConfig.asrVersion = version
-                                            }
-                                        )
-                                    }
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Model version")
+                                        .font(KalamTheme.subheadlineFont)
+
+                                    SetupDropdownField(
+                                        selection: \$modelsConfig.asrVersion,
+                                        options: ASRModelVersion.allCases,
+                                        label: { \$0.shortDisplayName }
+                                    )
+
+                                    Text(modelsConfig.asrVersion.description)
+                                        .font(KalamTheme.footnoteFont)
+                                        .foregroundColor(KalamTheme.textSecondary)
                                 }
                             }
                             .padding(.horizontal, 16)
