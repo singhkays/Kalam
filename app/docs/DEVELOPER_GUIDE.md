@@ -318,7 +318,7 @@ Kalam requires Parakeet TDT models for on-device transcription. Models are loade
    
    Install the Hugging Face CLI (one-time):
    ```bash
-   curl -LsSf https://hf.co/cli/install.sh | bash
+   brew install hf
    ```
    
    Then download a model:
