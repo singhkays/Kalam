@@ -351,7 +351,7 @@ Each model folder must contain:
 
 ### Why Not the Full Repo?
 
-The full Hugging Face repository is 2.6 GB, but Kalam only needs ~600 MB. The `--include` flag downloads only the required files, saving bandwidth and disk space.
+The full Hugging Face repository is 2.6 GB, but Kalam only needs ~450 MB. The `--include` flag downloads only the required files, saving bandwidth and disk space.
 
 ## Dependencies
 

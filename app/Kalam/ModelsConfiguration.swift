@@ -55,8 +55,8 @@ public enum ASRModelVersion: String, CaseIterable, Identifiable, Sendable {
     
     public var modelSize: String {
         switch self {
-        case .v2, .v3: return "~600 MB"
-        case .tdtCtc110m: return "~110 MB"
+        case .v2, .v3: return "~450 MB"
+        case .tdtCtc110m: return "~220 MB"
         }
     }
 
