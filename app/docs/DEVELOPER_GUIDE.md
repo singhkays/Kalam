@@ -314,11 +314,11 @@ Kalam requires Parakeet TDT models for on-device transcription. Models are loade
    Select or create a folder to store your models, e.g., `~/Models/FluidAudio`.
    This folder will store all your downloaded models.
 
-2. **Download a model** (~600 MB)
+2. **Download a model**
    
    Install the Hugging Face CLI (one-time):
    ```bash
-   curl -LsSf https://hf.co/cli/install.sh | bash
+   brew install hf
    ```
    
    Then download a model:
@@ -351,7 +351,7 @@ Each model folder must contain:
 
 ### Why Not the Full Repo?
 
-The full Hugging Face repository is 2.6 GB, but Kalam only needs ~600 MB. The `--include` flag downloads only the required files, saving bandwidth and disk space.
+The full Hugging Face repository is 2.6 GB, but Kalam only needs ~450 MB. The `--include` flag downloads only the required files, saving bandwidth and disk space.
 
 ## Dependencies
 

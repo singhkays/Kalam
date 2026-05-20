@@ -20,8 +20,7 @@ public enum ASRModelVersion: String, CaseIterable, Identifiable, Sendable {
             return "Parakeet TDT-CTC 110M (Lightweight)"
         }
     }
-    
-    
+
     public var description: String {
         switch self {
         case .v2:
@@ -46,8 +45,8 @@ public enum ASRModelVersion: String, CaseIterable, Identifiable, Sendable {
     
     public var modelSize: String {
         switch self {
-        case .v2, .v3: return "~600 MB"
-        case .tdtCtc110m: return "~110 MB"
+        case .v2, .v3: return "~450 MB"
+        case .tdtCtc110m: return "~220 MB"
         }
     }
 
@@ -58,7 +57,7 @@ public enum ASRModelVersion: String, CaseIterable, Identifiable, Sendable {
         case .v3:
             return "parakeet-tdt-0.6b-v3"
         case .tdtCtc110m:
-            return "parakeet-tdt-110m"
+            return "parakeet-tdt-ctc-110m"
         }
     }
 

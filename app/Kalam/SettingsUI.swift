@@ -779,7 +779,7 @@ struct SettingsView: View {
                         HStack(spacing: 8) {
                             Image(systemName: step2Complete ? "checkmark.circle.fill" : "2.circle")
                                 .foregroundColor(step2Complete ? .green : KalamTheme.textSecondary)
-                            Text("Step 2: Download model files (~600 MB)")
+                            Text("Step 2: Download model files")
                                 .font(KalamTheme.bodyStrongFont)
                                 .foregroundColor(KalamTheme.textPrimary)
                             Spacer()
@@ -846,13 +846,11 @@ struct SettingsView: View {
                                         .font(KalamTheme.footnoteFont)
                                         .foregroundColor(KalamTheme.textSecondary)
 
-                                    Picker("Model", selection: $selectedDownloadVersion) {
-                                        ForEach(ASRModelVersion.allCases) { version in
-                                            Text(version.displayName).tag(version)
-                                        }
-                                    }
-                                    .pickerStyle(.segmented)
-                                    .labelsHidden()
+                                    SetupDropdownField(
+                                        selection: $selectedDownloadVersion,
+                                        options: ASRModelVersion.allCases,
+                                        label: { $0.displayName }
+                                    )
 
                                     let command = downloadCommand(for: selectedDownloadVersion)
                                     Text(command)

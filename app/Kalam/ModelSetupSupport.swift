@@ -43,7 +43,7 @@ enum SystemSettingsNavigator {
 }
 
 enum ModelSetupSupport {
-    static let huggingFaceInstallCommand = "curl -LsSf https://hf.co/cli/install.sh | bash"
+    static let huggingFaceInstallCommand = "brew install hf"
 
     @discardableResult
     @MainActor
