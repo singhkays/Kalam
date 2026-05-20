@@ -314,7 +314,7 @@ Kalam requires Parakeet TDT models for on-device transcription. Models are loade
    Select or create a folder to store your models, e.g., `~/Models/FluidAudio`.
    This folder will store all your downloaded models.
 
-2. **Download a model** (~600 MB)
+2. **Download a model**
    
    Install the Hugging Face CLI (one-time):
    ```bash
