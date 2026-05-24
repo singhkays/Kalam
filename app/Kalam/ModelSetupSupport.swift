@@ -84,6 +84,9 @@ enum ModelSetupSupport {
     static func loadPersistedNormalizedSelectedModel(from defaults: UserDefaults = .standard) -> ModelsConfiguration {
         let loaded = ModelsConfiguration.load(from: defaults)
         let normalized = normalizedSelectedModel(in: loaded)
+        if normalized != loaded {
+            normalized.save(to: defaults)
+        }
         return normalized
     }
 

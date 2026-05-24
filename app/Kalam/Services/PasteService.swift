@@ -21,6 +21,11 @@ enum PasteServiceError: LocalizedError {
 final class PasteService {
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "PasteService")
 
+    private enum PasteDispatchResult {
+        case dispatched(strategy: String)
+        case unavailable(reason: String)
+    }
+
     private struct PasteboardSnapshot {
         let items: [[String: Data]]
 
@@ -57,8 +62,8 @@ final class PasteService {
             throw PasteServiceError.accessibilityNotTrusted
         }
 
-        if postUnicodeTextIfPossible(text) {
-            logger.info("Paste succeeded via CGEvent unicode")
+        if case .dispatched(let strategy) = dispatchUnicodeTextIfPossible(text) {
+            logger.info("Paste dispatched strategy=\(strategy, privacy: .public)")
             return
         }
 
@@ -67,18 +72,22 @@ final class PasteService {
         let insertedPasteboardState = writeAndTrackPasteboardState(pasteboard: pasteboard, text: text)
         _ = waitForPasteboardCommit(targetChangeCount: insertedPasteboardState.changeCount)
 
-        if postCmdV() {
-            logger.info("Paste succeeded via Cmd+V")
+        switch dispatchCommandVPaste() {
+        case .dispatched(let strategy):
+            logger.info("Paste dispatched strategy=\(strategy, privacy: .public)")
             restoreClipboardIfNeeded(snapshot, insertedState: insertedPasteboardState)
             return
+        case .unavailable(let reason):
+            logger.warning("Cmd+V paste dispatch unavailable reason=\(reason, privacy: .public); trying Accessibility insertion")
         }
 
         if let error = insertTextViaAccessibility(text) {
             logger.warning("Paste failed after AX fallback: \(error, privacy: .public)")
+            restoreClipboardIfNeeded(snapshot, insertedState: insertedPasteboardState)
             throw PasteServiceError.pasteExecutionFailed(reason: error)
         }
 
-        logger.info("Paste succeeded via Accessibility")
+        logger.info("Paste inserted via Accessibility")
         restoreClipboardIfNeeded(snapshot, insertedState: insertedPasteboardState)
     }
 
@@ -128,7 +137,7 @@ final class PasteService {
         return false
     }
 
-    private func postCmdV() -> Bool {
+    private func dispatchCommandVPaste() -> PasteDispatchResult {
         let source = CGEventSource(stateID: .combinedSessionState)
         let cmdKey: CGKeyCode = 55
         let vKey: CGKeyCode = 9
@@ -138,7 +147,7 @@ final class PasteService {
               let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: cmdKey, keyDown: false)
         else {
             logger.warning("Failed to create Cmd+V CGEvents")
-            return false
+            return .unavailable(reason: "eventCreationFailed")
         }
 
         vDown.flags = .maskCommand
@@ -148,24 +157,24 @@ final class PasteService {
         vDown.post(tap: .cghidEventTap)
         vUp.post(tap: .cghidEventTap)
         cmdUp.post(tap: .cghidEventTap)
-        return true
+        return .dispatched(strategy: "commandV")
     }
 
-    private func postUnicodeTextIfPossible(_ text: String) -> Bool {
+    private func dispatchUnicodeTextIfPossible(_ text: String) -> PasteDispatchResult {
         let utf16Array = Array(text.utf16)
         if utf16Array.isEmpty {
-            return false
+            return .unavailable(reason: "emptyText")
         }
         if utf16Array.count > 200 {
             logger.info("CGEvent unicode skipped due to length=\(utf16Array.count)")
-            return false
+            return .unavailable(reason: "textTooLong")
         }
 
         guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
               let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
         else {
             logger.warning("Failed to create CGEvent unicode events")
-            return false
+            return .unavailable(reason: "eventCreationFailed")
         }
 
         keyDown.keyboardSetUnicodeString(stringLength: utf16Array.count, unicodeString: utf16Array)
@@ -173,7 +182,7 @@ final class PasteService {
 
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
-        return true
+        return .dispatched(strategy: "unicode")
     }
 
     private func insertTextViaAccessibility(_ text: String) -> String? {

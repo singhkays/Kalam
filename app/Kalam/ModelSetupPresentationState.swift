@@ -26,6 +26,11 @@ struct ModelSetupWizardState: Equatable {
     }
 }
 
+struct ModelSetupPanelPresentation: Equatable {
+    let statusMessage: String
+    let selectedRepo: ASRModelVersion?
+}
+
 enum ModelSetupPresentationState: Equatable {
     case needsFolder
     case needsModel(folderURL: URL, version: ASRModelVersion, statusMessage: String)
@@ -95,5 +100,20 @@ extension OnboardingFlowController {
             version: selectedDownloadVersion,
             statusMessage: snapshot.modelStatus.message
         )
+    }
+
+    var modelSetupPresentation: ModelSetupPanelPresentation {
+        switch modelSetupPresentationState {
+        case .needsFolder:
+            return ModelSetupPanelPresentation(
+                statusMessage: "Choose where Kalam should store your local speech models.",
+                selectedRepo: nil
+            )
+        case .needsModel(_, _, let statusMessage),
+             .ready(_, _, let statusMessage):
+            return ModelSetupPanelPresentation(statusMessage: statusMessage, selectedRepo: nil)
+        case .repoFolderSelected(_, let selectedRepo, _, let statusMessage):
+            return ModelSetupPanelPresentation(statusMessage: statusMessage, selectedRepo: selectedRepo)
+        }
     }
 }

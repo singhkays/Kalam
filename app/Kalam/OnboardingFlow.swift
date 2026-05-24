@@ -889,23 +889,6 @@ struct OnboardingView: View {
         return .init(title: "Confirm", style: .prominent, action: controller.confirmHotkey)
     }
 
-    private var hotkeySecondaryAction: OnboardingAction? {
-        if controller.snapshot.hotkeyStatus.isReady {
-            return .init(title: "Change", style: .premium, action: {
-                // To reset and show the picker again
-                var config = OnboardingConfiguration.load()
-                config.hasPickedHotkey = false
-                controller.confirmHotkey() 
-                // Wait, I should probably have a separate method or just update the flag
-                // Let's just update the flag and let refresh handle it
-                let defaults = UserDefaults.standard
-                defaults.set(false, forKey: "internal.hasPickedHotkey")
-                controller.recheck()
-            })
-        }
-        return nil
-    }
-
     private var microphoneSelectionSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Divider()
@@ -1068,82 +1051,7 @@ struct OnboardingView: View {
 
     private var modelSetupCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            switch controller.modelSetupPresentationState {
-            case .needsFolder:
-                ModelAcquisitionPanel(
-                    folderURL: controller.snapshot.modelLibraryURL,
-                    statusMessage: "Choose where Kalam should store your local speech models.",
-                    wizardState: controller.modelSetupWizardState,
-                    selectedVersion: $controller.selectedDownloadVersion,
-                    downloadCommand: controller.downloadCommand,
-                    downloadCommandCopied: controller.downloadCommandCopied,
-                    installCommand: ModelSetupSupport.huggingFaceInstallCommand,
-                    installCommandCopied: controller.installCommandCopied,
-                    onChooseFolder: controller.chooseModelFolder,
-                    onChangeFolder: controller.chooseModelFolder,
-                    onOpenInFinder: controller.openModelFolderInFinder,
-                    onClearFolder: controller.clearModelFolder,
-                    onConfirmCLIInstalled: controller.confirmHFCLIInstalled,
-                    onCopyDownloadCommand: controller.copyDownloadCommand,
-                    onCopyInstallCommand: controller.copyInstallCommand
-                )
-            case .needsModel(_, _, let statusMessage):
-                ModelAcquisitionPanel(
-                    folderURL: controller.snapshot.modelLibraryURL,
-                    statusMessage: statusMessage,
-                    wizardState: controller.modelSetupWizardState,
-                    selectedVersion: $controller.selectedDownloadVersion,
-                    downloadCommand: controller.downloadCommand,
-                    downloadCommandCopied: controller.downloadCommandCopied,
-                    installCommand: ModelSetupSupport.huggingFaceInstallCommand,
-                    installCommandCopied: controller.installCommandCopied,
-                    onChooseFolder: controller.chooseModelFolder,
-                    onChangeFolder: controller.chooseModelFolder,
-                    onOpenInFinder: controller.openModelFolderInFinder,
-                    onClearFolder: controller.clearModelFolder,
-                    onConfirmCLIInstalled: controller.confirmHFCLIInstalled,
-                    onCopyDownloadCommand: controller.copyDownloadCommand,
-                    onCopyInstallCommand: controller.copyInstallCommand
-                )
-            case .repoFolderSelected(_, let selectedRepo, _, let statusMessage):
-                ModelAcquisitionPanel(
-                    folderURL: controller.snapshot.modelLibraryURL,
-                    statusMessage: statusMessage,
-                    wizardState: controller.modelSetupWizardState,
-                    selectedVersion: $controller.selectedDownloadVersion,
-                    downloadCommand: controller.downloadCommand,
-                    downloadCommandCopied: controller.downloadCommandCopied,
-                    installCommand: ModelSetupSupport.huggingFaceInstallCommand,
-                    installCommandCopied: controller.installCommandCopied,
-                    onChooseFolder: controller.chooseModelFolder,
-                    onChangeFolder: controller.chooseModelFolder,
-                    onOpenInFinder: controller.openModelFolderInFinder,
-                    onClearFolder: controller.clearModelFolder,
-                    selectedRepo: selectedRepo,
-                    onUseParentFolder: controller.useParentFolderForSelectedRepo,
-                    onConfirmCLIInstalled: controller.confirmHFCLIInstalled,
-                    onCopyDownloadCommand: controller.copyDownloadCommand,
-                    onCopyInstallCommand: controller.copyInstallCommand
-                )
-            case .ready(_, _, let statusMessage):
-                ModelAcquisitionPanel(
-                    folderURL: controller.snapshot.modelLibraryURL,
-                    statusMessage: statusMessage,
-                    wizardState: controller.modelSetupWizardState,
-                    selectedVersion: $controller.selectedDownloadVersion,
-                    downloadCommand: controller.downloadCommand,
-                    downloadCommandCopied: controller.downloadCommandCopied,
-                    installCommand: ModelSetupSupport.huggingFaceInstallCommand,
-                    installCommandCopied: controller.installCommandCopied,
-                    onChooseFolder: controller.chooseModelFolder,
-                    onChangeFolder: controller.chooseModelFolder,
-                    onOpenInFinder: controller.openModelFolderInFinder,
-                    onClearFolder: controller.clearModelFolder,
-                    onConfirmCLIInstalled: controller.confirmHFCLIInstalled,
-                    onCopyDownloadCommand: controller.copyDownloadCommand,
-                    onCopyInstallCommand: controller.copyInstallCommand
-                )
-            }
+            modelAcquisitionPanel(controller.modelSetupPresentation)
         }
         .padding(12)
         .background(
@@ -1152,6 +1060,35 @@ struct OnboardingView: View {
         )
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private func modelAcquisitionPanel(_ presentation: ModelSetupPanelPresentation) -> ModelAcquisitionPanel {
+        let useParentFolderAction: (() -> Void)?
+        if presentation.selectedRepo == nil {
+            useParentFolderAction = nil
+        } else {
+            useParentFolderAction = controller.useParentFolderForSelectedRepo
+        }
+
+        return ModelAcquisitionPanel(
+            folderURL: controller.snapshot.modelLibraryURL,
+            statusMessage: presentation.statusMessage,
+            wizardState: controller.modelSetupWizardState,
+            selectedVersion: $controller.selectedDownloadVersion,
+            downloadCommand: controller.downloadCommand,
+            downloadCommandCopied: controller.downloadCommandCopied,
+            installCommand: ModelSetupSupport.huggingFaceInstallCommand,
+            installCommandCopied: controller.installCommandCopied,
+            onChooseFolder: controller.chooseModelFolder,
+            onChangeFolder: controller.chooseModelFolder,
+            onOpenInFinder: controller.openModelFolderInFinder,
+            onClearFolder: controller.clearModelFolder,
+            selectedRepo: presentation.selectedRepo,
+            onUseParentFolder: useParentFolderAction,
+            onConfirmCLIInstalled: controller.confirmHFCLIInstalled,
+            onCopyDownloadCommand: controller.copyDownloadCommand,
+            onCopyInstallCommand: controller.copyInstallCommand
+        )
     }
 
     @ViewBuilder

@@ -3,11 +3,6 @@ import Foundation
 @preconcurrency import FluidAudio
 import OSLog
 
-private func privacySafeErrorSummary(_ error: Error) -> String {
-    let nsError = error as NSError
-    return "\(nsError.domain)#\(nsError.code)"
-}
-
 enum ASRError: LocalizedError, Sendable {
     case notInitialized
     case modelLibraryNotConfigured

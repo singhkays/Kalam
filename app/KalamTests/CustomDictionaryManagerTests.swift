@@ -44,11 +44,9 @@ final class CustomDictionaryManagerTests: XCTestCase {
     }
     
     func testMorphologicalSuffixes() {
-        // Even if morphological is false, the engine should now enforce it
         let entry = DictionaryEntry(
             trigger: "apple",
-            replacement: "orange",
-            morphological: false 
+            replacement: "orange"
         )
         
         let engine = ReplacementCompiler.compile(entries: [entry])
@@ -72,11 +70,9 @@ final class CustomDictionaryManagerTests: XCTestCase {
     }
     
     func testWholeWordEnforcement() {
-        // Even if wholeWord is false, the engine should now enforce it
         let entry = DictionaryEntry(
             trigger: "car",
-            replacement: "truck",
-            wholeWord: false
+            replacement: "truck"
         )
         
         let engine = ReplacementCompiler.compile(entries: [entry])
@@ -124,5 +120,32 @@ final class CustomDictionaryManagerTests: XCTestCase {
         XCTAssertTrue(examples.contains("apples → oranges"))
         XCTAssertTrue(examples.contains("apple's → orange's"))
         XCTAssertTrue(examples.contains("Apple → Orange"))
+    }
+
+    func testDecodesLegacyDictionaryOptions() throws {
+        let json = """
+        [
+          {
+            "id": "00000000-0000-0000-0000-000000000001",
+            "trigger": "apple",
+            "replacement": "orange",
+            "isEnabled": true,
+            "wholeWord": false,
+            "caseInsensitive": true,
+            "preserveCase": true,
+            "morphological": false,
+            "userAdded": true
+          }
+        ]
+        """
+
+        let entries = try JSONDecoder().decode([DictionaryEntry].self, from: Data(json.utf8))
+        XCTAssertEqual(entries, [
+            DictionaryEntry(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+                trigger: "apple",
+                replacement: "orange"
+            )
+        ])
     }
 }

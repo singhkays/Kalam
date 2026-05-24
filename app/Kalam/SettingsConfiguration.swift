@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import CoreAudio
 import AudioToolbox
+import OSLog
 
 enum GeneralSettingsKeys {
     static let launchAtLogin = "general.launchAtLogin"
@@ -191,6 +192,8 @@ extension Notification.Name {
 // MARK: - Audio Device Utilities
 
 enum AudioDeviceDebug {
+    private static let logger = Logger(subsystem: "singhkays.Kalam", category: "AudioDeviceDebug")
+
     struct DeviceInfo {
         let id: AudioDeviceID
         let name: String
@@ -208,22 +211,13 @@ enum AudioDeviceDebug {
         do {
             info = try defaultInputDeviceInfo()
         } catch {
-            print("Failed to query default input device: \(error.localizedDescription)")
+            logger.warning("Failed to query default input device errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             info = nil
         }
         if let info = info {
-            let isLogitech = info.name.localizedCaseInsensitiveContains("logitech") ||
-            info.name.localizedCaseInsensitiveContains("c920")
-            print("""
-            Input Device:
-            - Name: \(info.name)
-            - UID: \(info.uid)
-            - Channels (in): \(info.inputChannels)
-            - Nominal SR: \(info.nominalSampleRate) Hz
-            \(isLogitech ? "✅ Detected Logitech C920 (or similar)" : "ℹ️ Not a Logitech C920")
-            """)
+            logger.info("Default input device name=\(info.name, privacy: .public) uid=\(info.uid, privacy: .private) inputChannels=\(info.inputChannels, privacy: .public) sampleRate=\(info.nominalSampleRate, privacy: .public)")
         } else {
-            print("ℹ️ Could not query input device details (non-fatal, proceeding with defaults).")
+            logger.info("Could not query input device details; proceeding with defaults")
         }
     }
     
@@ -392,7 +386,7 @@ enum AudioDeviceDebug {
         status = AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &size, ablPtr)
         guard status == noErr else {
             if status == -10877 {
-                print("ℹ️ Non-fatal invalid property (-10877) for input channels; assuming default (2).")
+                logger.info("Non-fatal invalid property while reading input channels; assuming default channels=2")
                 return 2
             }
             throw error(status)
