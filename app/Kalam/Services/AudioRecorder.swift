@@ -44,21 +44,14 @@ enum AudioRecorderError: LocalizedError {
 final class AudioRecorder: @unchecked Sendable {
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "AudioRecorder")
     private let engine = AVAudioEngine()
-    private var converter: AVAudioConverter?
-    private var converterInputSampleRate: Double = 0
-    private var converterInputChannelCount: AVAudioChannelCount = 0
-    private var callbackCount: Int = 0
     private var isPrepared = false
     private var tapInstalled = false
     private var preparedInputDeviceID: AudioDeviceID?
-    private let targetFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
-    
-    // Thread-safe buffer and converter access
-    private let bufferQueue = DispatchQueue(label: "Kalam.AudioBuffer")
-    private var collecting = false
-    private var sampleBuffer: [Float] = []
-    private var recentWaveformSamples: [Float] = []
-    private let recentWaveformCapacity = 4096
+
+    // K-10: all capture state (buffers, converter, counters) lives behind
+    // AudioCaptureExchange; the render thread publishes non-blockingly
+    // (try-lock), consumers use exclusive access.
+    private let exchange = AudioCaptureExchange()
     
     // Tap buffer size reduced to lower tail latency at key-up
     private let tapBufferSizeFrames: AVAudioFrameCount = 1024
@@ -102,9 +95,11 @@ final class AudioRecorder: @unchecked Sendable {
             engine.inputNode.removeTap(onBus: 0)
             tapInstalled = false
         }
-        converter = nil
-        converterInputSampleRate = 0
-        converterInputChannelCount = 0
+        exchange.withExclusiveAccess { state in
+            state.converter = nil
+            state.converterInputSampleRate = 0
+            state.converterInputChannelCount = 0
+        }
         
         // Log current default input device details (to confirm e.g. Logitech C920)
         AudioDeviceDebug.logDefaultInputDeviceSummary()
@@ -172,13 +167,7 @@ final class AudioRecorder: @unchecked Sendable {
             tapInstalled = true
         }
         
-        bufferQueue.sync {
-            collecting = true
-            callbackCount = 0
-            sampleBuffer.removeAll(keepingCapacity: true)
-            recentWaveformSamples.removeAll(keepingCapacity: true)
-            // Do not reset converter here; keep across session until stop/drain to preserve internal filter state.
-        }
+        exchange.resetForNewSession()
         logger.info("Started collecting audio samples")
     }
     
@@ -190,15 +179,7 @@ final class AudioRecorder: @unchecked Sendable {
             try? await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000)
         }
         
-        var out: [Float] = []
-        bufferQueue.sync {
-            collecting = false
-            out = sampleBuffer
-            sampleBuffer.secureZero()
-            sampleBuffer.removeAll(keepingCapacity: false)
-            recentWaveformSamples.secureZero()
-            recentWaveformSamples.removeAll(keepingCapacity: false)
-        }
+        var out = exchange.stopCapture()
         
         // Stop the engine on the main thread to turn off the microphone indicator
         if engine.isRunning {
@@ -221,8 +202,8 @@ final class AudioRecorder: @unchecked Sendable {
         out.append(contentsOf: drainedTail)
         
         let durationMs = out.isEmpty ? 0 : Int(Double(out.count) / 16_000.0 * 1000)
-        let callbacks = bufferQueue.sync { callbackCount }
-        logger.info("Stopped collecting samples=\(out.count, privacy: .public) durationMs=\(durationMs, privacy: .public) callbacks=\(callbacks, privacy: .public)")
+        let (callbacks, dropped) = exchange.stats()
+        logger.info("Stopped collecting samples=\(out.count, privacy: .public) durationMs=\(durationMs, privacy: .public) callbacks=\(callbacks, privacy: .public) dropped=\(dropped, privacy: .public)")
         
         // Debug: Check non-zero and max amplitude
         let nonZeroCount = out.lazy.filter { abs($0) > 0.0001 }.count
@@ -242,182 +223,24 @@ final class AudioRecorder: @unchecked Sendable {
     /// graph construction asserts — the app's onboarding guarantees one in
     /// production). Mirrors the state portion of `startCollecting()`.
     func beginCollectingForTesting() {
-        bufferQueue.sync {
-            collecting = true
-            callbackCount = 0
-            sampleBuffer.removeAll(keepingCapacity: true)
-            recentWaveformSamples.removeAll(keepingCapacity: true)
-            // Do not reset converter here; keep across session until stop/drain to preserve internal filter state.
-        }
+        exchange.resetForNewSession()
     }
     
     /// Render-thread entry point (installTap callback). Never blocks — the
     /// publish path try-locks and drops (and counts) on contention (K-10).
     /// Internal for testability (KalamTests drives it with synthetic buffers).
-    func process(buffer: AVAudioPCMBuffer) {
-        bufferQueue.sync {
-            guard self.collecting else { return }
-            self.callbackCount += 1
-            let inputFormat = buffer.format
-            guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else { return }
-            let needsConverterRebuild =
-                self.converter == nil
-                || self.converterInputSampleRate != inputFormat.sampleRate
-                || self.converterInputChannelCount != inputFormat.channelCount
-
-            if needsConverterRebuild {
-                guard let rebuilt = AVAudioConverter(from: inputFormat, to: self.targetFormat) else {
-                    self.logger.warning("Failed to create AVAudioConverter inputSampleRate=\(inputFormat.sampleRate, privacy: .public) channels=\(inputFormat.channelCount, privacy: .public)")
-                    return
-                }
-                self.converter = rebuilt
-                self.converterInputSampleRate = inputFormat.sampleRate
-                self.converterInputChannelCount = inputFormat.channelCount
-            }
-            guard let converter = self.converter else { return }
-            
-            let ratio = self.targetFormat.sampleRate / inputFormat.sampleRate
-            let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 64.0)
-            
-            guard let outBuffer = AVAudioPCMBuffer(pcmFormat: self.targetFormat, frameCapacity: capacity) else {
-                self.logger.warning("Failed to create output buffer")
-                return
-            }
-            
-            var convError: NSError?
-            let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
-                outStatus.pointee = .haveData
-                return buffer
-            }
-            
-            let status = converter.convert(to: outBuffer, error: &convError, withInputFrom: inputBlock)
-            
-            if status == .error {
-                if let e = convError {
-                    self.logger.warning("Conversion error; using PCM fallback errorSummary=\(privacySafeErrorSummary(e), privacy: .public)")
-                } else {
-                    self.logger.warning("Conversion error unknown; using PCM fallback")
-                }
-                self.appendPCMBufferFallback(buffer)
-                return
-            }
-
-            let frames = Int(outBuffer.frameLength)
-            if frames > 0 {
-                guard let channel = outBuffer.floatChannelData?[0] else {
-                    self.logger.warning("No float channel data available; using PCM fallback")
-                    self.appendPCMBufferFallback(buffer)
-                    return
-                }
-                let samples = Array(UnsafeBufferPointer(start: channel, count: frames))
-                self.sampleBuffer.append(contentsOf: samples)
-                self.recentWaveformSamples.append(contentsOf: samples)
-                let overflow = self.recentWaveformSamples.count - self.recentWaveformCapacity
-                if overflow > 0 {
-                    self.recentWaveformSamples.removeFirst(overflow)
-                }
-            } else {
-                self.appendPCMBufferFallback(buffer)
-            }
-        }
-    }
-
-    private func appendPCMBufferFallback(_ buffer: AVAudioPCMBuffer) {
-        let mono = extractMonoFloatSamples(from: buffer)
-        guard !mono.isEmpty else { return }
-        let resampled = resampleLinear(mono, from: buffer.format.sampleRate, to: targetFormat.sampleRate)
-        guard !resampled.isEmpty else { return }
-        sampleBuffer.append(contentsOf: resampled)
-        recentWaveformSamples.append(contentsOf: resampled)
-        let overflow = recentWaveformSamples.count - recentWaveformCapacity
-        if overflow > 0 {
-            recentWaveformSamples.removeFirst(overflow)
-        }
-    }
-
-    private func extractMonoFloatSamples(from buffer: AVAudioPCMBuffer) -> [Float] {
-        let frames = Int(buffer.frameLength)
-        guard frames > 0 else { return [] }
-
-        switch buffer.format.commonFormat {
-        case .pcmFormatFloat32:
-            guard let channel = buffer.floatChannelData?[0] else { return [] }
-            return Array(UnsafeBufferPointer(start: channel, count: frames))
-
-        case .pcmFormatInt16:
-            guard let channel = buffer.int16ChannelData?[0] else { return [] }
-            return (0..<frames).map { Float(channel[$0]) / Float(Int16.max) }
-
-        case .pcmFormatInt32:
-            guard let channel = buffer.int32ChannelData?[0] else { return [] }
-            return (0..<frames).map { Float(channel[$0]) / Float(Int32.max) }
-
-        default:
-            return []
-        }
-    }
-
-    private func resampleLinear(_ input: [Float], from inRate: Double, to outRate: Double) -> [Float] {
-        guard !input.isEmpty else { return [] }
-        guard inRate > 0, outRate > 0 else { return [] }
-        guard abs(inRate - outRate) > 0.001 else { return input }
-
-        let outputCount = Int(Double(input.count) * outRate / inRate)
-        guard outputCount > 0 else { return [] }
-
-        var output = [Float](repeating: 0, count: outputCount)
-        let scale = inRate / outRate
-        for i in 0..<outputCount {
-            let src = Double(i) * scale
-            let lo = Int(src)
-            let hi = min(lo + 1, input.count - 1)
-            let frac = Float(src - Double(lo))
-            output[i] = input[lo] * (1 - frac) + input[hi] * frac
-        }
-        return output
+    @discardableResult
+    func process(buffer: AVAudioPCMBuffer) -> Bool {
+        exchange.publish(buffer)
     }
 
     func recentWaveform(sampleCount: Int = 512) -> [Float] {
-        bufferQueue.sync {
-            guard !recentWaveformSamples.isEmpty else { return [] }
-            let count = max(8, sampleCount)
-            if recentWaveformSamples.count <= count {
-                return recentWaveformSamples
-            }
-            return Array(recentWaveformSamples.suffix(count))
-        }
+        exchange.waveform(sampleCount: sampleCount)
     }
     
     // Drain any residual frames from the converter at stream end to avoid losing ~10–30 ms.
     private func drainConverterRemainder() -> [Float] {
-        var leftovers: [Float] = []
-        bufferQueue.sync {
-            guard let converter = self.converter else { return }
-            var convError: NSError?
-            
-            // Provide end-of-stream to flush internal buffers
-            let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
-                outStatus.pointee = .endOfStream
-                return nil
-            }
-            
-            while true {
-                guard let out = AVAudioPCMBuffer(pcmFormat: self.targetFormat, frameCapacity: 2048) else { break }
-                out.frameLength = 0
-                let status = converter.convert(to: out, error: &convError, withInputFrom: inputBlock)
-                if status == .haveData {
-                    if let ch = out.floatChannelData?[0] {
-                        let frames = Int(out.frameLength)
-                        leftovers.append(contentsOf: UnsafeBufferPointer(start: ch, count: frames))
-                    }
-                    continue
-                }
-                break
-            }
-            // Reset converter between sessions to clear state
-            converter.reset()
-        }
-        return leftovers
+        exchange.drainConverterRemainder()
     }
     
     deinit {
@@ -427,8 +250,6 @@ final class AudioRecorder: @unchecked Sendable {
         if engine.isRunning {
             engine.stop()
         }
-        sampleBuffer.secureZero()
-        recentWaveformSamples.secureZero()
         logger.info("AudioRecorder deinitialized; engine stopped and tap removed")
     }
 }
