@@ -255,8 +255,6 @@ Output:
 ```text
 This is done. Please send the summary
 ```
-What's the challenge we are finding with this issue and then why are we not able to fix it? Let's take a problem and solve it.
-
 
 `grammar protected terms`
 
@@ -318,12 +316,12 @@ Kalam requires Parakeet TDT models for on-device transcription. Models are loade
    Launch the app (or select "Complete Setup" from the menu bar).
    The **guided onboarding** will walk you through folder selection and model downloading.
 
-2. **Step 1: Choose a model folder**
-   
+2. **Choose a model folder**
+
    Select or create a folder to store your models, e.g., `~/Models/FluidAudio`.
    This folder will store all your downloaded models.
 
-2. **Download a model**
+3. **Download a model**
    
    Install the Hugging Face CLI (one-time):
    ```bash
@@ -347,7 +345,7 @@ Kalam requires Parakeet TDT models for on-device transcription. Models are loade
    
    The `--local-dir` path must match your chosen folder from Step 1.
 
-3. **Select the model** (Settings → Models → Step 3)
+4. **Select the model** (Settings → Models → Step 3)
 
 ### Required Files
 
@@ -374,12 +372,11 @@ Dependency updates should be deliberate: update the exact version in the Xcode p
 
 System frameworks:
 
-- `SwiftUI`, `AppKit`
+- `SwiftUI`, `AppKit` (AppKit's `NSSpellChecker` powers the optional grammar pass)
 - `AVFoundation`
 - `ApplicationServices`
 - `CoreAudio`, `AudioToolbox`
 - `NaturalLanguage` (used for tokenization in cleanup)
-- `AppKit` (`NSSpellChecker` for optional grammar pass)
 
 ## Optional: Enable ITN (`NemoTextProcessing.xcframework`)
 
@@ -467,7 +464,7 @@ Requirements (project settings):
 
 - macOS deployment target: `14.6`
 - Swift language version: `6.0`
-- Xcode 16.x recommended
+- Xcode 16.0 or newer (CI runs Xcode 26.6)
 
 Swift 6 concurrency posture: ASR mutable state is actor-isolated in `Kalam/Services/ASRService.swift`, paste execution is main-actor isolated in `Kalam/Services/PasteService.swift`, and the dictation flow no longer uses `Task.detached` to capture app/runtime objects. New background work should either live behind an actor boundary or capture only immutable `Sendable` values.
 
