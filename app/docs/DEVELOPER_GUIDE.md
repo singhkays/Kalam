@@ -74,12 +74,9 @@ Core files:
   - UserDefaults load/save and normalization
 - `SettingsUI.swift`
   - Settings UI (Word Replacement + Keyboard Controls + Refine + Models)
-- `TextCleanupConfiguration.swift`
-  - Cleanup feature flags and persistence
-  - Grammar mode and timeout budget persistence
-- `TextCleanupService.swift`
+- `Packages/KalamTextEngine/Sources/KalamTextEngine/TextCleanupEngine.swift` / `TextCleanupConfiguration.swift`
   - Deterministic low-latency transcript cleanup pipeline
-  - Optional grammar pass (`off` / `light` / `full`) with timeout budget
+  - Optional grammar pass (`off` / `light` / `full`) with timeout budget (AppKit-gated)
 - `app/Kalam/MicrophonePriorityConfiguration.swift` / `app/Kalam/MicrophoneDeviceService.swift`
   - Microphone selection and priority ordering
 
@@ -103,7 +100,7 @@ Core files:
 Current ordering in code:
 
 1. `ASR -> String`
-2. `TextCleanupService.clean(...)`
+2. `TextCleanupEngine.clean(...)`
 3. `NemoTextProcessing.normalizeSentence(...)` (if ITN enabled + available)
 4. `CustomDictionaryManager.apply(...)`
 5. paste
@@ -123,7 +120,7 @@ Current ordering in code:
 
 ## Text Cleanup Behavior
 
-`TextCleanupService` runs deterministic, local-only text transforms with feature flags:
+`TextCleanupEngine` runs deterministic, local-only text transforms with feature flags:
 
 - `removeFillers`
   - Removes common fillers and elongated variants (`ummm`, `uhhh`)
@@ -459,7 +456,7 @@ SWIFT_TOOLCHAIN=/path/to/swift ./scripts/test-engine.sh
 |---|---|---|
 | Filler removal, backtrack, lists, punctuation | `./scripts/test-engine.sh` | `Packages/KalamTextEngine/Tests/` |
 | Dictionary compilation and case mimicry | `./scripts/test-engine.sh` | `Packages/KalamTextEngine/Tests/` |
-| Grammar pass (`NSSpellChecker`) | `xcodebuild test` (Xcode only) | `KalamTests/TextCleanupServiceTests.swift` |
+| Grammar pass (`NSSpellChecker`) | `./scripts/test-engine.sh` | `Packages/KalamTextEngine/Tests/TextCleanupGrammarTests.swift` |
 | ITN, ASR, onboarding, full integration | `xcodebuild test` (Xcode only) | `KalamTests/` |
 
 ## Build / Run (Xcode)
@@ -505,5 +502,5 @@ Exit codes: `0` = all present models transcribed correctly, `1` = failure, `2` =
 - App currently relies on CGEvent unicode, then Cmd+V paste, then Accessibility insertion, so target-app behavior can vary.
 - Clipboard restore is guarded by pasteboard text and change count so user or target-app clipboard changes are left untouched.
 - Audio ducking requires output devices with settable scalar volume and is runtime-verified under sandbox.
-- Unit tests are available in `app/KalamTests/TextCleanupServiceTests.swift` and run via the `KalamTests` target.
+- Grammar/cleanup unit tests run headlessly via `./scripts/test-engine.sh` (`Packages/KalamTextEngine/Tests/`); the remaining app integration tests run via the `KalamTests` target.
 - Startup logs print ITN status/version and a smoke normalization example.
