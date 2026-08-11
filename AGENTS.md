@@ -38,7 +38,7 @@ Kalam is a privacy-first macOS menu bar dictation app (Swift 6, deployment targe
 | `AccessibilityHelper.swift` | `AccessibilityHelper` — AX trust check/prompt + explainer. |
 | `AppRelauncher.swift` | `AppRelauncher` — `open -n` relaunch (K-12 candidate). |
 | `AppMetadata.swift` | `KalamExternalLinks` + `KalamAppVersion` (used by Settings UI and AppDelegate). |
-| `SettingsUI.swift` | Settings window: Word Replacement / Keyboard / Refine / Models tabs. Giant view (K-04). |
+| `SettingsUI.swift` | Settings window shell: `SettingsView` orchestration (tab state, config load/persist). Per-tab views live in `Kalam/Settings/`. |
 | `OnboardingFlow.swift` | 4-step setup (Microphone, Accessibility, Hotkey, Model) + `OnboardingFlowController`. |
 | `ModelsConfiguration.swift` | Model version metadata, security-scoped bookmark (UserDefaults `models.modelLibraryBookmark`), availability checks. |
 | `ModelSetupSupport.swift`, `ModelAcquisitionPanel.swift` | Model folder picker + **copy-paste-only** `hf download` command (the app never executes shell commands). |
@@ -82,7 +82,7 @@ ASR → TextCleanupEngine.clean → ITN (if enabled) → CustomDictionaryManager
 - **Add a dictionary feature** → `DictionaryEntry.swift` / `ReplacementCompiler.swift` + tests.
 - **Change paste behavior** → `Services/PasteService.swift`; respect the clipboard guard; test the failure path (K-02).
 - **Touch the grammar pass** → `app/Packages/KalamTextEngine/Sources/KalamTextEngine/TextCleanupEngine.swift` (AppKit-gated section); tests are headless via `./scripts/test-engine.sh`.
-- **Add Settings UI** → `SettingsUI.swift` (or split per K-04); use `KalamTheme`/`KalamControlStyles`; label icon-only buttons (K-19).
+- **Add Settings UI** → `Kalam/Settings/` (tab views: `GeneralSettingsTab`, `ShortcutSettingsTab`, `CleanupSettingsTab`, `ModelsSettingsTab`, `UpdatesSettingsTab`, `WordReplacementView`; shared helpers in `SettingsSharedComponents.swift`; config persistence stays in the `SettingsView` shell). Use `KalamTheme`/`KalamControlStyles`; label icon-only buttons (K-19).
 
 ## Improvement-plan protocol
 

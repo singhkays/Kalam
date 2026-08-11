@@ -73,7 +73,9 @@ Core files:
   - Activation mode and key-combination modeling
   - UserDefaults load/save and normalization
 - `SettingsUI.swift`
-  - Settings UI (Word Replacement + Keyboard Controls + Refine + Models)
+  - Settings window shell (`SettingsView`): tab state, sidebar, config load/save orchestration
+- `Kalam/Settings/`
+  - Per-tab views: `GeneralSettingsTab` / `ShortcutSettingsTab` (hotkey + recorder sheet) / `CleanupSettingsTab` (refine + grammar) / `ModelsSettingsTab` / `UpdatesSettingsTab` / `WordReplacementView` (+ `EditableRow`); shared `SettingsSharedComponents.swift` (card surface, settings notification)
 - `Packages/KalamTextEngine/Sources/KalamTextEngine/TextCleanupEngine.swift` / `TextCleanupConfiguration.swift`
   - Deterministic low-latency transcript cleanup pipeline
   - Optional grammar pass (`off` / `light` / `full`) with timeout budget (AppKit-gated)
