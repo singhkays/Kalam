@@ -56,6 +56,96 @@ final class AudioCaptureExchangeTests: XCTestCase {
         // bound only, to stay deterministic).
         XCTAssertGreaterThanOrEqual(samples.count, 7_680_000, "preload must be fully captured")
     }
+
+    // MARK: - AudioCaptureExchange unit pins (GREEN-on-arrival; K-10)
+
+    func testPublishAndDrainPreserveOrderAndContent() {
+        let exchange = AudioCaptureExchange()
+        exchange.resetForNewSession()
+        for _ in 0..<3 {
+            XCTAssertTrue(exchange.publish(makeSyntheticBuffer(sampleRate: 16_000, frames: 1024)))
+        }
+        let drained = exchange.stopCapture()
+        // Every published frame must arrive; AVAudioConverter pads each call up
+        // to capacity (1024 in → 1088 out observed; verbatim pre-K-10 behavior),
+        // so bound between no-loss (3072) and fully-padded (3264).
+        XCTAssertGreaterThanOrEqual(drained.count, 3072, "no published samples may be lost")
+        XCTAssertLessThanOrEqual(drained.count, 3264)
+        XCTAssertFalse(drained.allSatisfy { $0 == 0 }, "content must not be silent")
+    }
+
+    func testPublishIsNonBlockingWhileConsumerHoldsLock() {
+        let exchange = AudioCaptureExchange()
+        exchange.resetForNewSession()
+        let lockAcquired = expectation(description: "consumer holds the lock")
+        let hog = Thread {
+            exchange.withExclusiveAccess { _ in
+                lockAcquired.fulfill()
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+        }
+        hog.start()
+        wait(for: [lockAcquired], timeout: 2)
+
+        let start = CFAbsoluteTimeGetCurrent()
+        let accepted = exchange.publish(makeSyntheticBuffer(frames: 1024))
+        let elapsed = CFAbsoluteTimeGetCurrent() - start
+
+        XCTAssertFalse(accepted, "publish must drop while the lock is held")
+        XCTAssertLessThan(elapsed, 0.05, "publish must never block (stalled \(Int(elapsed * 1000)) ms)")
+        let stats = exchange.stats()
+        XCTAssertEqual(stats.dropped, 1)
+        XCTAssertEqual(stats.callbacks, 0)
+    }
+
+    func testPublishAfterStopIsSkippedNotDropped() {
+        let exchange = AudioCaptureExchange()
+        exchange.resetForNewSession()
+        _ = exchange.stopCapture()
+        XCTAssertTrue(exchange.publish(makeSyntheticBuffer(frames: 1024)), "post-stop publishes are skipped, not dropped")
+        XCTAssertEqual(exchange.stats().dropped, 0)
+        XCTAssertEqual(exchange.stopCapture().count, 0)
+    }
+
+    func testStopCaptureIncludesPublishInFlight() {
+        let exchange = AudioCaptureExchange()
+        exchange.resetForNewSession()
+        XCTAssertTrue(exchange.publish(makeSyntheticBuffer(sampleRate: 16_000, frames: 1024)))
+        let drained = exchange.stopCapture()
+        XCTAssertGreaterThanOrEqual(drained.count, 1024, "no published samples may be lost")
+        XCTAssertLessThanOrEqual(drained.count, 1088) // converter padding (see testPublishAndDrain...)
+        // A publish after stop is skipped: nothing more to drain.
+        XCTAssertTrue(exchange.publish(makeSyntheticBuffer(sampleRate: 16_000, frames: 1024)))
+        XCTAssertEqual(exchange.stopCapture().count, 0)
+    }
+
+    func testConverterRebuildsWhenSampleRateChanges() {
+        let exchange = AudioCaptureExchange()
+        exchange.resetForNewSession()
+        XCTAssertTrue(exchange.publish(makeSyntheticBuffer(sampleRate: 48_000, frames: 48_000)))   // 1 s @48 kHz → ~16 k out
+        XCTAssertTrue(exchange.publish(makeSyntheticBuffer(sampleRate: 44_100, frames: 44_100)))   // 1 s @44.1 kHz → ~16 k out
+        let drained = exchange.stopCapture()
+        // 1 s + 1 s of 16 kHz mono; converter priming allows a small tolerance.
+        XCTAssertEqual(Double(drained.count), 32_000, accuracy: 256)
+    }
+
+    func testDrainConverterRemainderFlushesTail() {
+        let exchange = AudioCaptureExchange()
+        exchange.resetForNewSession()
+        XCTAssertTrue(exchange.publish(makeSyntheticBuffer(sampleRate: 48_000, frames: 4_800))) // 0.1 s
+        _ = exchange.stopCapture()
+        let tail = exchange.drainConverterRemainder()
+        XCTAssertFalse(tail.isEmpty, "resampler tail must be flushed at stream end")
+    }
+
+    func testWaveformReturnsRecentSamples() {
+        let exchange = AudioCaptureExchange()
+        exchange.resetForNewSession()
+        XCTAssertTrue(exchange.publish(makeSyntheticBuffer(sampleRate: 16_000, frames: 4096)))
+        let wave = exchange.waveform(sampleCount: 512)
+        XCTAssertEqual(wave.count, 512)
+        XCTAssertFalse(wave.allSatisfy { $0 == 0 })
+    }
 }
 
 // MARK: - Helpers
