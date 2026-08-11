@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import AppKit
+import OSLog
 
 
 
@@ -308,6 +309,7 @@ struct OnboardingStatusSnapshot: Equatable {
 
 @MainActor
 final class OnboardingFlowController: ObservableObject {
+    private let logger = Logger(subsystem: "singhkays.Kalam", category: "Onboarding")
     @Published private(set) var snapshot: OnboardingStatusSnapshot
     @Published var selectedDownloadVersion: ASRModelVersion {
         didSet {
@@ -504,20 +506,13 @@ final class OnboardingFlowController: ObservableObject {
 
     #if DEBUG
     func resetAllOnboardingState() {
-        print("\n[DEBUG] RESETTING ONBOARDING STATE")
+        logger.info("Onboarding state reset (DEBUG-only)")
         OnboardingConfiguration.reset()
-        
+
         // Provide TCC instructions
         let bundleID = Bundle.main.bundleIdentifier ?? "singhkays.Kalam"
-        print("""
-        ------------------------------------------------------------
-        To fully reset system permissions, run these in Terminal:
-        
-        tccutil reset Microphone \(bundleID)
-        tccutil reset Accessibility \(bundleID)
-        ------------------------------------------------------------
-        """)
-        
+        logger.info("To fully reset system permissions, run tccutil reset Microphone \(bundleID, privacy: .public) and tccutil reset Accessibility \(bundleID, privacy: .public)")
+
         refreshAction()
     }
     #endif

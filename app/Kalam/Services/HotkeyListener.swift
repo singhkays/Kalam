@@ -1,10 +1,12 @@
 import Foundation
 import AppKit
 import HotKey
+import OSLog
 
 // MARK: - Global Hotkey (press-to-talk)
 
 final class HotkeyListener {
+    private let logger = Logger(subsystem: "singhkays.Kalam", category: "Hotkey")
     private var hotKey: HotKey?
     private var localFlagsMonitor: Any?
     private var globalFlagsMonitor: Any?
@@ -34,7 +36,7 @@ final class HotkeyListener {
         let safeConfiguration = configuration.normalized()
         if let modifierOnlyFlags = safeConfiguration.keyCombination.modifierOnlyFlags {
             startModifierMonitoring(requiredFlags: modifierOnlyFlags, preset: safeConfiguration.keyCombination)
-            print("Hotkey registered: \(safeConfiguration.keyCombination.displayName)")
+            logger.info("Hotkey registered \(safeConfiguration.keyCombination.displayName, privacy: .public)")
             return
         }
 
@@ -49,7 +51,7 @@ final class HotkeyListener {
             self?.onPTTChanged?(false)
         }
 
-        print("Hotkey registered: \(safeConfiguration.displayString)")
+        logger.info("Hotkey registered \(safeConfiguration.displayString, privacy: .public)")
     }
 
     private func startModifierMonitoring(requiredFlags: NSEvent.ModifierFlags, preset: KeyCombination) {

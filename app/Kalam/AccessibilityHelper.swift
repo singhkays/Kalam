@@ -1,12 +1,15 @@
 import ApplicationServices
+import OSLog
 
 // MARK: - Accessibility helper
 
 enum AccessibilityHelper {
+    private static let logger = Logger(subsystem: "singhkays.Kalam", category: "Accessibility")
+
     static var isTrusted: Bool {
         AXIsProcessTrusted()
     }
-    
+
     @discardableResult
     static func ensureTrusted(prompt: Bool) -> Bool {
         let opts = ["AXTrustedCheckOptionPrompt": prompt] as CFDictionary
@@ -14,18 +17,13 @@ enum AccessibilityHelper {
         if !trusted {
             explainAccessibilityIfNeeded()
         } else {
-            print("Accessibility: trusted = true")
+            logger.info("Accessibility trusted")
         }
         return trusted
     }
-    
+
     static func explainAccessibilityIfNeeded() {
         guard !AXIsProcessTrusted() else { return }
-        print("""
-        Accessibility not enabled for this app.
-        Enable it in:
-        System Settings → Privacy & Security → Accessibility → enable for Kalam.
-        If you just enabled it, quit and re-launch the app.
-        """)
+        logger.info("Accessibility not enabled — enable Kalam in System Settings → Privacy & Security → Accessibility, then relaunch")
     }
 }
