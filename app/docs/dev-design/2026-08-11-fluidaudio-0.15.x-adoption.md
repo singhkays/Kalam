@@ -1,7 +1,7 @@
 # FluidAudio 0.14.5 → 0.15.5 Adoption Research & Plan
 
 **Date:** 2026-08-11
-**Status:** Plan (not executed)
+**Status:** Executed 2026-08-11 (commit `a74b239`) — Phases 0–3 code, tests, and docs done; build green, Xcode suite 62/62, engine 32/32. **Remaining manual gates:** Phase 1.6 dictation smoke test with real models and Phase 2.2 latency/WER measurement (need a Mac with a configured model library; the `.cpuAndGPU` v3 path is currently enabled per upstream's measured +~8% RTFx / WER-neutral claim — revert by changing `ASRService.encoderComputeUnits(for:)` to return `nil`).
 **Scope:** Evaluate upstream FluidAudio changes (v0.14.5 → v0.15.5) against Kalam's actual usage, recommend adopt/defer/skip, and plan the adoption work.
 **Sources:** FluidAudio releases page (v0.15.0–v0.15.5), upstream source diffed at tags `v0.14.5` and `v0.15.5` (`AsrModels.swift`, `AsrManager.swift`, `AsrTypes.swift`, `DownloadUtils.swift`, `ModelHub.swift`, `ModelHubOfflineTests.swift`), Kalam `app/` source.
 
