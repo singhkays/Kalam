@@ -39,6 +39,13 @@ build_log.txt
 app/build_log.txt
 *.py
 
+# Local agent session artifacts (never commit)
+.grok/
+.hermes/
+
+# Local real-model library (RealModelSmokeTests fixtures; user-provisioned)
+Models/
+
 # Internal Development Docs (Move to private repo or remove from here if they should be public)
 design_brief.md
 kalam_gtm.md
