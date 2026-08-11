@@ -120,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var ignoreNextKeyUp = false
     private var hotkeyConfiguration: PTTHotkeyConfiguration = .load()
     private var transcriptionTask: Task<Void, Never>?
+    private var recordingSessions = RecordingSessionTracker()
     private let holdOrToggleTapThreshold: CFTimeInterval = 0.45
     private let doubleTapInterval: CFTimeInterval = 0.35
     
@@ -853,6 +854,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @discardableResult
     private func startRecording(triggerMode: RecordingTriggerMode) -> Bool {
+        // K-01: a new recording supersedes any in-flight transcription/paste from
+        // the previous session — abort it so stale text is never pasted.
+        transcriptionTask?.cancel()
         guard !isRecording else { return false }
         let onboardingSnapshot = currentOnboardingSnapshot()
         guard !onboardingSnapshot.hasIncompleteRequirements else {
@@ -886,6 +890,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
 
+        _ = recordingSessions.beginNewRecording()
         isRecording = true
         recordingTriggerMode = triggerMode
         
@@ -929,12 +934,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Capture PTT times on MainActor before detaching
         let pttDown = self.pttDownTime
         let pttUp = self.pttUpTime
+        let generation = recordingSessions.currentGeneration()
 
         transcriptionTask?.cancel()
         
         // Run as an actor-inherited task instead of Task.detached so Swift 6 does not
         // send MainActor app state into an unisolated closure. Add post-roll to preserve trailing phonemes.
-        transcriptionTask = Task(priority: .userInitiated) { [weak self, pttDown, pttUp] in
+        transcriptionTask = Task(priority: .userInitiated) { [weak self, pttDown, pttUp, generation] in
             guard let self = self else { return }
             guard !Task.isCancelled else { return }
             let defaults = UserDefaults.standard
@@ -1029,6 +1035,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                 try await Task.sleep(nanoseconds: UInt64(pasteDelay * 1_000_000_000))
                 guard !Task.isCancelled else { return }
+                guard self.recordingSessions.isCurrent(generation) else {
+                    self.logger.info("Paste suppressed: recording superseded by a newer session")
+                    return
+                }
                 stageMark("paste-wait")
 
                 do {

@@ -19,9 +19,28 @@ enum PasteServiceError: LocalizedError {
 
 @MainActor
 final class PasteService {
-    private let logger = Logger(subsystem: "singhkays.Kalam", category: "PasteService")
+    private static let logger = Logger(subsystem: "singhkays.Kalam", category: "PasteService")
 
-    private struct PasteboardSnapshot {
+    /// Injectable behavior for paste strategies. Production defaults are the real
+    /// CGEvent/AX implementations; tests inject fakes so no real keystrokes or
+    /// accessibility calls are ever posted (K-02 regression coverage).
+    @MainActor
+    struct PasteStrategies {
+        var isProcessTrusted: () -> Bool = { AXIsProcessTrusted() }
+        var postUnicodeText: (String) -> Bool = { PasteService.postUnicodeTextIfPossible($0) }
+        var postCmdV: () -> Bool = { PasteService.postCmdV() }
+        var insertTextViaAccessibility: (String) -> String? = { PasteService.insertTextViaAccessibility($0) }
+        var pasteboard: NSPasteboard = .general
+        var restoreDelay: TimeInterval = 0.5
+    }
+
+    private let strategies: PasteStrategies
+
+    init(strategies: PasteStrategies = PasteStrategies()) {
+        self.strategies = strategies
+    }
+
+    struct PasteboardSnapshot {
         let items: [[String: Data]]
 
         init(pasteboard: NSPasteboard) {
@@ -52,56 +71,60 @@ final class PasteService {
 
     func paste(_ text: String) throws {
         // Check Accessibility without prompting in the hot path.
-        guard AXIsProcessTrusted() else {
-            logger.warning("Accessibility not trusted; aborting paste")
+        guard strategies.isProcessTrusted() else {
+            Self.logger.warning("Accessibility not trusted; aborting paste")
             throw PasteServiceError.accessibilityNotTrusted
         }
 
-        if postUnicodeTextIfPossible(text) {
-            logger.info("Paste succeeded via CGEvent unicode")
+        if strategies.postUnicodeText(text) {
+            Self.logger.info("Paste succeeded via CGEvent unicode")
             return
         }
 
-        let pasteboard = NSPasteboard.general
+        let pasteboard = strategies.pasteboard
         let snapshot = PasteboardSnapshot(pasteboard: pasteboard)
         let insertedPasteboardState = writeAndTrackPasteboardState(pasteboard: pasteboard, text: text)
-        _ = waitForPasteboardCommit(targetChangeCount: insertedPasteboardState.changeCount)
+        _ = waitForPasteboardCommit(pasteboard: pasteboard, targetChangeCount: insertedPasteboardState.changeCount)
 
-        if postCmdV() {
-            logger.info("Paste succeeded via Cmd+V")
-            restoreClipboardIfNeeded(snapshot, insertedState: insertedPasteboardState)
+        // K-02: the transcript now sits on the user's pasteboard. Restoring the
+        // original clipboard content is unconditional from this point — every exit
+        // path (Cmd+V success, AX insert success, or any failure) schedules the
+        // restore. Previously the throw path left the transcript on the clipboard.
+        defer { restoreClipboardIfNeeded(snapshot, insertedState: insertedPasteboardState) }
+
+        if strategies.postCmdV() {
+            Self.logger.info("Paste succeeded via Cmd+V")
             return
         }
 
-        if let error = insertTextViaAccessibility(text) {
-            logger.warning("Paste failed after AX fallback: \(error, privacy: .public)")
+        if let error = strategies.insertTextViaAccessibility(text) {
+            Self.logger.warning("Paste failed after AX fallback: \(error, privacy: .public)")
             throw PasteServiceError.pasteExecutionFailed(reason: error)
         }
 
-        logger.info("Paste succeeded via Accessibility")
-        restoreClipboardIfNeeded(snapshot, insertedState: insertedPasteboardState)
+        Self.logger.info("Paste succeeded via Accessibility")
     }
 
-    private struct InsertedPasteboardState {
+    struct InsertedPasteboardState {
         let text: String
         let changeCount: Int
     }
 
-    private func restoreClipboardIfNeeded(_ snapshot: PasteboardSnapshot, insertedState: InsertedPasteboardState) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            let pasteboard = NSPasteboard.general
+    func restoreClipboardIfNeeded(_ snapshot: PasteboardSnapshot, insertedState: InsertedPasteboardState) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + strategies.restoreDelay) {
+            let pasteboard = self.strategies.pasteboard
             guard pasteboard.changeCount == insertedState.changeCount,
                   pasteboard.string(forType: .string) == insertedState.text
             else {
-                self.logger.info("Clipboard restore skipped because pasteboard changed after Kalam write")
+                Self.logger.info("Clipboard restore skipped because pasteboard changed after Kalam write")
                 return
             }
             snapshot.restore(to: pasteboard)
-            self.logger.info("Clipboard restored after paste")
+            Self.logger.info("Clipboard restored after paste")
         }
     }
 
-    private func writeAndTrackPasteboardState(pasteboard: NSPasteboard, text: String) -> InsertedPasteboardState {
+    func writeAndTrackPasteboardState(pasteboard: NSPasteboard, text: String) -> InsertedPasteboardState {
         let before = pasteboard.changeCount
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
@@ -110,17 +133,18 @@ final class PasteService {
         return InsertedPasteboardState(text: text, changeCount: effectiveChangeCount)
     }
 
-    private func waitForPasteboardCommit(
+    func waitForPasteboardCommit(
+        pasteboard: NSPasteboard,
         targetChangeCount: Int,
         timeoutSeconds: TimeInterval = 0.15,
         pollIntervalSeconds: TimeInterval = 0.005
     ) -> Bool {
-        if targetChangeCount <= NSPasteboard.general.changeCount {
+        if targetChangeCount <= pasteboard.changeCount {
             return true
         }
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         while Date() < deadline {
-            if NSPasteboard.general.changeCount >= targetChangeCount {
+            if pasteboard.changeCount >= targetChangeCount {
                 return true
             }
             usleep(useconds_t(pollIntervalSeconds * 1_000_000))
@@ -128,7 +152,7 @@ final class PasteService {
         return false
     }
 
-    private func postCmdV() -> Bool {
+    private static func postCmdV() -> Bool {
         let source = CGEventSource(stateID: .combinedSessionState)
         let cmdKey: CGKeyCode = 55
         let vKey: CGKeyCode = 9
@@ -137,7 +161,7 @@ final class PasteService {
               let vUp = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false),
               let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: cmdKey, keyDown: false)
         else {
-            logger.warning("Failed to create Cmd+V CGEvents")
+            Self.logger.warning("Failed to create Cmd+V CGEvents")
             return false
         }
 
@@ -151,20 +175,20 @@ final class PasteService {
         return true
     }
 
-    private func postUnicodeTextIfPossible(_ text: String) -> Bool {
+    private static func postUnicodeTextIfPossible(_ text: String) -> Bool {
         let utf16Array = Array(text.utf16)
         if utf16Array.isEmpty {
             return false
         }
         if utf16Array.count > 200 {
-            logger.info("CGEvent unicode skipped due to length=\(utf16Array.count)")
+            Self.logger.info("CGEvent unicode skipped due to length=\(utf16Array.count)")
             return false
         }
 
         guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
               let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
         else {
-            logger.warning("Failed to create CGEvent unicode events")
+            Self.logger.warning("Failed to create CGEvent unicode events")
             return false
         }
 
@@ -176,7 +200,7 @@ final class PasteService {
         return true
     }
 
-    private func insertTextViaAccessibility(_ text: String) -> String? {
+    private static func insertTextViaAccessibility(_ text: String) -> String? {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
             return "No frontmost application found"
         }
