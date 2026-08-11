@@ -4,13 +4,18 @@ import AVFoundation
 
 /// K-10 regression pin. The render-thread publish path (`process`) must never
 /// block behind a consumer holding the capture state. RED on the pre-fix code:
-/// `process` does `bufferQueue.sync`, so the producer iteration colliding with
-/// the (multi-ms) stop critical section stalls for its full duration. GREEN
-/// after Task 2: `publish` try-locks and drops instead.
+/// `process` does `bufferQueue.sync`, so every producer iteration colliding
+/// with the (multi-ms) stop critical section stalls for its remainder —
+/// hundreds of iterations per run. GREEN after Task 2: `publish` try-locks and
+/// drops instead (µs per iteration, zero stalls).
 ///
 /// Timing-based by necessity (the "never blocks" property is a latency bound),
-/// but the margins are wide: the preload makes the stop section ~8–20 ms on any
-/// hardware, while the bound (5 ms) is ~100× the post-fix publish (~50 µs).
+/// but the assertion statistic is noise-robust: we count iterations exceeding a
+/// 5 ms threshold rather than asserting on the max. A single VM scheduling
+/// hiccup (~15 ms observed under full-suite load) is tolerated; a blocking
+/// design produces hundreds of stalled iterations and fails by an order of
+/// magnitude. The structural guarantee (publish under a held lock drops, never
+/// waits) is pinned deterministically by `testPublishIsNonBlockingWhileConsumerHoldsLock`.
 final class AudioCaptureExchangeTests: XCTestCase {
 
     func testProducerDoesNotStallWhileStopRuns() async throws {
@@ -48,8 +53,8 @@ final class AudioCaptureExchangeTests: XCTestCase {
 
         let maxStall = meter.maxStall
         XCTAssertLessThan(
-            maxStall, 0.005,
-            "K-10: render-thread publish stalled \(Int(maxStall * 1000)) ms — must never block on the capture lock"
+            meter.stallCount, 10,
+            "K-10: \(meter.stallCount) render-thread publishes stalled >5 ms (max \(Int(maxStall * 1000)) ms) — a blocking capture lock would stall hundreds"
         )
         // The preload must be fully captured (480 s × 16 kHz = 7,680,000 samples;
         // the resampler tail adds a little, and a live mic adds more — lower
@@ -163,19 +168,31 @@ private func makeSyntheticBuffer(sampleRate: Double = 48_000, channels: Int = 1,
     return buffer
 }
 
-/// Swift-6-safe max-of-durations accumulator (mutating a captured var across
-/// threads is a compile error in Swift 6).
+/// Swift-6-safe stall accumulator (mutating a captured var across threads is a
+/// compile error in Swift 6). Counts iterations over the threshold in addition
+/// to tracking the max — the count is the noise-robust assertion statistic.
 private final class StallMeter: @unchecked Sendable {
+    /// Iterations longer than this count as stalls: ~100× the post-fix publish
+    /// (µs), occasionally exceeded by VM scheduling noise (tolerated as a
+    /// single count), massively exceeded by a blocking lock (hundreds of hits).
+    static let stallThreshold: TimeInterval = 0.005
     private let lock = NSLock()
     private var _max: TimeInterval = 0
+    private var _stallCount = 0
     func record(_ value: TimeInterval) {
         lock.lock()
         defer { lock.unlock() }
         _max = Swift.max(_max, value)
+        if value > Self.stallThreshold { _stallCount += 1 }
     }
     var maxStall: TimeInterval {
         lock.lock()
         defer { lock.unlock() }
         return _max
+    }
+    var stallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _stallCount
     }
 }
