@@ -1,3 +1,4 @@
+import KalamTextEngine
 import XCTest
 @testable import Kalam_test
 

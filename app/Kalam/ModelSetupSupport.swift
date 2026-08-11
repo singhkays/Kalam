@@ -84,6 +84,12 @@ enum ModelSetupSupport {
     static func loadPersistedNormalizedSelectedModel(from defaults: UserDefaults = .standard) -> ModelsConfiguration {
         let loaded = ModelsConfiguration.load(from: defaults)
         let normalized = normalizedSelectedModel(in: loaded)
+        if normalized != loaded {
+            // Persist the promotion (e.g. v2 -> v3 once v3 is installed) so every
+            // subsequent plain load sees the same selection. Mirrors the existing
+            // load-side-effect pattern for stale bookmark refresh.
+            normalized.save(to: defaults)
+        }
         return normalized
     }
 

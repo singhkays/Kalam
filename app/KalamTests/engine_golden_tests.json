@@ -8,8 +8,8 @@
     {
         "name": "False Positive List Marker with Backtrack",
         "input": "the budget is five billion dollars and actually no the budget is seven billion dollars",
-        "expected": "the budget is $7 billion",
-        "description": "Tests false positive marker '5 billion' and '7 billion' handled by ITN + backtrack."
+        "expected": "the budget is $5 billion and actually no the budget is $7 billion",
+        "description": "Tests false positive marker '5 billion' and '7 billion' handled by ITN. Bare 'actually no' is not a backtrack cue (would destroy valid prose), so the clause is preserved."
     },
     {
         "name": "Continuous Dictation with Multiple Backtracks",

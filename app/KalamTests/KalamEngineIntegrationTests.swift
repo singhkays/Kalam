@@ -1,5 +1,6 @@
 import XCTest
 import AVFoundation
+import KalamTextEngine
 @testable import Kalam_test
 
 final class KalamEngineIntegrationTests: XCTestCase {

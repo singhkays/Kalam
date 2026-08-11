@@ -1,3 +1,4 @@
+import KalamTextEngine
 import XCTest
 @testable import Kalam_test
 
@@ -45,10 +46,13 @@ final class TextCleanupServiceTests: XCTestCase {
         XCTAssertGreaterThan(result.stats.backtrackEdits, 0)
     }
 
-    func testBacktrackNoCueRemovesPriorClause() {
+    func testBareNoIsNotTreatedAsBacktrackCue() {
+        // Bare "no" is a common word in normal prose, not a correction cue —
+        // treating it as one deleted valid text ("there is no way" -> "way").
+        // Matches the engine's documented backtrack behavior.
         let input = "book me tomorrow no book me Friday"
         let result = service.clean(input, configuration: config())
-        XCTAssertEqual(result.text, "book me Friday")
+        XCTAssertEqual(result.text, "book me tomorrow no book me Friday")
     }
 
     func testNumberedListFormatting() {
