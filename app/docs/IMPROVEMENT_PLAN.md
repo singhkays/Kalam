@@ -32,9 +32,9 @@
 |---|---|---|---|---|---|---|
 | K-08 | ⬜ | Medium | Transcript text sits on `NSPasteboard.general` for up to ~0.5 s after Cmd+V paste. | `PasteService.swift:91` (`asyncAfter .now() + 0.5`). | Shorten the window / restore sooner once change-count confirms; tie to K-02's defer-restore. | Paste into an app that polls the pasteboard; confirm restore timing. |
 | K-09 | ⬜ | Medium | `waitForPasteboardCommit` spins `usleep` up to 150 ms on the MainActor. | `PasteService.swift:113–129` (loop at 122–127). | Replace with `Task.sleep` / continuation polling. | No main-thread stall during paste (sample main thread). |
-| K-10 | ⬜ | Medium | Real-time audio thread (installTap callback) takes a blocking `bufferQueue.sync` while the transcription task holds the same queue — priority-inversion risk on the render thread. | `KalamApp.swift:2500–2556` (`process(buffer:)`). | `os_unfair_lock` / `tryLock`, or lock-free enqueue; never block the audio thread. | Record while transcribing; no audio glitches under contention. |
+| K-10 | ⬜ | Medium | Real-time audio thread (installTap callback) takes a blocking `bufferQueue.sync` while the transcription task holds the same queue — priority-inversion risk on the render thread. | `Services/AudioRecorder.swift` (`process(buffer:)`; was `KalamApp.swift:2500–2556` at review time). | `os_unfair_lock` / `tryLock`, or lock-free enqueue; never block the audio thread. | Record while transcribing; no audio glitches under contention. |
 | K-11 | ⬜ | Low | GitHub Actions use mutable tags (supply-chain hardening gap); `deploy-kalam-landing.yml` has no `permissions:` block. | `.github/workflows/release.yml` (`checkout@v4`, `cache@v4`, `setup-xcode@v1`, `action-gh-release@v2`); `deploy-kalam-landing.yml` (`checkout@v4`, `setup-node@v4`). | Pin actions to commit SHAs; add explicit `permissions:` (contents: write only where needed). | Workflows still run after pinning. |
-| K-12 | ⬜ | Info | `AppRelauncher` uses `open -n` + `exit(0)`; consider `SMAppService`/`NSWorkspace` relaunch for cleaner lifecycle. | `KalamApp.swift:2908–2923`. | Evaluate; low priority. | Manual relaunch test after setup completion. |
+| K-12 | ⬜ | Info | `AppRelauncher` uses `open -n` + `exit(0)`; consider `SMAppService`/`NSWorkspace` relaunch for cleaner lifecycle. | `AppRelauncher.swift` (was `KalamApp.swift:2908–2923` at review time). | Evaluate; low priority. | Manual relaunch test after setup completion. |
 
 ## Priority 4 — Tests & CI
 
@@ -48,12 +48,12 @@
 
 | ID | Status | Severity | Finding | Evidence (at review time) | Fix | Verify |
 |---|---|---|---|---|---|---|
-| K-16 | ⬜ | Low | Debug leftover + raw `print()` instead of `Logger`: `print("\n[DEBUG] RESETTING ONBOARDING STATE")` and 13 other `print()` calls. | `OnboardingFlow.swift:507`; `KalamApp.swift:1318, 1333, 2892, 2899, 2919`; `SettingsConfiguration.swift:211`. | Remove debug prints; convert remaining `print()` → `Logger`. | `grep -rn 'print(' app/Kalam --include='*.swift'` → only intentional output remains. |
+| K-16 | ⬜ | Low | Debug leftover + raw `print()` instead of `Logger`: `print("\n[DEBUG] RESETTING ONBOARDING STATE")` and 13 other `print()` calls. | `OnboardingFlow.swift:516`; `Services/HotkeyListener.swift:37,52`; `AccessibilityHelper.swift:17,24`; `AppRelauncher.swift:14`; `SettingsConfiguration.swift:211,217,226,395` (KalamApp.swift itself is print-free since K-03; `KalamTestRunner.swift` prints are intentional). | Remove debug prints; convert remaining `print()` → `Logger`. | `grep -rn 'print(' app/Kalam --include='*.swift'` → only intentional output remains. |
 | K-17 | ⬜ | Low | Docs drift: stray pasted paragraph in the guide; references to deleted `app/Kalam/TextCleanupConfiguration.swift`. | `app/docs/DEVELOPER_GUIDE.md:249` (stray text), `:67–69` (deleted file). | Remove stray text; update architecture list to point at the engine package. | Read-through of the guide. |
 | K-18 | ⬜ | Low | `app/.grok/` and `app/.hermes/` (incl. `desktop-attachments/`) are untracked local dirs not covered by `.gitignore` — a careless `git add -A` commits session artifacts. | `.gitignore` (no grok/hermes entries); `git status` untracked list. | Add `.grok/` and `.hermes/` to `.gitignore` (and `app/.grok/`, `app/.hermes/`). | `git status` clean of those dirs. |
 | K-19 | ⬜ | Medium | Accessibility gaps for a dictation app: only 2 `.accessibilityLabel`s in the entire app; the hotkey dropdown is hidden from VoiceOver; onboarding windows hide traffic lights and are mouse-first. | `SetupDropdownField.swift:25` (`.accessibilityHidden(true)`); app-wide label count = 2 (`ModelAcquisitionPanel.swift:190`, `CommandCopyRow.swift:103`). | Label icon-only buttons; expose the dropdown; add keyboard paths to onboarding. | VoiceOver + full-keyboard pass over Settings and Onboarding. |
 | K-20 | ⬜ | Low | Dictionary data loss edges: imported entries with `userAdded == false` are silently dropped on next launch; corrupt `user_dictionary.json` silently resets to empty (no backup, no notice). | `CustomDictionaryManager.swift:103` (load filter), `:105–108` (silent reset). | Preserve a `.bak` of corrupt files + surface a notice; reconsider the `userAdded` filter on import. | Import JSON with `userAdded:false`, relaunch, entries persist (or documented behavior). |
-| K-21 | ⬜ | Info | Inconsistencies: settings window created at 750 pt then min/max set to 900 pt; `import CoreAudio` mid-file. | `KalamApp.swift:361` vs `:370–384`; `:1155`. | Unify window widths; move imports to file top. | Visual + build check. |
+| K-21 | ⬜ | Info | Inconsistencies: settings window created at 750 pt then min/max set to 900 pt. (The mid-file `import CoreAudio` was removed by K-03.) | `KalamApp.swift:341–343` vs `:353`. | Unify window widths. | Visual + build check. |
 
 ---
 
@@ -61,7 +61,7 @@
 
 - **No network entitlement** (deliberate). Any new `URLSession`/network code in the app is a regression — review it hard.
 - Sandbox + hardened runtime + library validation + dyld-env-vars disabled (`Kalam.entitlements`).
-- Audio buffers are `secureZero()`'d (`KalamApp.swift:20–28`).
+- Audio buffers are `secureZero()`'d (`Services/AudioRecorder.swift`).
 - **Transcript text is never logged** — only counts/timings with `privacy: .public`. Keep it that way.
 - Security-scoped bookmark handling with stale-refresh and model-folder validation (`ModelsConfiguration.swift:245–272`).
 - Clipboard restore guard is correct on success paths (changeCount + string equality).

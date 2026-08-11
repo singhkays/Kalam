@@ -48,13 +48,23 @@ Kalam is a macOS menu bar dictation app that records audio with push-to-talk, ru
 Core files:
 
 - `KalamApp.swift`
-  - App entry point and `AppDelegate`
-  - Hotkey event handling/state machine
-  - Audio recording pipeline
+  - App entry point and `AppDelegate` (pure orchestration since K-03)
+  - Hotkey event handling/state machine (delegates to `Services/HotkeyListener.swift`)
+  - Recording orchestration (delegates to `Services/AudioRecorder.swift` + `Services/SilenceTrimmer.swift`)
   - ASR service integration
   - Paste service
-  - System audio ducking
+  - System audio ducking (delegates to `Services/SystemAudioDucker.swift`)
   - Dictionary engine/persistence
+- `DictationOverlayController.swift`
+  - Overlay capsule UI (`OverlayCapsuleView`/`WaveformView`), placement, waveform/timer updates
+- `Services/AudioRecorder.swift`
+  - AVAudioEngine capture, 16 kHz mono resample, secureZero'd audio buffers, `AudioRecorderError`
+- `Services/SilenceTrimmer.swift`
+  - Energy-based endpointer (hysteresis, hangover, duration-aware fallback) + `normalizePeak`
+- `Services/SystemAudioDucker.swift`
+  - CoreAudio virtual-main-volume ducking while recording
+- `Services/HotkeyListener.swift`
+  - Global hotkey registration (HotKey package + modifier-only side-key monitoring), PTT callbacks
 - `OnboardingFlow.swift` / `OnboardingActionStyles.swift`
   - 4-step guided setup implementation
   - Permission handling (Microphone, Accessibility)

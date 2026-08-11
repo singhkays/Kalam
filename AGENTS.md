@@ -10,7 +10,7 @@ Kalam is a privacy-first macOS menu bar dictation app (Swift 6, deployment targe
 - **Never log transcript or audio content.** Logs may contain only counts/timings with `privacy: .public`. Policy: `app/docs/SECURITY.md`.
 - **Sandbox + hardened runtime + library validation stay enabled** (`app/Kalam/Kalam.entitlements`).
 - **Deterministic cleanup/dictionary logic lives in `app/Packages/KalamTextEngine/`** (SwiftPM package, headless-testable via Swift Testing). Keep new pure-text logic there with tests. The app shell (`TextCleanupService`) only adds the AppKit-dependent grammar pass on top.
-- **Audio buffers are `secureZero()`'d after use** (`KalamApp.swift`).
+- **Audio buffers are `secureZero()`'d after use** (`app/Kalam/Services/AudioRecorder.swift`).
 - **Clipboard-restore guard semantics stay intact**: restore the user's clipboard only if pasteboard changeCount is unchanged AND content equals what Kalam wrote.
 
 ## Repo layout
@@ -29,7 +29,15 @@ Kalam is a privacy-first macOS menu bar dictation app (Swift 6, deployment targe
 
 | File | Responsibility |
 |---|---|
-| `KalamApp.swift` | Entry, AppDelegate, hotkey state machine (hold/toggle/doubleTap/holdOrToggle), recording orchestration, paste pipeline, audio ducking, overlay UI (`DictationOverlayController`/`OverlayCapsuleView`/`WaveformView`), `AudioRecorder`, `SilenceTrimmer`, `HotkeyListener`. **Known god file (~2,900 lines) — see IMPROVEMENT_PLAN K-03 before extending it.** |
+| `KalamApp.swift` | Entry, AppDelegate, hotkey state machine (hold/toggle/doubleTap/holdOrToggle), recording orchestration, paste pipeline, chime. Pure orchestration since K-03 (2026-08-11); components live in the files below. |
+| `DictationOverlayController.swift` | Dictation overlay UI: `DictationOverlayController` + `OverlayCapsuleView` + `WaveformView` (AppKit/CALayer capsule with rainbow border, waveform, target-app row). |
+| `Services/AudioRecorder.swift` | `AudioRecorder` (AVAudioEngine + 16 kHz mono resample, tap callback, secureZero'd buffers) + `AudioRecorderError` + `Array<Float>.secureZero()`. |
+| `Services/SilenceTrimmer.swift` | `SilenceTrimmer` — energy-based endpointer with hysteresis + `normalizePeak`. |
+| `Services/SystemAudioDucker.swift` | `SystemAudioDucker` — CoreAudio virtual-main-volume ducking + `Float.clamped(to:)`. |
+| `Services/HotkeyListener.swift` | `HotkeyListener` — HotKey package + modifier-only (side-key) monitoring, PTT callbacks. |
+| `AccessibilityHelper.swift` | `AccessibilityHelper` — AX trust check/prompt + explainer. |
+| `AppRelauncher.swift` | `AppRelauncher` — `open -n` relaunch (K-12 candidate). |
+| `AppMetadata.swift` | `KalamExternalLinks` + `KalamAppVersion` (used by Settings UI and AppDelegate). |
 | `SettingsUI.swift` | Settings window: Word Replacement / Keyboard / Refine / Models tabs. Giant view (K-04). |
 | `OnboardingFlow.swift` | 4-step setup (Microphone, Accessibility, Hotkey, Model) + `OnboardingFlowController`. |
 | `ModelsConfiguration.swift` | Model version metadata, security-scoped bookmark (UserDefaults `models.modelLibraryBookmark`), availability checks. |
