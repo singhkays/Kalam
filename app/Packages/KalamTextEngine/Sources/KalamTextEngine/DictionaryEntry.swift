@@ -7,10 +7,8 @@ public struct DictionaryEntry: Identifiable, Codable, Equatable {
 
     public var isEnabled: Bool = true
 
-    public var wholeWord: Bool = true
     public var caseInsensitive: Bool = true
     public var preserveCase: Bool = true
-    public var morphological: Bool = true
 
     public var isPhrase: Bool {
         trigger.contains(where: { $0.isWhitespace })
@@ -22,20 +20,16 @@ public struct DictionaryEntry: Identifiable, Codable, Equatable {
          trigger: String,
          replacement: String,
          isEnabled: Bool = true,
-         wholeWord: Bool = true,
          caseInsensitive: Bool = true,
          preserveCase: Bool = true,
-         morphological: Bool = true,
          userAdded: Bool = true)
     {
         self.id = id
         self.trigger = trigger
         self.replacement = replacement
         self.isEnabled = isEnabled
-        self.wholeWord = wholeWord
         self.caseInsensitive = caseInsensitive
         self.preserveCase = preserveCase
-        self.morphological = morphological
         self.userAdded = userAdded
     }
 

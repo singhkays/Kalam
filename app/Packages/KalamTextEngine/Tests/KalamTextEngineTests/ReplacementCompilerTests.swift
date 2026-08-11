@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import KalamTextEngine
 
 @Test func smartCaseMimicry() {
@@ -41,10 +42,10 @@ import Testing
 }
 
 @Test func morphologicalSuffixes() {
+    // Suffix matching is unconditional: plurals and possessives always map.
     let entry = DictionaryEntry(
         trigger: "apple",
-        replacement: "orange",
-        morphological: false
+        replacement: "orange"
     )
 
     let engine = ReplacementCompiler.compile(entries: [entry])
@@ -68,10 +69,10 @@ import Testing
 }
 
 @Test func wholeWordEnforcement() {
+    // Whole-word matching is unconditional: "car" must never match inside "carpet".
     let entry = DictionaryEntry(
         trigger: "car",
-        replacement: "truck",
-        wholeWord: false
+        replacement: "truck"
     )
 
     let engine = ReplacementCompiler.compile(entries: [entry])
@@ -118,4 +119,16 @@ import Testing
     #expect(examples.contains("apples → oranges"))
     #expect(examples.contains("apple's → orange's"))
     #expect(examples.contains("Apple → Orange"))
+}
+
+@Test func legacyDictionaryJSONWithDeadFlagsStillDecodes() throws {
+    // Pre-K-05 user_dictionary.json files contain wholeWord/morphological keys.
+    // Synthesized Codable ignores unknown keys; old files must keep decoding.
+    let legacy = """
+    [{"id": "11111111-1111-1111-1111-111111111111", "trigger": "car", "replacement": "truck", "isEnabled": true, "wholeWord": false, "morphological": false, "caseInsensitive": true, "preserveCase": true, "userAdded": true}]
+    """
+    let entries = try JSONDecoder().decode([DictionaryEntry].self, from: Data(legacy.utf8))
+    #expect(entries.count == 1)
+    #expect(entries[0].trigger == "car")
+    #expect(entries[0].caseInsensitive)
 }

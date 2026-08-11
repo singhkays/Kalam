@@ -45,11 +45,10 @@ final class CustomDictionaryManagerTests: XCTestCase {
     }
     
     func testMorphologicalSuffixes() {
-        // Even if morphological is false, the engine should now enforce it
+        // Suffix matching is unconditional: plurals and possessives always map.
         let entry = DictionaryEntry(
             trigger: "apple",
-            replacement: "orange",
-            morphological: false 
+            replacement: "orange"
         )
         
         let engine = ReplacementCompiler.compile(entries: [entry])
@@ -73,11 +72,10 @@ final class CustomDictionaryManagerTests: XCTestCase {
     }
     
     func testWholeWordEnforcement() {
-        // Even if wholeWord is false, the engine should now enforce it
+        // Whole-word matching is unconditional (never matches inside "carpet").
         let entry = DictionaryEntry(
             trigger: "car",
-            replacement: "truck",
-            wholeWord: false
+            replacement: "truck"
         )
         
         let engine = ReplacementCompiler.compile(entries: [entry])
