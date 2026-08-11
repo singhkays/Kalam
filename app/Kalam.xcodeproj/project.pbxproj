@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		6ACC086F2E5F866000A12905 /* HotKey in Frameworks */ = {isa = PBXBuildFile; productRef = 6ACC086E2E5F866000A12905 /* HotKey */; };
 		6AFA33292E5EE6ED0010595A /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 6AFA33282E5EE6ED0010595A /* FluidAudio */; };
+		7B10000D2F0000020010595A /* KalamTextEngine in Frameworks */ = {isa = PBXBuildFile; productRef = 7B10000E2F0000020010595A /* KalamTextEngine */; };
+		7B10000F2F0000020010595A /* KalamTextEngine in Frameworks */ = {isa = PBXBuildFile; productRef = 7B1000102F0000020010595A /* KalamTextEngine */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -46,6 +48,7 @@
 			files = (
 				6ACC086F2E5F866000A12905 /* HotKey in Frameworks */,
 				6AFA33292E5EE6ED0010595A /* FluidAudio in Frameworks */,
+				7B10000D2F0000020010595A /* KalamTextEngine in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -53,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7B10000F2F0000020010595A /* KalamTextEngine in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -99,6 +103,7 @@
 			packageProductDependencies = (
 				6AFA33282E5EE6ED0010595A /* FluidAudio */,
 				6ACC086E2E5F866000A12905 /* HotKey */,
+				7B10000E2F0000020010595A /* KalamTextEngine */,
 			);
 			productName = Kalam;
 			productReference = 6AFA33182E5EE63B0010595A /* Kalam-test.app */;
@@ -122,6 +127,7 @@
 			);
 			name = KalamTests;
 			packageProductDependencies = (
+				7B1000102F0000020010595A /* KalamTextEngine */,
 			);
 			productName = KalamTests;
 			productReference = 7B1000082F0000010010595A /* KalamTests.xctest */;
@@ -158,6 +164,7 @@
 			packageReferences = (
 				6AFA33272E5EE6ED0010595A /* XCRemoteSwiftPackageReference "FluidAudio" */,
 				6ACC086D2E5F866000A12905 /* XCRemoteSwiftPackageReference "HotKey" */,
+				7B1000122F0000020010595A /* XCLocalSwiftPackageReference "Packages/KalamTextEngine" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 6AFA33192E5EE63B0010595A /* Products */;
@@ -496,6 +503,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		7B1000122F0000020010595A /* XCLocalSwiftPackageReference "Packages/KalamTextEngine" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/KalamTextEngine;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		6ACC086D2E5F866000A12905 /* XCRemoteSwiftPackageReference "HotKey" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -525,6 +539,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 6AFA33272E5EE6ED0010595A /* XCRemoteSwiftPackageReference "FluidAudio" */;
 			productName = FluidAudio;
+		};
+		7B10000E2F0000020010595A /* KalamTextEngine */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7B1000122F0000020010595A /* XCLocalSwiftPackageReference "Packages/KalamTextEngine" */;
+			productName = KalamTextEngine;
+		};
+		7B1000102F0000020010595A /* KalamTextEngine */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7B1000122F0000020010595A /* XCLocalSwiftPackageReference "Packages/KalamTextEngine" */;
+			productName = KalamTextEngine;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

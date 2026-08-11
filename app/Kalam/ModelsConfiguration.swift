@@ -1,5 +1,6 @@
 import Foundation
 @preconcurrency import FluidAudio
+import KalamTextEngine
 
 // MARK: - ASR Model Version
 

@@ -1,0 +1,444 @@
+import Foundation
+import NaturalLanguage
+
+public struct TextCleanupStats: Equatable, Sendable {
+    public var fillerRemovals: Int = 0
+    public var backtrackEdits: Int = 0
+    public var listItemsFormatted: Int = 0
+    public var punctuationEdits: Int = 0
+    public var grammarEdits: Int = 0
+
+    public var fillerMs: Double = 0
+    public var backtrackMs: Double = 0
+    public var listMs: Double = 0
+    public var punctuationMs: Double = 0
+    public var grammarMs: Double = 0
+    public var durationMs: Double = 0
+
+    public var grammarAttempted: Bool = false
+    public var grammarTimedOut: Bool = false
+    public var grammarSkippedForLength: Bool = false
+
+    public var totalEdits: Int {
+        fillerRemovals + backtrackEdits + listItemsFormatted + punctuationEdits + grammarEdits
+    }
+
+    public init() {}
+}
+
+public struct TextCleanupResult: Sendable {
+    public var text: String
+    public var stats: TextCleanupStats
+
+    public var didChange: Bool {
+        stats.totalEdits > 0
+    }
+
+    public init(text: String, stats: TextCleanupStats) {
+        self.text = text
+        self.stats = stats
+    }
+}
+
+public struct TextCleanupEngine: Sendable {
+    public init() {}
+
+    public func clean(_ text: String, configuration: TextCleanupConfiguration) -> TextCleanupResult {
+        let started = CFAbsoluteTimeGetCurrent()
+        let input = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard configuration.enabled, !input.isEmpty else {
+            return TextCleanupResult(text: input, stats: TextCleanupStats())
+        }
+
+        var out = input
+        var stats = TextCleanupStats()
+
+        if configuration.removeFillers {
+            let stageStart = CFAbsoluteTimeGetCurrent()
+            let (updated, count) = removeFillers(in: out)
+            out = updated
+            stats.fillerRemovals = count
+            stats.fillerMs = (CFAbsoluteTimeGetCurrent() - stageStart) * 1000
+        }
+
+        if configuration.backtrack {
+            let stageStart = CFAbsoluteTimeGetCurrent()
+            let (updated, count) = applyBacktrack(in: out)
+            out = updated
+            stats.backtrackEdits = count
+            stats.backtrackMs = (CFAbsoluteTimeGetCurrent() - stageStart) * 1000
+        }
+
+        if configuration.listFormatting {
+            let stageStart = CFAbsoluteTimeGetCurrent()
+            let (updated, count) = formatNumberedList(in: out)
+            out = updated
+            stats.listItemsFormatted = count
+            stats.listMs = (CFAbsoluteTimeGetCurrent() - stageStart) * 1000
+        }
+
+        if configuration.punctuation {
+            let stageStart = CFAbsoluteTimeGetCurrent()
+            let (updated, count) = normalizePunctuation(in: out)
+            out = updated
+            stats.punctuationEdits = count
+            stats.punctuationMs = (CFAbsoluteTimeGetCurrent() - stageStart) * 1000
+        }
+
+        out = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        if out.isEmpty {
+            out = input
+        }
+
+        stats.durationMs = (CFAbsoluteTimeGetCurrent() - started) * 1000
+        return TextCleanupResult(text: out, stats: stats)
+    }
+
+    private func removeFillers(in text: String) -> (String, Int) {
+        var out = text
+        var total = 0
+
+        for regex in Self.multiWordFillerPatterns {
+            let (updated, count) = replacingMatches(in: out, regex: regex, with: " ")
+            out = updated
+            total += count
+        }
+
+        let tokenizer = NLTokenizer(unit: .word)
+        tokenizer.string = out
+
+        var ranges: [Range<String.Index>] = []
+        tokenizer.enumerateTokens(in: out.startIndex..<out.endIndex) { range, _ in
+            let token = out[range].lowercased()
+            if Self.isSingleWordFiller(token) {
+                ranges.append(range)
+            }
+            return true
+        }
+
+        if !ranges.isEmpty {
+            for range in ranges.reversed() {
+                out.replaceSubrange(range, with: " ")
+            }
+            total += ranges.count
+        }
+
+        return (out, total)
+    }
+
+    private func applyBacktrack(in text: String) -> (String, Int) {
+        var out = text
+        var edits = 0
+
+        while true {
+            let nsRange = NSRange(out.startIndex..<out.endIndex, in: out)
+            guard
+                let match = Self.backtrackCuePattern.firstMatch(in: out, options: [], range: nsRange),
+                let cueRange = Range(match.range, in: out)
+            else {
+                break
+            }
+
+            let clauseStart = startOfPreviousClause(before: cueRange.lowerBound, in: out)
+            let removalStart = listAwareBacktrackStart(before: cueRange.lowerBound, clauseStart: clauseStart, in: out) ?? clauseStart
+            out.removeSubrange(removalStart..<cueRange.upperBound)
+            edits += 1
+        }
+
+        return (out, edits)
+    }
+
+    private static func isFalsePositiveMarker(match: NSTextCheckingResult, in text: String) -> Bool {
+        guard let markerRange = Range(match.range, in: text) else { return true }
+
+        let afterMarker = text[markerRange.upperBound...]
+        if let firstChar = afterMarker.first(where: { !$0.isWhitespace }) {
+            if firstChar == "." || firstChar == ")" || firstChar == "-" {
+                return false
+            }
+        }
+
+        let textBefore = text[..<markerRange.lowerBound]
+        let wordsBefore = textBefore.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        let lastWordBefore = wordsBefore.last?.lowercased().trimmingCharacters(in: .punctuationCharacters)
+        let previousWordBefore = wordsBefore.dropLast().last?.lowercased().trimmingCharacters(in: .punctuationCharacters)
+
+        let prepositions: Set<String> = ["at", "in", "of", "to", "for", "with", "by", "on", "from", "than", "about", "under", "over"]
+        if let w = lastWordBefore, prepositions.contains(w) {
+            let listLeadIns: Set<String> = ["and", "then", "plus"]
+            if let previousWordBefore, listLeadIns.contains(previousWordBefore) {
+                return false
+            }
+            return true
+        }
+
+        let wordsAfter = afterMarker.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        let firstWordAfter = wordsAfter.first?.lowercased().trimmingCharacters(in: .punctuationCharacters)
+
+        let multipliers: Set<String> = ["hundred", "thousand", "million", "billion", "trillion", "percent", "dollars", "times"]
+        if let w = firstWordAfter, multipliers.contains(w) {
+            return true
+        }
+
+        return false
+    }
+
+    private func formatNumberedList(in text: String) -> (String, Int) {
+        let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        let matches = Self.numberMarkerPattern.matches(in: text, options: [], range: nsRange)
+
+        var validMarkers: [NSTextCheckingResult] = []
+        var expectedNumber = 1
+        for match in matches {
+            guard let markerRange = Range(match.range, in: text) else { continue }
+            let markerStr = String(text[markerRange]).lowercased()
+            let number: Int
+            if let mapped = Self.numberWords[markerStr] {
+                number = mapped
+            } else if let parsed = Int(markerStr.filter { $0.isNumber }) {
+                number = parsed
+            } else {
+                continue
+            }
+
+            if number == expectedNumber {
+                if Self.isFalsePositiveMarker(match: match, in: text) {
+                    continue
+                }
+                validMarkers.append(match)
+                expectedNumber += 1
+            }
+        }
+
+        guard validMarkers.count >= 2 else { return (text, 0) }
+        guard let firstRange = Range(validMarkers[0].range, in: text) else { return (text, 0) }
+
+        let prefixRaw = String(text[..<firstRange.lowerBound])
+        let prefix = prefixRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let maxPrefixCount = validMarkers.count >= 3 ? 200 : 40
+        if prefix.count > maxPrefixCount {
+            return (text, 0)
+        }
+
+        var items: [(number: Int, item: String)] = []
+
+        for index in 0..<validMarkers.count {
+            guard let markerRange = Range(validMarkers[index].range, in: text) else { break }
+            let marker = String(text[markerRange]).lowercased()
+            let number: Int
+            if let mapped = Self.numberWords[marker] {
+                number = mapped
+            } else if let parsed = Int(marker.filter { $0.isNumber }) {
+                number = parsed
+            } else {
+                break
+            }
+
+            let nextStart: String.Index = {
+                if index + 1 < validMarkers.count, let nextRange = Range(validMarkers[index + 1].range, in: text) {
+                    return nextRange.lowerBound
+                }
+                return text.endIndex
+            }()
+
+            var item = String(text[markerRange.upperBound..<nextStart])
+            item = item.trimmingCharacters(in: Self.listTrimSet)
+
+            let wordCount = item.split(whereSeparator: { $0.isWhitespace }).count
+            guard !item.isEmpty, wordCount > 0, wordCount <= 20 else {
+                // Truncate the list at the first invalid item rather than
+                // aborting the entire list. This preserves valid items
+                // collected so far.
+                break
+            }
+            guard !Self.isLikelyContinuationFragment(item) else {
+                break
+            }
+
+            items.append((number, item))
+        }
+
+        // A list needs at least two valid items to be worth formatting.
+        guard items.count >= 2 else {
+            return (text, 0)
+        }
+
+        var parts: [String] = []
+        if !prefix.isEmpty {
+            if Self.shouldAppendListIntroColon(to: prefix) {
+                parts.append("\(prefix):")
+            } else {
+                parts.append(prefix)
+            }
+        }
+        parts.append(contentsOf: items.map { "\($0.number). \($0.item)" })
+
+        return (parts.joined(separator: "\n"), items.count)
+    }
+
+    private func normalizePunctuation(in text: String) -> (String, Int) {
+        var out = text
+        var edits = 0
+
+        let transformations: [(NSRegularExpression, String)] = [
+            (Self.spaceBeforePunctuationPattern, "$1"),
+            (Self.missingSpaceAfterPunctuationPattern, "$1 "),
+            (Self.repeatedPunctuationPattern, "$1"),
+            (Self.spaceAroundNewlinePattern, "\n"),
+            (Self.multiSpacePattern, " ")
+        ]
+
+        for (regex, template) in transformations {
+            let (updated, count) = replacingMatches(in: out, regex: regex, with: template)
+            out = updated
+            edits += count
+        }
+
+        return (out, edits)
+    }
+
+    private func listAwareBacktrackStart(before index: String.Index, clauseStart: String.Index, in text: String) -> String.Index? {
+        guard clauseStart < index else { return nil }
+
+        let clauseRange = NSRange(clauseStart..<index, in: text)
+        let matches = Self.numberMarkerPattern.matches(in: text, options: [], range: clauseRange)
+        guard matches.count >= 2 else { return nil }
+
+        var validRanges: [(range: Range<String.Index>, number: Int)] = []
+        var expectedNumber = 1
+
+        for match in matches {
+            guard let markerRange = Range(match.range, in: text) else { continue }
+            let marker = String(text[markerRange]).lowercased()
+            let number: Int
+            if let mapped = Self.numberWords[marker] {
+                number = mapped
+            } else if let parsed = Int(marker.filter { $0.isNumber }) {
+                number = parsed
+            } else {
+                continue
+            }
+
+            guard number == expectedNumber else { continue }
+            guard !Self.isFalsePositiveMarker(match: match, in: text) else { continue }
+            validRanges.append((markerRange, number))
+            expectedNumber += 1
+        }
+
+        guard let lastRange = validRanges.last, lastRange.number > 1 else {
+            return nil
+        }
+
+        return lastRange.range.lowerBound
+    }
+
+    private func startOfPreviousClause(before index: String.Index, in text: String) -> String.Index {
+        let prefix = text[..<index]
+        if let boundary = prefix.lastIndex(where: { Self.clauseBoundaryCharacters.contains($0) }) {
+            return text.index(after: boundary)
+        }
+        return text.startIndex
+    }
+
+    private func replacingMatches(in text: String, regex: NSRegularExpression, with template: String) -> (String, Int) {
+        let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        let count = regex.numberOfMatches(in: text, options: [], range: nsRange)
+        guard count > 0 else { return (text, 0) }
+        let updated = regex.stringByReplacingMatches(in: text, options: [], range: nsRange, withTemplate: template)
+        return (updated, count)
+    }
+
+    private static func isLikelyContinuationFragment(_ item: String) -> Bool {
+        let words = item
+            .split(whereSeparator: { $0.isWhitespace })
+            .map { $0.lowercased().trimmingCharacters(in: .punctuationCharacters) }
+            .filter { !$0.isEmpty }
+
+        guard let lastWord = words.last else { return true }
+        let continuationWords: Set<String> = [
+            "and", "or", "to", "for", "with", "of", "the", "a", "an",
+            "my", "your", "our", "their", "this", "that", "these", "those", "even"
+        ]
+        return continuationWords.contains(lastWord)
+    }
+
+    private static func shouldAppendListIntroColon(to prefix: String) -> Bool {
+        let trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        guard let lastCharacter = trimmed.last, !Self.clauseBoundaryCharacters.contains(lastCharacter), lastCharacter != ":" else {
+            return false
+        }
+
+        let words = trimmed.split(whereSeparator: { $0.isWhitespace }).map { $0.lowercased().trimmingCharacters(in: .punctuationCharacters) }
+        guard words.count <= 4 else { return false }
+
+        let phrases: Set<String> = [
+            "plan is",
+            "plans are",
+            "we must ship",
+            "requirements are",
+            "tasks are",
+            "steps are"
+        ]
+        let candidate = words.joined(separator: " ")
+        return phrases.contains(candidate)
+    }
+
+    private static func isSingleWordFiller(_ token: String) -> Bool {
+        singleWordFillerSet.contains(token)
+    }
+
+    /// Explicit allow-list of known filler words and their elongated variants.
+    /// Previously used a character-set heuristic (`allSatisfy { $0 == "u" || $0 == "m" }`)
+    /// that matched real words like "mum", "huh", and "muumuu". Replaced with an
+    /// explicit set to eliminate false positives on common nouns.
+    private static let singleWordFillerSet: Set<String> = [
+        "um", "umm", "uh", "uhh", "uhm", "erm", "ah"
+    ]
+
+    private static let multiWordFillerPatterns: [NSRegularExpression] = [
+        try! NSRegularExpression(pattern: "(?i)\\byou\\s+know\\b", options: []),
+        try! NSRegularExpression(pattern: "(?i)\\bi\\s+mean\\b", options: []),
+        try! NSRegularExpression(pattern: "(?i)\\bkind\\s+of\\b", options: []),
+        try! NSRegularExpression(pattern: "(?i)\\bsort\\s+of\\b", options: [])
+    ]
+
+    /// Matches correction cues like "scratch that", "ignore that", "delete that".
+    /// Bare "no" and "actually" were removed because they appear in ordinary
+    /// prose ("there is no way", "actually that's right") and would delete the
+    /// preceding clause, destroying valid text. The multi-word cues are
+    /// unambiguous self-correction markers.
+    private static let backtrackCuePattern = try! NSRegularExpression(
+        pattern: "(?i)(?:\\b(?:scratch\\s+that|ignore\\s+that|delete\\s+that)\\b[,;:\\-]*\\s*)",
+        options: []
+    )
+
+    private static let numberMarkerPattern = try! NSRegularExpression(
+        pattern: "(?i)\\b(one|two|three|four|five|first|second|third|fourth|fifth|\\d+(?:st|nd|rd|th)?)\\b",
+        options: []
+    )
+
+    private static let numberWords: [String: Int] = [
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "first": 1,
+        "second": 2,
+        "third": 3,
+        "fourth": 4,
+        "fifth": 5
+    ]
+
+    private static let spaceBeforePunctuationPattern = try! NSRegularExpression(pattern: "\\s+([,.;:!?])", options: [])
+    private static let missingSpaceAfterPunctuationPattern = try! NSRegularExpression(pattern: "([,.;:!?])(?=[\\p{L}\\p{N}])", options: [])
+    private static let repeatedPunctuationPattern = try! NSRegularExpression(pattern: "([,.;:!?]){2,}", options: [])
+    private static let multiSpacePattern = try! NSRegularExpression(pattern: "[\\t ]{2,}", options: [])
+    private static let spaceAroundNewlinePattern = try! NSRegularExpression(pattern: "[\\t ]*\\n[\\t ]*", options: [])
+
+    private static let clauseBoundaryCharacters: Set<Character> = [".", "!", "?", ";", "\n"]
+    private static let listTrimSet = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ",;:.!-"))
+}

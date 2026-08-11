@@ -1,13 +1,13 @@
 import Foundation
 
-enum TextCleanupGrammarMode: String, CaseIterable, Codable, Identifiable, Sendable {
+public enum TextCleanupGrammarMode: String, CaseIterable, Codable, Identifiable, Sendable {
     case off
     case light
     case full
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
-    var displayName: String {
+    public var displayName: String {
         switch self {
         case .off:
             return "Off"
@@ -19,8 +19,8 @@ enum TextCleanupGrammarMode: String, CaseIterable, Codable, Identifiable, Sendab
     }
 }
 
-struct TextCleanupConfiguration: Equatable, Codable, Sendable {
-    static let defaults = TextCleanupConfiguration(
+public struct TextCleanupConfiguration: Equatable, Codable, Sendable {
+    public static let defaults = TextCleanupConfiguration(
         enabled: true,
         removeFillers: true,
         backtrack: true,
@@ -30,15 +30,33 @@ struct TextCleanupConfiguration: Equatable, Codable, Sendable {
         grammarTimeoutMs: 100
     )
 
-    var enabled: Bool
-    var removeFillers: Bool
-    var backtrack: Bool
-    var listFormatting: Bool
-    var punctuation: Bool
-    var grammarMode: TextCleanupGrammarMode
-    var grammarTimeoutMs: Int
+    public var enabled: Bool
+    public var removeFillers: Bool
+    public var backtrack: Bool
+    public var listFormatting: Bool
+    public var punctuation: Bool
+    public var grammarMode: TextCleanupGrammarMode
+    public var grammarTimeoutMs: Int
 
-    var boundedGrammarTimeoutMs: Int {
+    public init(
+        enabled: Bool,
+        removeFillers: Bool,
+        backtrack: Bool,
+        listFormatting: Bool,
+        punctuation: Bool,
+        grammarMode: TextCleanupGrammarMode,
+        grammarTimeoutMs: Int
+    ) {
+        self.enabled = enabled
+        self.removeFillers = removeFillers
+        self.backtrack = backtrack
+        self.listFormatting = listFormatting
+        self.punctuation = punctuation
+        self.grammarMode = grammarMode
+        self.grammarTimeoutMs = grammarTimeoutMs
+    }
+
+    public var boundedGrammarTimeoutMs: Int {
         min(400, max(25, grammarTimeoutMs))
     }
 
@@ -52,7 +70,7 @@ struct TextCleanupConfiguration: Equatable, Codable, Sendable {
         static let grammarTimeoutMs = "textCleanup.grammarTimeoutMs"
     }
 
-    static func load(from defaults: UserDefaults = .standard) -> TextCleanupConfiguration {
+    public static func load(from defaults: UserDefaults = .standard) -> TextCleanupConfiguration {
         let modeRaw = defaults.string(forKey: Keys.grammarMode)
         let mode = modeRaw.flatMap(TextCleanupGrammarMode.init(rawValue:)) ?? Self.defaults.grammarMode
 
@@ -67,7 +85,7 @@ struct TextCleanupConfiguration: Equatable, Codable, Sendable {
         )
     }
 
-    func save(to defaults: UserDefaults = .standard) {
+    public func save(to defaults: UserDefaults = .standard) {
         defaults.set(enabled, forKey: Keys.enabled)
         defaults.set(removeFillers, forKey: Keys.removeFillers)
         defaults.set(backtrack, forKey: Keys.backtrack)

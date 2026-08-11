@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
+import KalamTextEngine
 
 // MARK: - Settings UI (SwiftUI)
 

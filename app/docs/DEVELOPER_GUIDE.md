@@ -419,7 +419,40 @@ Required:
 1. Microphone (audio capture)
 2. Accessibility (caret positioning and synthesized paste events)
 
-## Build / Run
+## Headless testing (no Xcode)
+
+Deterministic cleanup and dictionary logic is extracted into a local SwiftPM package at `Packages/KalamTextEngine/`. These tests use **Swift Testing** (`@Test` / `#expect`) and can run on a VM without Xcode.
+
+### Prerequisites
+
+```bash
+brew install swift
+```
+
+Use the brew Swift toolchain (`/opt/homebrew/opt/swift/bin/swift`), not Apple CLT (`/usr/bin/swift`) which lacks XCTest.
+
+### Run
+
+```bash
+./scripts/test-engine.sh
+```
+
+Override the toolchain:
+
+```bash
+SWIFT_TOOLCHAIN=/path/to/swift ./scripts/test-engine.sh
+```
+
+### What runs locally vs Xcode-only
+
+| Scope | Runner | Location |
+|---|---|---|
+| Filler removal, backtrack, lists, punctuation | `./scripts/test-engine.sh` | `Packages/KalamTextEngine/Tests/` |
+| Dictionary compilation and case mimicry | `./scripts/test-engine.sh` | `Packages/KalamTextEngine/Tests/` |
+| Grammar pass (`NSSpellChecker`) | `xcodebuild test` (Xcode only) | `KalamTests/TextCleanupServiceTests.swift` |
+| ITN, ASR, onboarding, full integration | `xcodebuild test` (Xcode only) | `KalamTests/` |
+
+## Build / Run (Xcode)
 
 Requirements (project settings):
 
