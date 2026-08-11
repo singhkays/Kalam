@@ -36,7 +36,7 @@ Kalam is a privacy-first macOS menu bar dictation app (Swift 6, deployment targe
 | `Services/SystemAudioDucker.swift` | `SystemAudioDucker` — CoreAudio virtual-main-volume ducking + `Float.clamped(to:)`. |
 | `Services/HotkeyListener.swift` | `HotkeyListener` — HotKey package + modifier-only (side-key) monitoring, PTT callbacks. |
 | `AccessibilityHelper.swift` | `AccessibilityHelper` — AX trust check/prompt + explainer. |
-| `AppRelauncher.swift` | `AppRelauncher` — `open -n` relaunch (K-12 candidate). |
+| `AppRelauncher.swift` | `AppRelauncher` — relaunch via `NSWorkspace.openApplication` + orderly `NSApp.terminate` gated on launch success (K-12). |
 | `AppMetadata.swift` | `KalamExternalLinks` + `KalamAppVersion` (used by Settings UI and AppDelegate). |
 | `SettingsUI.swift` | Settings window shell: `SettingsView` orchestration (tab state, config load/persist). Per-tab views live in `Kalam/Settings/`. |
 | `OnboardingFlow.swift` | 4-step setup (Microphone, Accessibility, Hotkey, Model) + `OnboardingFlowController`. |
