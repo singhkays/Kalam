@@ -472,6 +472,24 @@ xcodebuild test -project Kalam.xcodeproj -scheme Kalam -destination 'platform=ma
 
 On a signed developer machine, repeat without `CODE_SIGNING_ALLOWED=NO` before release signing.
 
+## Real-model ASR smoke tests
+
+`RealModelSmokeTests` loads the actual Parakeet CoreML model folders and transcribes a fixed TTS-generated fixture through the same `AsrModels`/`AsrManager` path `ASRService` uses — verifying the FluidAudio load path, transcription output, and the `ModelHub.offlineMode` invariant (no network entitlement) end-to-end.
+
+Requirements:
+
+- Model folders in `<repo>/Models/` (`parakeet-tdt-0.6b-v2`, `parakeet-tdt-0.6b-v3`, `parakeet-tdt-ctc-110m`), or any directory via the `KALAM_MODEL_LIBRARY` env var. Only the versions present are tested; missing versions are skipped, never failed.
+- `fixtures/dictation_fixture.wav` (committed; regenerate with `say -v Albert "…" && afconvert … -f WAVE -d LEI16@16000 -c 1`).
+- A Mac capable of running CoreML (load times vary; VMs run on CPU).
+
+Run:
+
+```bash
+./scripts/parakeet-smoke.sh
+```
+
+Exit codes: `0` = all present models transcribed correctly, `1` = failure, `2` = nothing ran (models/fixture missing). Transcripts and load/transcribe timings print to the log for inspection.
+
 ## Current Notes
 
 - App currently relies on CGEvent unicode, then Cmd+V paste, then Accessibility insertion, so target-app behavior can vary.
