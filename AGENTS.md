@@ -21,7 +21,7 @@ Kalam is a privacy-first macOS menu bar dictation app (Swift 6, deployment targe
 | `app/Packages/KalamTextEngine/` | SwiftPM package: deterministic cleanup engine + dictionary compiler (`Sources/`) + Swift Testing suite (`Tests/`) |
 | `app/docs/` | `DEVELOPER_GUIDE.md` (architecture/runtime flow — source of truth), `SECURITY.md`, **`IMPROVEMENT_PLAN.md` (read before changing code)** |
 | `landing-page/` | Vite/React marketing site |
-| `scripts/` | `test-engine.sh` — headless engine tests (maintained). **`app/scripts/test-engine.sh` is stale/broken — never use it.** |
+| `scripts/` | `test-engine.sh` — headless engine tests (single entry point since K-15). |
 | `.github/workflows/` | `release.yml` (tag → build, test, DMG, GitHub release), `deploy-kalam-landing.yml` |
 | `build.sh` | DMG packaging script (used by CI) |
 
@@ -29,12 +29,13 @@ Kalam is a privacy-first macOS menu bar dictation app (Swift 6, deployment targe
 
 | File | Responsibility |
 |---|---|
-| `KalamApp.swift` | Entry, AppDelegate, hotkey state machine (hold/toggle/doubleTap/holdOrToggle), recording orchestration, paste pipeline, chime. Pure orchestration since K-03 (2026-08-11); components live in the files below. |
+| `KalamApp.swift` | Entry, AppDelegate, hotkey event application (decision logic in `Services/PTTStateMachine.swift`), recording orchestration, paste pipeline, chime. Pure orchestration since K-03 (2026-08-11); components live in the files below. |
 | `DictationOverlayController.swift` | Dictation overlay UI: `DictationOverlayController` + `OverlayCapsuleView` + `WaveformView` (AppKit/CALayer capsule with rainbow border, waveform, target-app row). |
 | `Services/AudioRecorder.swift` | `AudioRecorder` (AVAudioEngine + 16 kHz mono resample, tap callback, secureZero'd buffers) + `AudioRecorderError` + `Array<Float>.secureZero()`. |
 | `Services/SilenceTrimmer.swift` | `SilenceTrimmer` — energy-based endpointer with hysteresis + `normalizePeak`. |
 | `Services/SystemAudioDucker.swift` | `SystemAudioDucker` — CoreAudio virtual-main-volume ducking + `Float.clamped(to:)`. |
 | `Services/HotkeyListener.swift` | `HotkeyListener` — HotKey package + modifier-only (side-key) monitoring, PTT callbacks. |
+| `Services/PTTStateMachine.swift` | `PTTStateMachine` — pure hold/toggle/doubleTap/holdOrToggle decision logic emitting events (K-14); `AppDelegate` applies them. |
 | `AccessibilityHelper.swift` | `AccessibilityHelper` — AX trust check/prompt + explainer. |
 | `AppRelauncher.swift` | `AppRelauncher` — relaunch via `NSWorkspace.openApplication` + orderly `NSApp.terminate` gated on launch success (K-12). |
 | `AppMetadata.swift` | `KalamExternalLinks` + `KalamAppVersion` (used by Settings UI and AppDelegate). |
@@ -71,7 +72,7 @@ ASR → TextCleanupEngine.clean → ITN (if enabled) → CustomDictionaryManager
 
 | Command | When | Notes |
 |---|---|---|
-| `./scripts/test-engine.sh` | Engine package tests (headless, no Xcode) | From repo root; needs brew Swift (`/opt/homebrew/opt/swift/bin/swift`); 32 tests green at review time |
+| `./scripts/test-engine.sh` | Engine package tests (headless, no Xcode) | From repo root; needs brew Swift (`/opt/homebrew/opt/swift/bin/swift`); 41 tests green |
 | `cd app && xcodebuild test -project Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO` | Full suite (Xcode) | Covers grammar/ITN/onboarding/integration; requires Xcode |
 | `./build.sh` (or CI) | DMG build | arm64, ad-hoc signing when `SIGNING_IDENTITY` unset |
 | `cd landing-page && npm ci && npm run build` | Landing page | |
@@ -106,7 +107,6 @@ This repo lives on a shared VirtIOFS mount; **other agent sessions may commit/ed
 ## Gotchas
 
 - `app/.grok/` and `app/.hermes/` are local session artifacts — never commit them (gitignore gap tracked as K-18).
-- `app/scripts/test-engine.sh` is stale/broken (wrong package path) — use root `scripts/test-engine.sh` (K-15).
 - `.build/`, `xcuserdata/`, `DerivedData/` are gitignored.
 - The `hf download` command shown in the Models UI is **copy-paste only** — the app never executes it.
 - Models are user-provisioned; the app validates required `.mlmodelc` directory presence, not content integrity (documented in `SECURITY.md`).
