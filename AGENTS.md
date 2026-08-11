@@ -9,7 +9,7 @@ Kalam is a privacy-first macOS menu bar dictation app (Swift 6, deployment targe
 - **No network code.** The sandbox deliberately omits `com.apple.security.network.client`. Any `URLSession`, socket, or network call in the app is a regression — flag it in review.
 - **Never log transcript or audio content.** Logs may contain only counts/timings with `privacy: .public`. Policy: `app/docs/SECURITY.md`.
 - **Sandbox + hardened runtime + library validation stay enabled** (`app/Kalam/Kalam.entitlements`).
-- **Deterministic cleanup/dictionary logic lives in `app/Packages/KalamTextEngine/`** (SwiftPM package, headless-testable via Swift Testing). Keep new pure-text logic there with tests. The app shell (`TextCleanupService`) only adds the AppKit-dependent grammar pass on top.
+- **Deterministic cleanup/dictionary logic lives in `app/Packages/KalamTextEngine/`** (SwiftPM package, headless-testable via Swift Testing). Keep new pure-text logic there with tests. The grammar pass (AppKit `NSSpellChecker`) lives in `TextCleanupEngine` behind `canImport(AppKit)`.
 - **Audio buffers are `secureZero()`'d after use** (`app/Kalam/Services/AudioRecorder.swift`).
 - **Clipboard-restore guard semantics stay intact**: restore the user's clipboard only if pasteboard changeCount is unchanged AND content equals what Kalam wrote.
 
@@ -45,7 +45,7 @@ Kalam is a privacy-first macOS menu bar dictation app (Swift 6, deployment targe
 | `CustomDictionaryManager.swift` | `@MainActor`; `~/Library/Application Support/Kalam/user_dictionary.json`; debounced save; compiles rules via `ReplacementCompiler`. |
 | `PTTHotkeyConfiguration.swift` | Activation modes + key combinations + persistence. |
 | `SettingsConfiguration.swift` | General + microphone config; UserDefaults keys. |
-| `TextCleanupService.swift` | Wraps `TextCleanupEngine` + grammar pass (`NSSpellChecker`, timeout-bounded, `>1200` chars skipped). |
+| `Packages/KalamTextEngine` | Cleanup engine incl. AppKit-gated grammar pass (`NSSpellChecker`, timeout-bounded, `>1200` chars skipped); headless-testable. |
 | `NemoTextProcessing.swift` | ITN bridge to `NemoTextProcessing.xcframework` (optional at runtime). |
 | `Services/ASRService.swift` | **Actor** — FluidAudio integration, model warmup. |
 | `Services/PasteService.swift` | `@MainActor` — CGEvent/Cmd+V/AX paste + clipboard snapshot/restore. |
@@ -57,7 +57,7 @@ Kalam is a privacy-first macOS menu bar dictation app (Swift 6, deployment targe
 ## Pipeline order — do not reorder without updating `app/docs/DEVELOPER_GUIDE.md`
 
 ```
-ASR → TextCleanupService.clean → ITN (if enabled) → CustomDictionaryManager.apply → PasteService.paste
+ASR → TextCleanupEngine.clean → ITN (if enabled) → CustomDictionaryManager.apply → PasteService.paste
 ```
 
 ## Concurrency posture (Swift 6 language mode)
@@ -79,9 +79,9 @@ ASR → TextCleanupService.clean → ITN (if enabled) → CustomDictionaryManage
 ## Common tasks
 
 - **Add a cleanup rule** → engine package: `app/Packages/KalamTextEngine/Sources/KalamTextEngine/TextCleanupEngine.swift` + an `@Test` in `Tests/KalamTextEngineTests/` + run `./scripts/test-engine.sh`.
-- **Add a dictionary feature** → `DictionaryEntry.swift` / `ReplacementCompiler.swift` + tests (note: `wholeWord`/`morphological` flags are currently no-ops — K-05).
+- **Add a dictionary feature** → `DictionaryEntry.swift` / `ReplacementCompiler.swift` + tests.
 - **Change paste behavior** → `Services/PasteService.swift`; respect the clipboard guard; test the failure path (K-02).
-- **Touch the grammar pass** → `TextCleanupService.swift`; tests are Xcode-only (`KalamTests/TextCleanupServiceTests.swift`); consider moving logic into the engine for headless tests (K-06).
+- **Touch the grammar pass** → `app/Packages/KalamTextEngine/Sources/KalamTextEngine/TextCleanupEngine.swift` (AppKit-gated section); tests are headless via `./scripts/test-engine.sh`.
 - **Add Settings UI** → `SettingsUI.swift` (or split per K-04); use `KalamTheme`/`KalamControlStyles`; label icon-only buttons (K-19).
 
 ## Improvement-plan protocol

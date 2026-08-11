@@ -645,7 +645,7 @@ Apply these string replacements (line numbers drift; search for the quoted text)
 5. ~line 508: "Unit tests are available in `app/KalamTests/TextCleanupServiceTests.swift` and run via the `KalamTests` target." → "Grammar/cleanup unit tests run headlessly via `./scripts/test-engine.sh` (`Packages/KalamTextEngine/Tests/`); the remaining app integration tests run via the `KalamTests` target."
 6. Also delete the stale `- `TextCleanupConfiguration.swift`` file-list entry (points at the app-side file deleted earlier — K-17 cleanup, do it while here).
 
-- [ ] **Step 2: `AGENTS.md`** — ⚠️ **BLOCKED at execution time (2026-08-11):** the Hermes runtime refuses agent writes to protected agent-instruction files (`AGENTS.md`), even with consent. The four replacements below are fully specified; apply them by hand (or with explicit human approval) once K-05/K-06 verification is complete. Until then `AGENTS.md` still names `TextCleanupService` (stale but harmless — the code itself is updated).
+- [x] **Step 2: `AGENTS.md`** — applied 2026-08-11 with explicit user approval (the runtime's approval prompt was answered). All four replacements below are in place.
 
 1. Architecture table row: `| `TextCleanupService.swift` | Wraps `TextCleanupEngine` + grammar pass (`NSSpellChecker`, timeout-bounded, `>1200` chars skipped). |` → `| `Packages/KalamTextEngine` | Cleanup engine incl. AppKit-gated grammar pass (`NSSpellChecker`, timeout-bounded, `>1200` chars skipped); headless-testable. |`
 2. Pipeline order line: `ASR → TextCleanupService.clean → ITN (if enabled) → CustomDictionaryManager.apply → PasteService.paste` → `ASR → TextCleanupEngine.clean → ITN (if enabled) → CustomDictionaryManager.apply → PasteService.paste`
