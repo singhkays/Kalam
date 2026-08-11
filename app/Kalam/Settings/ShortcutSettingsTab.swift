@@ -68,6 +68,7 @@ struct ShortcutSettingsTab: View {
                                     .font(KalamTheme.bodyStrongFont)
                                 Image(systemName: "chevron.up.chevron.down")
                                     .font(KalamTheme.captionFont)
+                                    .accessibilityHidden(true)
                             }
                             .foregroundColor(KalamTheme.textPrimary)
                             .padding(.horizontal, 10)
@@ -123,6 +124,7 @@ struct ShortcutSettingsTab: View {
                                     .font(KalamTheme.bodyStrongFont)
                                 Image(systemName: "chevron.up.chevron.down")
                                     .font(KalamTheme.captionFont)
+                                    .accessibilityHidden(true)
                             }
                             .foregroundColor(KalamTheme.textPrimary)
                             .padding(.horizontal, 10)

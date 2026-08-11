@@ -78,6 +78,7 @@ struct WordReplacementView: View {
                                 .foregroundColor(KalamTheme.textTertiary)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Clear search")
                     }
                 }
                 .frame(height: 32)
@@ -99,6 +100,7 @@ struct WordReplacementView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Add rule")
+                .accessibilityLabel("Add rule")
 
                 Button(action: { manager.sortEntriesByTrigger() }) {
                     Image(systemName: "arrow.up.arrow.down")
@@ -114,6 +116,7 @@ struct WordReplacementView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Sort by spoken phrase")
+                .accessibilityLabel("Sort by spoken phrase")
             }
         }
         .padding(.top, 14)
@@ -283,6 +286,7 @@ struct EditableRow: View {
                 }
                 .buttonStyle(.plain)
                 .help("Delete rule")
+                .accessibilityLabel("Delete rule")
             }
             .padding(.vertical, 6)
             .padding(.horizontal, 10)

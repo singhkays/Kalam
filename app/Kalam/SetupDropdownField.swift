@@ -38,5 +38,8 @@ struct SetupDropdownField<T: Equatable & Identifiable>: View {
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+        // K-19: expose the control to VoiceOver as a labeled pop-up button.
+        .accessibilityLabel(Text(label(selection)))
+        .accessibilityHint("Opens a menu of options.")
     }
 }

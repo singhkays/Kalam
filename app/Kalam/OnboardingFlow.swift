@@ -598,6 +598,8 @@ struct OnboardingView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 24))
+        // K-19: Esc closes the wizard (traffic lights are hidden on this window).
+        .onExitCommand(perform: onClose)
     }
 
     private var setupWell: some View {
