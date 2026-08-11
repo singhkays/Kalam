@@ -143,6 +143,13 @@ From Star Trek in 1966 to Siri in 2011 we have come far.
     #expect(result.stats.listItemsFormatted == 3)
 }
 
+@Test func bareNoIsNotTreatedAsBacktrackCue() {
+    // Bare "no" is common in normal prose — never a correction cue.
+    let result = TextCleanupEngine().clean("book me tomorrow no book me Friday", configuration: config())
+    #expect(result.text == "book me tomorrow no book me Friday")
+    #expect(result.stats.backtrackEdits == 0)
+}
+
 @Test func punctuationNormalization() {
     let result = TextCleanupEngine().clean("hello ,world!!this is fine", configuration: config())
     #expect(result.text == "hello, world! this is fine")
