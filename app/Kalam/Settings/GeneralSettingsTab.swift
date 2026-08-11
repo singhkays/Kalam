@@ -174,6 +174,7 @@ struct GeneralSettingsTab: View {
             .frame(maxWidth: .infinity, alignment: .center)
         }
     }
+    @ViewBuilder
     private func behaviorToggleRow(icon: String, title: String, isOn: Binding<Bool>) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
