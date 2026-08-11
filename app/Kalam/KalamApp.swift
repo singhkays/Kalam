@@ -320,10 +320,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let w = NSWindow(contentViewController: vc)
         w.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         configureSettingsWindow(w)
-        
-        w.setContentSize(NSSize(width: 750, height: 640))
-        w.minSize = NSSize(width: 750, height: 640)
-        w.maxSize = NSSize(width: 750, height: CGFloat.greatestFiniteMagnitude)
+
+        w.setContentSize(NSSize(width: Self.settingsWindowWidth, height: 640))
+        w.minSize = NSSize(width: Self.settingsWindowWidth, height: 640)
+        w.maxSize = NSSize(width: Self.settingsWindowWidth, height: .greatestFiniteMagnitude)
         let wc = NSWindowController(window: w)
         self.settingsWC = wc
         presentWindowController(wc, centerIfNeeded: true)
@@ -332,8 +332,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
+    // K-21: single source of truth for the settings window width.
+    private static let settingsWindowWidth: CGFloat = 900
+
     private func configureSettingsWindow(_ window: NSWindow) {
-        let fixedWidth: CGFloat = 900
+        let fixedWidth = Self.settingsWindowWidth
         window.identifier = NSUserInterfaceItemIdentifier("KalamSettingsWindow")
         window.title = "Settings"
         window.titleVisibility = .visible
