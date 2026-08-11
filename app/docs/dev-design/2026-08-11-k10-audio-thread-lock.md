@@ -779,6 +779,18 @@ git commit -m "docs(K-10): mark implementation executed; automated verification 
 - **`prepare()` converter reset locking** is defensive-only (prepare runs with the engine stopped); no behavioral change.
 - **Drop hygiene telemetry:** if `dropped=` ever trends nonzero in production, surface a count in the overlay/settings rather than only the log.
 
+## Execution notes (2026-08-11, commits `c3392bc` / `adfaf13` / `f9afaf1`)
+
+Deviations from the tasks above, all verified green:
+
+1. **Test host has no audio input device** — `AVAudioEngine` input-graph access asserts (`required condition is false: inputNode != nullptr`) in the sandboxed `Kalam-test` host (this VM has no mic input). The RED test therefore uses a new test-only seam `AudioRecorder.beginCollectingForTesting()` (activates capture state without the engine; in the new code it is a one-liner over `exchange.resetForNewSession()`). No engine is touched anywhere in the test path.
+2. **`process` seam kept Void in Task 1** — only the visibility changed (`private` → internal); the `Bool`-returning wrapper landed with Task 2's rewire (the old body cannot return `Bool`).
+3. **Swift 6 sendability** — `OSAllocatedUnfairLock.withLock` requires `@Sendable (inout State) throws -> R` with `R: Sendable`; `withExclusiveAccess` carries both constraints.
+4. **Converter padding** — `AVAudioConverter` emits up to capacity per call (1024 in → 1088 out at ratio 1.0; verbatim pre-K-10 behavior), so the count assertions use no-loss bounds (≥ input frames, ≤ fully padded) instead of exact values.
+5. **Timing statistic** — the integration test asserts on the count of producer iterations > 5 ms (< 10) rather than on the max: a single VM scheduling hiccup (~15 ms observed under full-suite load) is tolerated, while the old blocking design stalled hundreds of iterations per run (RED evidence: 42 ms max stall in isolation). The structural guarantee (publish under a held lock drops, never waits) is pinned deterministically by `testPublishIsNonBlockingWhileConsumerHoldsLock`.
+
+---
+
 ## Test commands summary
 
 | Command (from repo root) | Purpose |
