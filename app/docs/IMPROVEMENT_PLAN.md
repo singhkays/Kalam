@@ -65,7 +65,8 @@
 - **Transcript text is never logged** — only counts/timings with `privacy: .public`. Keep it that way.
 - Security-scoped bookmark handling with stale-refresh and model-folder validation (`ModelsConfiguration.swift:245–272`).
 - Clipboard restore guard is correct on success paths (changeCount + string equality).
-- Dependency pins: FluidAudio `0.14.5`, HotKey `0.2.1` (pbxproj) + exact revisions in `Package.resolved`.
+- Dependency pins: FluidAudio `0.15.5`, HotKey `0.2.1` (pbxproj) + exact revisions in `Package.resolved`.
+- `ModelHub.offlineMode` is enforced at app launch and in `ASRService.initialize` (`ASRService.enforceOfflineMode()`) — FluidAudio must never touch the network (see the 0.15.5 adoption dev-design doc); pinned by `FluidAudioOfflineModeTests`.
 - Update mechanism is browser-only (`NSWorkspace.open`, no in-app network).
 - `ASRService` is a clean actor; `PasteService` main-actor isolated; transcription task avoids `Task.detached`.
 - Engine package tests: 32/32 green via `./scripts/test-engine.sh`.
