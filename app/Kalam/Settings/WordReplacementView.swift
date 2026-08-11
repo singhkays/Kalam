@@ -56,9 +56,27 @@ struct WordReplacementView: View {
                     .font(KalamTheme.pageTitleFont)
                     .foregroundColor(KalamTheme.textPrimary)
 
-                Text("\(manager.entries.count) rules • \(activeRuleCount) active")
+                Text("\\(manager.entries.count) rules • \\(activeRuleCount) active")
                     .font(KalamTheme.calloutFont)
                     .foregroundColor(KalamTheme.textSecondary)
+            }
+
+            // K-20: surface a corrupt-store recovery notice (with a kept .bak)
+            // in-app — never OS notifications.
+            if let notice = manager.loadFailureNotice {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(notice)
+                        .font(.footnote)
+                    Spacer()
+                    Button("Dismiss") { manager.loadFailureNotice = nil }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(KalamTheme.accent)
+                }
+                .padding(10)
+                .background(KalamTheme.controlTint)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
 
             HStack(spacing: 8) {

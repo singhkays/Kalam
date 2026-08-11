@@ -10,13 +10,23 @@ private func privacySafeErrorSummary(_ error: Error) -> String {
 @MainActor
 final class CustomDictionaryManager: ObservableObject {
     static let shared = CustomDictionaryManager()
-    private let logger = Logger(subsystem: "singhkays.Kalam", category: "CustomDictionary")
-    private init() {}
 
     @Published var entries: [DictionaryEntry] = []
 
+    /// Set when `user_dictionary.json` exists but fails to decode; the corrupt
+    /// file is preserved as `user_dictionary.json.bak` before the store resets.
+    @Published var loadFailureNotice: String?
+
+    private let logger = Logger(subsystem: "singhkays.Kalam", category: "CustomDictionary")
+    private let storeURLOverride: URL?
     private let fileName = "user_dictionary.json"
+
+    init(storeURL: URL? = nil) {
+        self.storeURLOverride = storeURL
+    }
+
     private var appSupportURL: URL {
+        if let storeURLOverride { return storeURLOverride }
         let fm = FileManager.default
         let appName = "Kalam"
         let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -77,7 +87,13 @@ final class CustomDictionaryManager: ObservableObject {
         logger.info("Custom dictionary import started")
         let data = try Data(contentsOf: url)
         let decoded = try JSONDecoder().decode([DictionaryEntry].self, from: data)
-        entries = decoded
+        // An explicit import is a user action: imported entries are user-owned,
+        // so they must survive the `userAdded` filter on the next launch.
+        entries = decoded.map { entry in
+            var owned = entry
+            owned.userAdded = true
+            return owned
+        }
         logger.info("Custom dictionary import complete; count=\(self.entries.count)")
         save()
         recompile()
@@ -94,6 +110,7 @@ final class CustomDictionaryManager: ObservableObject {
         let url = appSupportURL
         guard FileManager.default.fileExists(atPath: url.path) else {
             entries = []
+            loadFailureNotice = nil
             logger.info("Custom dictionary file missing; starting empty")
             return
         }
@@ -101,10 +118,26 @@ final class CustomDictionaryManager: ObservableObject {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode([DictionaryEntry].self, from: data)
             entries = decoded.filter { $0.userAdded }
+            loadFailureNotice = nil
             logger.info("Custom dictionary loaded entries=\(decoded.count), userEntries=\(self.entries.count)")
         } catch {
             logger.warning("Custom dictionary load failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
+            preserveCorruptFile(at: url)
             entries = []
+            loadFailureNotice = "Kalam couldn't read your saved dictionary. A backup was kept next to the original file."
+        }
+    }
+
+    private func preserveCorruptFile(at url: URL) {
+        let backupURL = url.deletingPathExtension().appendingPathExtension("json.bak")
+        do {
+            if FileManager.default.fileExists(atPath: backupURL.path) {
+                try FileManager.default.removeItem(at: backupURL)
+            }
+            try FileManager.default.copyItem(at: url, to: backupURL)
+            logger.info("Custom dictionary corrupt file preserved as \(backupURL.lastPathComponent, privacy: .public)")
+        } catch {
+            logger.warning("Custom dictionary backup failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
         }
     }
 
