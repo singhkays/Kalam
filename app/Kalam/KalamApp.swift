@@ -73,27 +73,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let paster = PasteService()
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "DictationRuntime")
 
-    private enum RecordingTriggerMode {
-        case hold
-        case toggle
-    }
-    
-    private var isRecording = false
+    private var isRecording: Bool { pttState.isRecording }
     private var isASRReady = false
     private var isASRSetupIssue = false
     private var asrRecordingBlockMessage = "Model loading..."
     private var isAudioReady = false
     private var pttDownTime: CFAbsoluteTime = 0
     private var pttUpTime: CFAbsoluteTime = 0
-    private var currentKeyDownTime: CFAbsoluteTime = 0
-    private var lastTapReleaseTime: CFAbsoluteTime = 0
-    private var recordingTriggerMode: RecordingTriggerMode?
-    private var ignoreNextKeyUp = false
     private var hotkeyConfiguration: PTTHotkeyConfiguration = .load()
     private var transcriptionTask: Task<Void, Never>?
+    private var runtimePrepTask: Task<Void, Never>?
     private var recordingSessions = RecordingSessionTracker()
-    private let holdOrToggleTapThreshold: CFTimeInterval = 0.45
-    private let doubleTapInterval: CFTimeInterval = 0.35
+    private let ptt = PTTStateMachine()
+    private var pttState = PTTStateMachine.State()
     
     private var settingsWC: NSWindowController?
     private var onboardingWC: NSWindowController?
@@ -188,8 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 let configuration = PTTHotkeyConfiguration.load()
                 self.hotkeyConfiguration = configuration
-                self.lastTapReleaseTime = 0
-                self.ignoreNextKeyUp = false
+                self.pttState.resetForConfigurationChange()
                 self.hotkeys.update(configuration: configuration)
             }
         }
@@ -703,102 +694,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleHotkeyEvent(isDown: Bool) {
         let now = CFAbsoluteTimeGetCurrent()
-        let config = hotkeyConfiguration.normalized()
-
-        if isDown {
-            currentKeyDownTime = now
-
-            switch config.activationMode {
-            case .hold:
+        let events = ptt.handle(
+            isDown: isDown,
+            now: now,
+            activationMode: hotkeyConfiguration.normalized().activationMode,
+            state: &pttState
+        )
+        for event in events {
+            switch event {
+            case .start(let triggerMode):
                 pttDownTime = now
-                _ = startRecording(triggerMode: .hold)
-
-            case .toggle:
-                toggleRecording(now: now)
-
-            case .doubleTap:
-                handleDoubleTap(now: now)
-
-            case .holdOrToggle:
-                handleHoldOrToggleKeyDown(now: now)
+                _ = startRecording(triggerMode: triggerMode)
+            case .stop:
+                pttUpTime = now
+                stopRecordingAndTranscribe()
+            case .suppressNextKeyUp:
+                pttState.suppressNextKeyUp()
             }
-            return
         }
-
-        if ignoreNextKeyUp {
-            ignoreNextKeyUp = false
-            return
-        }
-
-        switch config.activationMode {
-        case .hold:
-            pttUpTime = now
-            stopRecordingAndTranscribe()
-
-        case .toggle:
-            break
-
-        case .doubleTap:
-            lastTapReleaseTime = now
-
-        case .holdOrToggle:
-            handleHoldOrToggleKeyUp(now: now)
-        }
-    }
-
-    private func handleHoldOrToggleKeyDown(now: CFAbsoluteTime) {
-        if isRecording, recordingTriggerMode == .toggle {
-            pttUpTime = now
-            stopRecordingAndTranscribe()
-            ignoreNextKeyUp = true
-            return
-        }
-
-        guard !isRecording else { return }
-        pttDownTime = now
-        _ = startRecording(triggerMode: .hold)
-    }
-
-    private func handleHoldOrToggleKeyUp(now: CFAbsoluteTime) {
-        guard isRecording else { return }
-        guard recordingTriggerMode == .hold else { return }
-
-        let pressDuration = now - currentKeyDownTime
-        if pressDuration < holdOrToggleTapThreshold {
-            recordingTriggerMode = .toggle
-            return
-        }
-
-        pttUpTime = now
-        stopRecordingAndTranscribe()
-    }
-
-    private func toggleRecording(now: CFAbsoluteTime) {
-        if isRecording {
-            pttUpTime = now
-            stopRecordingAndTranscribe()
-            ignoreNextKeyUp = true
-            return
-        }
-
-        pttDownTime = now
-        _ = startRecording(triggerMode: .toggle)
-    }
-
-    private func handleDoubleTap(now: CFAbsoluteTime) {
-        if isRecording {
-            pttUpTime = now
-            stopRecordingAndTranscribe()
-            ignoreNextKeyUp = true
-            return
-        }
-
-        guard lastTapReleaseTime > 0 else { return }
-        guard (now - lastTapReleaseTime) <= doubleTapInterval else { return }
-
-        pttDownTime = now
-        _ = startRecording(triggerMode: .toggle)
-        lastTapReleaseTime = 0
     }
 
     private func resolvePriorityOrderedMicrophones() -> [MicrophoneDeviceDescriptor] {
@@ -827,7 +740,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @discardableResult
-    private func startRecording(triggerMode: RecordingTriggerMode) -> Bool {
+    private func startRecording(triggerMode: PTTStateMachine.TriggerMode) -> Bool {
         // K-01: a new recording supersedes any in-flight transcription/paste from
         // the previous session — abort it so stale text is never pasted.
         transcriptionTask?.cancel()
@@ -865,8 +778,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         _ = recordingSessions.beginNewRecording()
-        isRecording = true
-        recordingTriggerMode = triggerMode
+        pttState.recordingDidStart(triggerMode)
         
         // Play chime (so user hears it at full volume)
         let chimeDuration = playRecordingChime()
@@ -892,8 +804,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     
     private func stopRecordingAndTranscribe() {
         guard isRecording else { return }
-        isRecording = false
-        recordingTriggerMode = nil
+        pttState.recordingDidStop()
         
         if UserDefaults.standard.bool(forKey: "duckEnabled") {
             duckingStartWorkItem?.cancel()
@@ -1060,8 +971,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func cancelRecording() {
         guard isRecording else { return }
-        isRecording = false
-        recordingTriggerMode = nil
+        pttState.recordingDidStop()
 
         if UserDefaults.standard.bool(forKey: "duckEnabled") {
             duckingStartWorkItem?.cancel()
