@@ -23,7 +23,7 @@ jobs:
       - name: Set up Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: '16.0'
+          xcode-version: '26.6'
 
       - name: Cache SwiftPM & DerivedData
         uses: actions/cache@v4
@@ -32,9 +32,24 @@ jobs:
             ~/Library/Developer/Xcode/DerivedData
             ~/Library/Caches/org.swift.swiftpm
             ~/.swiftpm
-          key: macos-xcode-16.0-spm-${{ hashFiles('**/Package.resolved') }}
+          key: macos-xcode-26-spm-${{ hashFiles('**/Package.resolved') }}
           restore-keys: |
-            macos-xcode-16.0-spm-
+            macos-xcode-26-spm-
+
+      - name: Run KalamTextEngine tests
+        run: ./scripts/test-engine.sh
+
+      - name: Run Xcode tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild test \
+            -project app/Kalam.xcodeproj \
+            -scheme Kalam \
+            -destination 'platform=macOS' \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | xcbeautify
 
       - name: Build & Package
         env:
