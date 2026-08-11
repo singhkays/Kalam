@@ -31,7 +31,10 @@ final class PasteService {
         var postCmdV: () -> Bool = { PasteService.postCmdV() }
         var insertTextViaAccessibility: (String) -> String? = { PasteService.insertTextViaAccessibility($0) }
         var pasteboard: NSPasteboard = .general
-        var restoreDelay: TimeInterval = 0.5
+        /// Grace delay before restoring the user's clipboard after a Cmd+V
+        /// paste, giving the target app time to read the pasteboard. Only the
+        /// Cmd+V path uses this; AX/failure paths restore immediately (K-08).
+        var restoreDelay: TimeInterval = 0.15
     }
 
     private let strategies: PasteStrategies
@@ -69,6 +72,15 @@ final class PasteService {
         }
     }
 
+    /// Which strategy consumed the transcript, deciding how long it may sit on
+    /// the pasteboard before the snapshot restore (K-08). Only the Cmd+V path
+    /// hands the pasteboard to the target app, so only it keeps a grace delay.
+    enum PasteOutcome {
+        case cmdV              // target app is expected to read the pasteboard
+        case accessibility     // text delivered via AX — pasteboard never consumed
+        case failed            // every strategy failed — nothing consumed it
+    }
+
     func paste(_ text: String) throws {
         // Check Accessibility without prompting in the hot path.
         guard strategies.isProcessTrusted() else {
@@ -90,10 +102,12 @@ final class PasteService {
         // original clipboard content is unconditional from this point — every exit
         // path (Cmd+V success, AX insert success, or any failure) schedules the
         // restore. Previously the throw path left the transcript on the clipboard.
-        defer { restoreClipboardIfNeeded(snapshot, insertedState: insertedPasteboardState) }
+        var outcome = PasteOutcome.failed
+        defer { restoreClipboardIfNeeded(snapshot, insertedState: insertedPasteboardState, outcome: outcome) }
 
         if strategies.postCmdV() {
             Self.logger.info("Paste succeeded via Cmd+V")
+            outcome = .cmdV
             return
         }
 
@@ -103,6 +117,7 @@ final class PasteService {
         }
 
         Self.logger.info("Paste succeeded via Accessibility")
+        outcome = .accessibility
     }
 
     struct InsertedPasteboardState {
@@ -110,8 +125,18 @@ final class PasteService {
         let changeCount: Int
     }
 
-    func restoreClipboardIfNeeded(_ snapshot: PasteboardSnapshot, insertedState: InsertedPasteboardState) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + strategies.restoreDelay) {
+    func restoreClipboardIfNeeded(
+        _ snapshot: PasteboardSnapshot,
+        insertedState: InsertedPasteboardState,
+        outcome: PasteOutcome
+    ) {
+        // K-08: only the Cmd+V path hands the pasteboard to the target app, so
+        // only it keeps a (short) grace delay for the app to read it. The AX
+        // path and failures restore immediately — the transcript never needs to
+        // linger. The changeCount + string-equality guard is unchanged.
+        let delay: TimeInterval = outcome == .cmdV ? strategies.restoreDelay : 0
+
+        let restore: @MainActor () -> Void = {
             let pasteboard = self.strategies.pasteboard
             guard pasteboard.changeCount == insertedState.changeCount,
                   pasteboard.string(forType: .string) == insertedState.text
@@ -121,6 +146,12 @@ final class PasteService {
             }
             snapshot.restore(to: pasteboard)
             Self.logger.info("Clipboard restored after paste")
+        }
+
+        if delay > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { restore() }
+        } else {
+            restore()
         }
     }
 
