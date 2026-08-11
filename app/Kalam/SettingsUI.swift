@@ -1,7 +1,4 @@
-import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
-import KalamTextEngine
 
 // MARK: - Settings UI (SwiftUI)
 
@@ -51,9 +48,6 @@ struct SettingsView: View {
     init(initialTab: SettingsTab = .general) {
         _selectedTab = State(initialValue: initialTab)
     }
-
-    // MARK: - Computed Properties
-
 
     @ViewBuilder
     private var mainContent: some View {
@@ -143,17 +137,7 @@ struct SettingsView: View {
             }
     }
 
-    // MARK: - Extracted View Builders
-    /// The content for the Models tab.
-
-    /// The content for the Refine tab.
-
-
-
-
-
     // MARK: - Actions & Event Handlers
-
 
     private func onAppear() {
         if manager.isFirstLaunch {
