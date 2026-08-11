@@ -357,7 +357,7 @@ The full Hugging Face repository is 2.6 GB, but Kalam only needs ~450 MB. The `-
 
 SwiftPM packages:
 
-- `FluidAudio` (ASR integration), pinned to `0.14.5` in `Kalam.xcodeproj/project.pbxproj`
+- `FluidAudio` (ASR integration), pinned to `0.15.5` in `Kalam.xcodeproj/project.pbxproj`
 - `HotKey` (global hotkeys), pinned to `0.2.1` in `Kalam.xcodeproj/project.pbxproj`
 - transitive packages pinned in `Kalam.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`
 

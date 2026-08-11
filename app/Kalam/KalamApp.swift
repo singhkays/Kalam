@@ -142,6 +142,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let recordingChimeVolume: Float = 0.15
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // No-network invariant: set before any FluidAudio loader can run
+        // (see ASRService.enforceOfflineMode and the adoption dev-design doc).
+        ASRService.enforceOfflineMode()
         let generalSettings = GeneralSettingsConfiguration.load()
         NSApp.setActivationPolicy(generalSettings.showInDock ? .regular : .accessory)
         prepareRecordingChime()

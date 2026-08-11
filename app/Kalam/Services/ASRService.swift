@@ -1,4 +1,5 @@
 import AppKit
+import CoreML
 import Foundation
 @preconcurrency import FluidAudio
 import OSLog
@@ -58,6 +59,32 @@ struct ASRServiceStatus: Sendable {
 
 actor ASRService {
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "ASRService")
+
+    /// FluidAudio must never touch the network: Kalam has no network
+    /// entitlement (hard convention, see IMPROVEMENT_PLAN "What looks solid").
+    /// This blocks ModelHub's delete-cache-and-redownload fallback and any
+    /// HuggingFace fetch, surfacing typed `DownloadError.modelMissing`/`networkDisabled`
+    /// instead (adopted with FluidAudio 0.15.5 — see app/docs/dev-design/2026-08-11-fluidaudio-0.15.x-adoption.md).
+    /// Idempotent; must run before any FluidAudio loader is touched.
+    static func enforceOfflineMode() {
+        ModelHub.offlineMode = true
+    }
+
+    /// Opt-in GPU encoder placement (FluidAudio 0.15.1 #659): upstream measured
+    /// ~+8% end-to-end RTFx, WER-neutral on Apple Silicon for the Parakeet v3
+    /// conformer encoder (17.8ms vs 23.5ms per 15s window). ANE remains the
+    /// default for power efficiency on iOS; a plugged-in macOS dictation app is
+    /// the throughput workload the docstring targets. Scoped to v3 because
+    /// upstream measured v3 only (Q1 in the adoption dev-design doc) — v2/110m
+    /// keep the default until measured. `nil` = FluidAudio default.
+    private static func encoderComputeUnits(for version: ASRModelVersion) -> MLComputeUnits? {
+        #if arch(arm64)
+        return version == .v3 ? .cpuAndGPU : nil
+        #else
+        return nil
+        #endif
+    }
+
     private var asrManager: AsrManager?
     private var initialized = false
     private var currentModelVersion: ASRModelVersion?
@@ -105,6 +132,7 @@ actor ASRService {
     }
 
     private func initialize(using config: ModelsConfiguration) async throws {
+        Self.enforceOfflineMode()
         do {
             let version = config.asrVersion
             let availability = config.availability(for: version)
@@ -131,7 +159,11 @@ actor ASRService {
             }
 
             let models = try await ModelsConfiguration.withSecurityScopedAccess(to: modelLibraryURL) {
-                try await AsrModels.load(from: modelDirectory, version: version.fluidAudioVersion)
+                try await AsrModels.load(
+                    from: modelDirectory,
+                    version: version.fluidAudioVersion,
+                    encoderComputeUnits: Self.encoderComputeUnits(for: version)
+                )
             }
             
             var asrConfig = ASRConfig.default
