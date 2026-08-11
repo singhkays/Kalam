@@ -549,3 +549,14 @@ git commit -m "docs(K-08/K-09): dev plan authored; statuses flipped to in-progre
 - The `effectiveChangeCount` quirk in `writeAndTrackPasteboardState` (protects against changeCount not advancing).
 - K-02's defer semantics: restore scheduled unconditionally once the snapshot is taken — the new `outcome` only selects the delay.
 - No transcript text in any log line; no new entitlements; no network code.
+
+---
+
+## Execution deviations (2026-08-11, post-implementation)
+
+Found while executing; the code is authoritative over this section's earlier prose.
+
+1. **Defer-before-cancellation (correctness fix):** the plan's snippet placed `try Task.checkCancellation()` *before* the `defer { restoreClipboardIfNeeded(...) }` registration. A canceled paste then threw before the defer existed → the clipboard was never restored. Final order: register the `defer` immediately after the commit wait, then `try Task.checkCancellation()`. Caught by the new interplay test (`testPasteAbortsWhenCanceledAndRestoresClipboard`).
+2. **Bounded-retry restore:** `NSPasteboard` writes commit asynchronously (on this host `clearContents()` bumps `changeCount` synchronously but `setString` alone may not). An immediate (delay-0) restore could run before the commit landed → guard mismatch → transcript left on the clipboard. `restoreClipboardIfNeeded` now retries the same guarded restore every 20 ms up to 10 attempts (~200 ms). A user copy never matches the guard, so retries can never clobber it.
+3. **Test-host semantics:** in the XCTest host, named-pasteboard commits land only when the main runloop is pumped (`RunLoop.main.run`); `Task.sleep` in async tests does not service the pasteboard server. Consequently: (a) `testWaitForPasteboardCommitDetectsAdvanceDuringWait` is a **sync** test that pumps while a Task runs the wait, and advances the pasteboard mid-wait with `clearContents`+`setString`; (b) `testPasteAbortsWhenCanceledAndRestoresClipboard` cancels **before** dispatch (a mid-wait cancel can't be staged through `paste()` headlessly — the commit wait early-returns on this host); mid-wait cancellation is covered at the wait level by `testWaitForPasteboardCommitRespondsToCancellation` (added; not in the original plan).
+4. `PasteOutcome` is `internal` (not `private`) — the tests pass `.cmdV` directly.

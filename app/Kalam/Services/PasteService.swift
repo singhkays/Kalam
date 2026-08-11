@@ -81,7 +81,7 @@ final class PasteService {
         case failed            // every strategy failed — nothing consumed it
     }
 
-    func paste(_ text: String) throws {
+    func paste(_ text: String) async throws {
         // Check Accessibility without prompting in the hot path.
         guard strategies.isProcessTrusted() else {
             Self.logger.warning("Accessibility not trusted; aborting paste")
@@ -96,14 +96,20 @@ final class PasteService {
         let pasteboard = strategies.pasteboard
         let snapshot = PasteboardSnapshot(pasteboard: pasteboard)
         let insertedPasteboardState = writeAndTrackPasteboardState(pasteboard: pasteboard, text: text)
-        _ = waitForPasteboardCommit(pasteboard: pasteboard, targetChangeCount: insertedPasteboardState.changeCount)
+        _ = await waitForPasteboardCommit(pasteboard: pasteboard, targetChangeCount: insertedPasteboardState.changeCount)
 
         // K-02: the transcript now sits on the user's pasteboard. Restoring the
-        // original clipboard content is unconditional from this point — every exit
-        // path (Cmd+V success, AX insert success, or any failure) schedules the
-        // restore. Previously the throw path left the transcript on the clipboard.
+        // original clipboard content is unconditional from this point — every
+        // exit path (Cmd+V success, AX insert success, any failure, or
+        // cancellation) schedules the restore. The defer must be registered
+        // before the cancellation check so a canceled paste still restores.
         var outcome = PasteOutcome.failed
         defer { restoreClipboardIfNeeded(snapshot, insertedState: insertedPasteboardState, outcome: outcome) }
+
+        // K-09/K-01: the wait is cooperative, so a canceled transcription task
+        // (new recording started) reaches this point — abort the paste; the
+        // defer above still restores the clipboard.
+        try Task.checkCancellation()
 
         if strategies.postCmdV() {
             Self.logger.info("Paste succeeded via Cmd+V")
@@ -134,14 +140,28 @@ final class PasteService {
         // only it keeps a (short) grace delay for the app to read it. The AX
         // path and failures restore immediately — the transcript never needs to
         // linger. The changeCount + string-equality guard is unchanged.
+        //
+        // NSPasteboard commits writes asynchronously, so a restore that runs
+        // before the commit lands (immediate path, or a canceled wait) retries
+        // briefly until the guard matches. A user copy that replaced the
+        // transcript never matches the guard and is left alone — retrying only
+        // restores when the pasteboard still holds exactly what Kalam wrote.
         let delay: TimeInterval = outcome == .cmdV ? strategies.restoreDelay : 0
+        let retryInterval: TimeInterval = 0.02
+        let maxAttempts = 10   // ~200 ms retry budget for a slow commit
 
-        let restore: @MainActor () -> Void = {
+        func attemptRestore(attempt: Int) {
             let pasteboard = self.strategies.pasteboard
             guard pasteboard.changeCount == insertedState.changeCount,
                   pasteboard.string(forType: .string) == insertedState.text
             else {
-                Self.logger.info("Clipboard restore skipped because pasteboard changed after Kalam write")
+                guard attempt < maxAttempts else {
+                    Self.logger.info("Clipboard restore skipped: pasteboard no longer matches Kalam's write")
+                    return
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + retryInterval) {
+                    attemptRestore(attempt: attempt + 1)
+                }
                 return
             }
             snapshot.restore(to: pasteboard)
@@ -149,9 +169,11 @@ final class PasteService {
         }
 
         if delay > 0 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { restore() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                attemptRestore(attempt: 0)
+            }
         } else {
-            restore()
+            attemptRestore(attempt: 0)
         }
     }
 
@@ -169,16 +191,20 @@ final class PasteService {
         targetChangeCount: Int,
         timeoutSeconds: TimeInterval = 0.15,
         pollIntervalSeconds: TimeInterval = 0.005
-    ) -> Bool {
+    ) async -> Bool {
         if targetChangeCount <= pasteboard.changeCount {
             return true
         }
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         while Date() < deadline {
+            // K-09: cooperative sleep — yields the MainActor between polls so
+            // the UI and overlay animations never stall. Cancellation aborts
+            // promptly; the caller decides what that means.
+            try? await Task.sleep(nanoseconds: UInt64(pollIntervalSeconds * 1_000_000_000))
+            if Task.isCancelled { return false }
             if pasteboard.changeCount >= targetChangeCount {
                 return true
             }
-            usleep(useconds_t(pollIntervalSeconds * 1_000_000))
         }
         return false
     }

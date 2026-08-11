@@ -1016,10 +1016,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 stageMark("paste-wait")
 
                 do {
-                    try await MainActor.run {
-                        try self.paster.paste(postProcessed)
-                        self.overlay.showSuccessAndAutoHide()
-                    }
+                    try await self.paster.paste(postProcessed)
+                    self.overlay.showSuccessAndAutoHide()
                     stageMark("paste-dispatch")
                     if stageTimingEnabled {
                         let totalMs = (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000.0
@@ -1033,10 +1031,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     stageMark("paste-fallback-wait")
 
                     do {
-                        try await MainActor.run {
-                            try self.paster.paste(postProcessed)
-                            self.overlay.showSuccessAndAutoHide()
-                        }
+                        try await self.paster.paste(postProcessed)
+                        self.overlay.showSuccessAndAutoHide()
                         stageMark("paste-fallback-dispatch")
                         if stageTimingEnabled {
                             let totalMs = (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000.0
