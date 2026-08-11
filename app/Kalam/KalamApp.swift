@@ -989,7 +989,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 
                 // Run cleanup on transcript text before dictionary replacements.
                 let cleanupConfig = ModelsConfiguration.load().textCleanup
-                let cleanupResult = TextCleanupService.shared.clean(trimmedText, configuration: cleanupConfig)
+                let cleanupResult = TextCleanupEngine().clean(trimmedText, configuration: cleanupConfig)
                 let itnResult = Self.applyITNIfEnabled(to: cleanupResult.text)
                 stageMark("cleanup+itn")
 

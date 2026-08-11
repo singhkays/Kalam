@@ -30,7 +30,7 @@ struct KalamTestRunner {
         let config = configuration ?? ModelsConfiguration.load().textCleanup
         
         // 1. Cleanup
-        let cleanupResult = TextCleanupService.shared.clean(text, configuration: config)
+        let cleanupResult = TextCleanupEngine().clean(text, configuration: config)
         let cleanedText = cleanupResult.text
         
         // 2. ITN (Inverse Text Normalization)
