@@ -236,8 +236,25 @@ final class AudioRecorder: @unchecked Sendable {
     func cancelCapture() async {
         _ = await stopAndFetchSamples(postRollMs: 0)
     }
+
+    /// Test-only: activate capture state without touching the audio engine
+    /// (the test host has no microphone input device, so AVAudioEngine input
+    /// graph construction asserts — the app's onboarding guarantees one in
+    /// production). Mirrors the state portion of `startCollecting()`.
+    func beginCollectingForTesting() {
+        bufferQueue.sync {
+            collecting = true
+            callbackCount = 0
+            sampleBuffer.removeAll(keepingCapacity: true)
+            recentWaveformSamples.removeAll(keepingCapacity: true)
+            // Do not reset converter here; keep across session until stop/drain to preserve internal filter state.
+        }
+    }
     
-    private func process(buffer: AVAudioPCMBuffer) {
+    /// Render-thread entry point (installTap callback). Never blocks — the
+    /// publish path try-locks and drops (and counts) on contention (K-10).
+    /// Internal for testability (KalamTests drives it with synthetic buffers).
+    func process(buffer: AVAudioPCMBuffer) {
         bufferQueue.sync {
             guard self.collecting else { return }
             self.callbackCount += 1
