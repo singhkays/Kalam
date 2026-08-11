@@ -1,7 +1,7 @@
 # Kalam — Swift Codebase Improvement Plan
 
 **Status legend:** `⬜ todo` · `🔄 in progress` · `✅ done` (only after verified)
-**Last updated:** 2026-08-10
+**Last updated:** 2026-08-11
 **Source:** Full read-only review of `app/Kalam/`, `app/Packages/KalamTextEngine/`, entitlements, workflows, and scripts. Engine tests were green (32/32) at review time.
 **Working tree at review time:** uncommitted engine-extraction refactor in flight (`KalamApp.swift` −562 lines, `DictionaryEntry`/cleanup config moved into the `KalamTextEngine` package, `app/Kalam/TextCleanupConfiguration.swift` deleted).
 
@@ -20,7 +20,7 @@
 
 | ID | Status | Severity | Finding | Evidence (at review time) | Fix | Verify |
 |---|---|---|---|---|---|---|
-| K-03 | 🔄 | Medium | `KalamApp.swift` is a 2,924-line god file (~10 responsibilities): `AppDelegate` (~580), `DictationOverlayController` + `OverlayCapsuleView` + `WaveformView` (~700 lines of AppKit/CALayer UI), `AudioRecorder` (~400), `SilenceTrimmer` (~195), `SystemAudioDucker` (~130), `HotkeyListener` (~195), helpers. | `KalamApp.swift` structure; overlay UI spans ~1483–2279. | Extract overlay UI → own file; `AudioRecorder`/`SilenceTrimmer`/`SystemAudioDucker` → `Services/`; `HotkeyListener` → own file. `AppDelegate` becomes pure orchestration. | `./scripts/test-engine.sh` still green; `xcodebuild build` succeeds; manual smoke: hotkey + overlay + ducking. |
+| K-03 | ✅ | Medium | `KalamApp.swift` is a 2,924-line god file (~10 responsibilities): `AppDelegate` (~580), `DictationOverlayController` + `OverlayCapsuleView` + `WaveformView` (~700 lines of AppKit/CALayer UI), `AudioRecorder` (~400), `SilenceTrimmer` (~195), `SystemAudioDucker` (~130), `HotkeyListener` (~195), helpers. | `KalamApp.swift` structure; overlay UI spans ~1483–2279. | Extract overlay UI → own file; `AudioRecorder`/`SilenceTrimmer`/`SystemAudioDucker` → `Services/`; `HotkeyListener` → own file. `AppDelegate` becomes pure orchestration. | `./scripts/test-engine.sh` still green; `xcodebuild build` succeeds; manual smoke: hotkey + overlay + ducking. |
 | K-04 | ⬜ | Medium | `SettingsView` is a single 1,518-line struct (`SettingsUI.swift:8–1526`); only 5 top-level types in a 2,154-line file. | `SettingsUI.swift` type scan. | Split per-tab (Word Replacement / Keyboard / Refine / Models) into separate files. | Build + manual smoke of each tab. |
 | K-05 | ⬜ | Medium | `wholeWord` and `morphological` flags on `DictionaryEntry` are dead configuration — the compiler always emits `\b(trigger)(suffix)?\b`, and no UI toggle exists. Test `wholeWordEnforcement` pins `wholeWord: false` while asserting whole-word behavior (passes by proving the flag is a no-op). | `DictionaryEntry.swift:10–13`; `ReplacementCompiler.swift:159–171`; `ReplacementCompilerTests.swift:70–81`; `SettingsUI.swift:1907` (copy text only). | Either honor the flags in `compileWordRule` or delete them; fix the test to assert intended semantics. | `./scripts/test-engine.sh` green. |
 | K-06 | ⬜ | Medium | `normalizePunctuation` (5 transforms + `try!` regexes) is duplicated verbatim across the package boundary; the entire grammar pass (`runGrammar`, `normalizeSentenceStarts`, `isProtectedTerm`) lives only in the app shell → zero headless test coverage for the app's most fragile code. | `TextCleanupEngine.swift:281–300` vs `TextCleanupService.swift:173–195, 216–222`; grammar-only code in `TextCleanupService.swift`. | Move the grammar pass into `KalamTextEngine` behind `canImport(AppKit)`; delete the app-side duplicate. | `./scripts/test-engine.sh` covers grammar; `xcodebuild test` integration passes. |
@@ -81,3 +81,7 @@
    - Headless engine: `./scripts/test-engine.sh` (from repo root)
    - Full suite (needs Xcode): `xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO`
 6. When a priority group is fully `✅`, optionally convert its rows into a short "resolved" changelog section at the bottom rather than deleting them (keeps history for other agents).
+
+## Resolved changelog
+
+- **K-03 (2026-08-11)** — KalamApp.swift god-file extraction. `KalamApp.swift` 2,968 → 1,158 lines; `DictationOverlayController.swift` (overlay + views), `Services/{AudioRecorder,SilenceTrimmer,SystemAudioDucker,HotkeyListener}.swift`, `AccessibilityHelper.swift`, `AppRelauncher.swift`, `AppMetadata.swift` created (folder-synced groups, no pbxproj edits). Commits `42d91e5` `068df0c` `5bda37d` `cff43e5` `e296739` `ed02265` `024bf6b`; docs `79c1b2c` `318e683`; plan `app/docs/dev-design/2026-08-11-k03-kalamapp-god-file-extraction.md`. Verified: engine 32/32, `xcodebuild build` + full Xcode suite green (incl. RealModelSmokeTests v2), manual hotkey/overlay/ducking smoke passed. K-21's mid-file `import CoreAudio` removed incidentally.

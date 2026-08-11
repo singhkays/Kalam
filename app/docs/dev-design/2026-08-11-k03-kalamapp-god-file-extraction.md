@@ -1,7 +1,7 @@
 # K-03 — KalamApp.swift God-File Extraction: Implementation Plan
 
 **Date:** 2026-08-11
-**Status:** Executed 2026-08-11 — Tasks 0–8 complete (9 commits: `e4fbdb6`, `42d91e5`, `068df0c`, `5bda37d`, `cff43e5`, `e296739`, `ed02265`, `024bf6b`, `79c1b2c`). Task 9.1–9.4 pass (engine 32/32, build green, full Xcode suite green incl. `RealModelSmokeTests.testParakeetV2Smoke`, invariant greps clean). **Task 9.5 manual smoke (hotkey + overlay + ducking) pending human run** — flip `K-03` to `✅` only after it passes.
+**Status:** Executed 2026-08-11 — Tasks 0–8 complete (9 commits: `e4fbdb6`, `42d91e5`, `068df0c`, `5bda37d`, `cff43e5`, `e296739`, `ed02265`, `024bf6b`, `79c1b2c`). Task 9.1–9.4 pass (engine 32/32, build green, full Xcode suite green incl. `RealModelSmokeTests.testParakeetV2Smoke`, invariant greps clean). **Task 9.5 manual smoke (hotkey + overlay + ducking) passed by user 2026-08-11** — `K-03` marked `✅` in IMPROVEMENT_PLAN.md.
 **Scope:** Extract the ~1,800 lines of non-orchestration code out of `app/Kalam/KalamApp.swift` (2,968 lines) into focused files. Pure structural refactor — **zero behavior change**.
 **Sources:** `app/Kalam/KalamApp.swift` (read in full, 2026-08-11), `app/Kalam.xcodeproj/project.pbxproj` (folder-synced groups confirmed), `app/KalamTests/` (no references to extracted types), AGENTS.md, IMPROVEMENT_PLAN K-03.
 **Executing agent note:** all line numbers below were verified against the working tree on 2026-08-11 and **will drift** — every task re-locates its range by anchor string before cutting (the `grep` commands are given).
