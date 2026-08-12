@@ -104,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var appDidBecomeActiveObserver: NSObjectProtocol?
     private var localKeyDownMonitor: Any?
     private var globalKeyDownMonitor: Any?
+    private var audioMonitor: AudioDeviceMonitor?
     private var selectedInputUID: String?
     private var duckingStartWorkItem: DispatchWorkItem?
     private let recordingChime = NSSound(named: NSSound.Name("Breeze"))
@@ -256,6 +257,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // K-26: react to audio-topology changes (dock reconnects, device
+        // death) and system wake — the audio graph must be re-prepared
+        // against the fresh device list instead of staying bound to a
+        // stale CoreAudio device.
+        let monitor = AudioDeviceMonitor()
+        monitor.start(
+            onDeviceChange: { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.refreshAudioInputAfterDeviceChange()
+                }
+            },
+            onWake: { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.handleSystemWake()
+                }
+            }
+        )
+        audioMonitor = monitor
+
         applyGeneralSettings()
         installEscapeMonitor()
         refreshOnboardingState(reopenIfNeeded: false)
@@ -297,6 +319,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationCenter.default.removeObserver(openSetupObserver)
             self.openSetupObserver = nil
         }
+        audioMonitor?.stop()
+        audioMonitor = nil
         if let localKeyDownMonitor {
             NSEvent.removeMonitor(localKeyDownMonitor)
             self.localKeyDownMonitor = nil
@@ -741,6 +765,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isASRReady = forceReady ?? status.isReady
         isASRSetupIssue = status.isSetupIssue
         asrRecordingBlockMessage = status.recordingBlockMessage
+    }
+
+    /// K-26: CoreAudio device changed (plug/unplug, default-input switch,
+    /// device death, dock reconnect) — rebuild the audio graph against the
+    /// fresh topology and re-select the priority-ordered microphone.
+    private func refreshAudioInputAfterDeviceChange() {
+        audio.invalidatePreparedState()
+        do {
+            _ = try prepareAudioForRecording()
+            isAudioReady = true
+        } catch {
+            isAudioReady = false
+            logger.warning("Audio refresh after device change failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
+        }
+        refreshOnboardingState(reopenIfNeeded: false)
+    }
+
+    /// K-26: system woke. Two failure modes to clear:
+    /// 1. A phantom PTT session (toggle started before sleep, key-up lost) —
+    ///    the first post-wake keypress would otherwise act as a STOP and
+    ///    instantly "transcribe" a junk clip. Reset the machine silently
+    ///    (no chime, no toast — wake should not beep).
+    /// 2. A stale audio-graph binding — same refresh as a device change.
+    private func handleSystemWake() {
+        logger.info("System wake: resetting PTT state and refreshing audio input")
+        if isRecording {
+            transcriptionTask?.cancel()
+            transcriptionTask = nil
+            dictationTargetPID = nil
+            dictationTargetElement = nil
+            heldTranscript = nil
+            let audio = self.audio
+            Task { await audio.cancelCapture() }
+            overlay.hide()
+        }
+        pttState.resetForConfigurationChange()
+        refreshAudioInputAfterDeviceChange()
     }
 
     private func handleHotkeyEvent(isDown: Bool) {
