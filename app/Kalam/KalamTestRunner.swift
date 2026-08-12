@@ -73,11 +73,16 @@ struct KalamTestRunner {
         }
         
         let span = itnSpan > 0 ? UInt32(itnSpan) : 16
+        let protector = ITNSpanProtector()
         let lines = text.components(separatedBy: "\n")
         let normalizedLines = lines.map { line -> String in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { return line }
-            return NemoTextProcessing.normalizeSentence(line, maxSpanTokens: span)
+            // K-28: mask spoken-number spans ITN mis-normalizes (ranges,
+            // idioms, digit sequences), normalize, then restore.
+            let masked = protector.protect(trimmed)
+            let normalized = NemoTextProcessing.normalizeSentence(masked.text, maxSpanTokens: span)
+            return protector.restore(normalized, spans: masked.spans)
         }
         let normalized = normalizedLines.joined(separator: "\n")
         return (normalized, normalized != text)

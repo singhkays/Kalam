@@ -73,6 +73,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let paster = PasteService()
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "DictationRuntime")
 
+    // K-23: record-time paste target (app PID + focused element), and a held transcript
+    // awaiting an explicit "Paste" action when the captured target is gone.
+    private var dictationTargetPID: pid_t?
+    private var dictationTargetElement: AXUIElement?
+    private var heldTranscript: String?
+
     private var isRecording: Bool { pttState.isRecording }
     private var isASRReady = false
     private var isASRSetupIssue = false
@@ -134,6 +140,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.setWaveformProvider { [weak self] in
             self?.audio.recentWaveform(sampleCount: 512) ?? []
         }
+        overlay.setPasteHeldTranscriptAction { [weak self] in
+            self?.pasteHeldTranscript()
+        }
         
         // Status bar icon/menu
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -192,6 +201,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             guard let self = self else { return }
             Task { @MainActor in
+                // Refresh first so the UI reflects the new config immediately
+                // (availability is a fast disk check); ASR prep runs in the
+                // background, then a final refresh flips isASRReady.
+                self.refreshOnboardingState(reopenIfNeeded: false)
                 await self.prepareRuntimeIfPossible()
                 self.refreshOnboardingState(reopenIfNeeded: false)
             }
@@ -235,6 +248,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
+                // Refresh before the slow ASR prep so the onboarding window
+                // (if needed) appears immediately, then again after prep.
+                self.refreshOnboardingState(reopenIfNeeded: true)
                 await self.prepareRuntimeIfPossible()
                 self.refreshOnboardingState(reopenIfNeeded: true)
             }
@@ -390,6 +406,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupMenuItem?.title = snapshot.hasIncompleteRequirements ? "Complete Setup…" : "Run Setup Again…"
         onboardingController?.apply(snapshot: snapshot)
+        // K-24: after the user attempted Accessibility setup, every refresh transitions the
+        // setup state to .enabledPendingRelaunch while the process isn't trusted — this makes
+        // the "Quit & Reopen Kalam" relaunch path reachable (it was dead code before).
+        onboardingController?.confirmAccessibilityEnabledIfAttempted()
         if reopenIfNeeded, snapshot.hasIncompleteRequirements {
             reopenOnboardingIfNeeded(with: snapshot.mode)
         }
@@ -425,6 +445,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshAction: { [weak self] in
                 guard let self else { return }
                 Task { @MainActor in
+                    // Same ordering as the modelsConfig observer: refresh the
+                    // snapshot first (fast), run the slow ASR prep, then
+                    // refresh again so isASRReady reaches the UI.
+                    self.refreshOnboardingState(reopenIfNeeded: false)
                     await self.prepareRuntimeIfPossible()
                     self.refreshOnboardingState(reopenIfNeeded: false)
                 }
@@ -617,11 +641,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let span = UInt32(spanTokens)
         let started = CFAbsoluteTimeGetCurrent()
+        let protector = ITNSpanProtector()
         let lines = text.components(separatedBy: "\n")
         let normalizedLines = lines.map { line -> String in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { return line }
-            return NemoTextProcessing.normalizeSentence(line, maxSpanTokens: span)
+            // K-28: mask spoken-number spans ITN mis-normalizes (ranges,
+            // idioms, digit sequences), normalize, then restore.
+            let masked = protector.protect(trimmed)
+            let normalized = NemoTextProcessing.normalizeSentence(masked.text, maxSpanTokens: span)
+            return protector.restore(normalized, spans: masked.spans)
         }
 
         let normalized = normalizedLines.joined(separator: "\n")
@@ -653,6 +682,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func prepareRuntimeIfPossible() async {
+        // Single-flight: the modelsConfig observer, refreshAction,
+        // appDidBecomeActive and the startup task can all fire concurrently
+        // (e.g. applyModelLibraryFolder previously triggered both the
+        // notification and refreshAction). Coalesce into one in-flight
+        // preparation instead of loading/compiling the ASR model twice.
+        if let runtimePrepTask {
+            await runtimePrepTask.value
+            return
+        }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performRuntimePreparation()
+        }
+        runtimePrepTask = task
+        await task.value
+        runtimePrepTask = nil
+    }
+
+    private func performRuntimePreparation() async {
         let microphoneAuthorization = AVCaptureDevice.authorizationStatus(for: .audio)
         if microphoneAuthorization == .authorized {
             do {
@@ -800,6 +848,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
         }
         
+        // K-23: remember where the user is dictating so the transcript follows the
+        // record-time target even if the frontmost app changes during transcription.
+        if let frontmost = NSWorkspace.shared.frontmostApplication {
+            switch AccessibilityFocusResolver.resolveFocusedElement(frontmostApp: frontmost) {
+            case .success(let resolution):
+                dictationTargetPID = frontmost.processIdentifier
+                dictationTargetElement = resolution.element
+            case .failure:
+                dictationTargetPID = nil
+                dictationTargetElement = nil
+            }
+        } else {
+            dictationTargetPID = nil
+            dictationTargetElement = nil
+        }
+
         audio.startCollecting()
         overlay.showRecording(isHoldMode: triggerMode == .hold)
         return true
@@ -930,7 +994,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 stageMark("paste-wait")
 
                 do {
-                    try await self.paster.paste(postProcessed)
+                    switch PasteService.PasteRouting.target(
+                        capturedPID: self.dictationTargetPID,
+                        capturedElement: self.dictationTargetElement,
+                        frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier
+                    ) {
+                    case .frontmost:
+                        try await self.paster.paste(postProcessed)
+                    case .capturedElement(let element):
+                        // K-23: the user switched apps while transcribing — insert into the
+                        // record-time target (bypasses the pasteboard entirely).
+                        do {
+                            try await self.paster.paste(into: element, text: postProcessed)
+                        } catch {
+                            // The captured target is gone (app quit / field closed): hold the
+                            // transcript with a notice instead of pasting into the wrong app.
+                            self.heldTranscript = postProcessed
+                            self.dictationTargetElement = nil
+                            self.dictationTargetPID = nil
+                            let frontmostName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "the frontmost app"
+                            await MainActor.run {
+                                self.overlay.showError(
+                                    "Transcript ready — paste into \(frontmostName)?",
+                                    action: .pasteHeldTranscript,
+                                    autoHideAfter: nil
+                                )
+                            }
+                            self.logger.info("Captured-target paste failed; transcript held errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
+                            return
+                        }
+                    }
+                    self.heldTranscript = nil
+                    self.dictationTargetElement = nil
+                    self.dictationTargetPID = nil
                     self.overlay.showSuccessAndAutoHide()
                     stageMark("paste-dispatch")
                     if stageTimingEnabled {
@@ -976,6 +1072,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard isRecording else { return }
         pttState.recordingDidStop()
 
+        // K-23: a canceled session must not retain its paste target or held transcript.
+        dictationTargetPID = nil
+        dictationTargetElement = nil
+        heldTranscript = nil
+
         if UserDefaults.standard.bool(forKey: "duckEnabled") {
             duckingStartWorkItem?.cancel()
             duckingStartWorkItem = nil
@@ -991,6 +1092,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await audio.cancelCapture()
             await MainActor.run {
                 self.overlay.showInfoAndAutoHide("Recording canceled")
+            }
+        }
+    }
+
+    /// K-23: explicit "Paste" action for a held transcript — pastes into the CURRENT
+    /// frontmost app (the user consciously chose it by clicking the overlay button).
+    private func pasteHeldTranscript() {
+        guard let text = heldTranscript else { return }
+        heldTranscript = nil
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.paster.paste(text)
+                self.overlay.showSuccessAndAutoHide()
+            } catch {
+                self.logger.warning("Held-transcript paste failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
+                self.overlay.showError("Paste failed", action: nil, autoHideAfter: 4.0)
             }
         }
     }
