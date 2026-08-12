@@ -56,7 +56,7 @@ struct WordReplacementView: View {
                     .font(KalamTheme.pageTitleFont)
                     .foregroundColor(KalamTheme.textPrimary)
 
-                Text("\\(manager.entries.count) rules • \\(activeRuleCount) active")
+                Text("\(manager.entries.count) rules • \(activeRuleCount) active")
                     .font(KalamTheme.calloutFont)
                     .foregroundColor(KalamTheme.textSecondary)
             }

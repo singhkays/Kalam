@@ -30,6 +30,8 @@ final class PasteService {
         var postUnicodeText: (String) -> Bool = { PasteService.postUnicodeTextIfPossible($0) }
         var postCmdV: () -> Bool = { PasteService.postCmdV() }
         var insertTextViaAccessibility: (String) -> String? = { PasteService.insertTextViaAccessibility($0) }
+        /// K-23: insert into a specific captured element (record-time paste target).
+        var insertTextIntoElement: (AXUIElement, String) -> String? = { PasteService.insertTextViaAccessibility(into: $0, text: $1) }
         var pasteboard: NSPasteboard = .general
         /// Grace delay before restoring the user's clipboard after a Cmd+V
         /// paste, giving the target app time to read the pasteboard. Only the
@@ -124,6 +126,40 @@ final class PasteService {
 
         Self.logger.info("Paste succeeded via Accessibility")
         outcome = .accessibility
+    }
+
+    /// K-23: insert into a specific captured element (the record-time paste target) instead
+    /// of the frontmost app. Used when the frontmost app changed during transcription —
+    /// bypasses the pasteboard entirely, so the transcript never sits on the clipboard.
+    func paste(into element: AXUIElement, text: String) async throws {
+        guard strategies.isProcessTrusted() else {
+            Self.logger.warning("Accessibility not trusted; aborting captured-element paste")
+            throw PasteServiceError.accessibilityNotTrusted
+        }
+        if let error = strategies.insertTextIntoElement(element, text) {
+            Self.logger.warning("Captured-element paste failed: \(error, privacy: .public)")
+            throw PasteServiceError.pasteExecutionFailed(reason: error)
+        }
+        Self.logger.info("Paste succeeded via captured-element Accessibility insert")
+    }
+
+    /// Where a transcript should be pasted (K-23).
+    enum PasteTarget: Equatable {
+        /// No capture, or the frontmost app is still the record-time target — existing pipeline.
+        case frontmost
+        /// The user switched apps during transcription — insert into the captured element.
+        case capturedElement(AXUIElement)
+    }
+
+    /// Pure decision for the paste target (headless-testable).
+    enum PasteRouting {
+        static func target(capturedPID: pid_t?, capturedElement: AXUIElement?, frontmostPID: pid_t?) -> PasteTarget {
+            guard let capturedPID, let capturedElement, let frontmostPID,
+                  capturedPID != frontmostPID else {
+                return .frontmost
+            }
+            return .capturedElement(capturedElement)
+        }
     }
 
     struct InsertedPasteboardState {
@@ -270,8 +306,18 @@ final class PasteService {
             return error.reason
         }
 
+        if let error = insertTextViaAccessibility(into: resolution.element, text: text) {
+            return "Resolved focused element in \(resolution.appName) via \(resolution.strategy), but \(error)"
+        }
+        return nil
+    }
+
+    /// K-23: insert into a specific captured element (the record-time paste target) instead
+    /// of the frontmost app's focused element. Used when the frontmost app changed during
+    /// transcription; bypasses the pasteboard entirely.
+    private static func insertTextViaAccessibility(into element: AXUIElement, text: String) -> String? {
         let insertResult = AXUIElementSetAttributeValue(
-            resolution.element,
+            element,
             kAXSelectedTextAttribute as CFString,
             text as CFTypeRef
         )
@@ -280,7 +326,7 @@ final class PasteService {
         }
 
         let valueResult = AXUIElementSetAttributeValue(
-            resolution.element,
+            element,
             kAXValueAttribute as CFString,
             text as CFTypeRef
         )
@@ -288,8 +334,7 @@ final class PasteService {
             return nil
         }
 
-        return "Resolved focused element in \(resolution.appName) via \(resolution.strategy), "
-            + "but kAXSelectedTextAttribute failed with \(insertResult.debugName) and "
+        return "kAXSelectedTextAttribute failed with \(insertResult.debugName) and "
             + "kAXValueAttribute failed with \(valueResult.debugName)."
     }
 }

@@ -320,6 +320,100 @@ final class PasteServiceTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), original,
             "K-02: the defer restore must still fire after cancellation")
     }
+
+    // MARK: - K-23 (captured-element paste + routing)
+
+    func testPasteIntoCapturedElementSucceedsWithoutTouchingPasteboard() async throws {
+        let pasteboard = makeIsolatedPasteboard()
+        pasteboard.clearContents()
+        pasteboard.setString("user-copy-\\(UUID().uuidString)", forType: .string)
+
+        let element = AXUIElementCreateSystemWide()
+        let insertedElement = TestBox<AXUIElement>()
+        var strategies = PasteService.PasteStrategies()
+        strategies.isProcessTrusted = { true }
+        strategies.insertTextIntoElement = { target, _ in
+            insertedElement.value = target
+            return nil
+        }
+        strategies.pasteboard = pasteboard
+        let service = PasteService(strategies: strategies)
+
+        try await service.paste(into: element, text: "transcript-\\(UUID().uuidString)")
+
+        XCTAssertNotNil(insertedElement.value, "the captured element must receive the insert")
+        XCTAssertTrue(insertedElement.value === element, "insert must target the captured element")
+        // The captured path bypasses the pasteboard entirely.
+        XCTAssertEqual(
+            pasteboard.string(forType: .string)?.hasPrefix("user-copy-"), true,
+            "K-23: the user's clipboard must be untouched by a captured-element paste"
+        )
+    }
+
+    func testPasteIntoCapturedElementThrowsOnInsertFailure() async {
+        var strategies = PasteService.PasteStrategies()
+        strategies.isProcessTrusted = { true }
+        strategies.insertTextIntoElement = { _, _ in "element is gone" }
+        let service = PasteService(strategies: strategies)
+
+        do {
+            try await service.paste(into: AXUIElementCreateSystemWide(), text: "transcript")
+            XCTFail("captured-element paste must throw when the insert fails")
+        } catch PasteServiceError.pasteExecutionFailed(let reason) {
+            XCTAssertEqual(reason, "element is gone")
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
+    func testPasteIntoCapturedElementRequiresTrust() async {
+        var insertCalled = false
+        var strategies = PasteService.PasteStrategies()
+        strategies.isProcessTrusted = { false }
+        strategies.insertTextIntoElement = { _, _ in
+            insertCalled = true
+            return nil
+        }
+        let service = PasteService(strategies: strategies)
+
+        do {
+            try await service.paste(into: AXUIElementCreateSystemWide(), text: "transcript")
+            XCTFail("captured-element paste must require AX trust")
+        } catch PasteServiceError.accessibilityNotTrusted {
+            // expected
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+        XCTAssertFalse(insertCalled, "no insert may run without AX trust")
+    }
+
+    func testPasteRoutingNoCaptureFallsBackToFrontmost() {
+        let element = AXUIElementCreateSystemWide()
+        XCTAssertEqual(
+            PasteService.PasteRouting.target(capturedPID: nil, capturedElement: element, frontmostPID: 42),
+            .frontmost
+        )
+        XCTAssertEqual(
+            PasteService.PasteRouting.target(capturedPID: 7, capturedElement: nil, frontmostPID: 42),
+            .frontmost
+        )
+    }
+
+    func testPasteRoutingSameAppUsesFrontmost() {
+        let element = AXUIElementCreateSystemWide()
+        XCTAssertEqual(
+            PasteService.PasteRouting.target(capturedPID: 7, capturedElement: element, frontmostPID: 7),
+            .frontmost
+        )
+    }
+
+    func testPasteRoutingSwitchedAppTargetsCapturedElement() {
+        let element = AXUIElementCreateSystemWide()
+        XCTAssertEqual(
+            PasteService.PasteRouting.target(capturedPID: 7, capturedElement: element, frontmostPID: 42),
+            .capturedElement(element)
+        )
+    }
 }
 
 /// Mutable box so a Task closure can hand a result back to a sync test

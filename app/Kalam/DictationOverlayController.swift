@@ -16,6 +16,8 @@ final class DictationOverlayController {
     enum OverlayAction {
         case openAccessibilitySettings
         case openMicrophoneSettings
+        /// K-23: paste a held transcript into the current frontmost app (explicit user action).
+        case pasteHeldTranscript
     }
 
     private enum OverlayState {
@@ -34,6 +36,8 @@ final class DictationOverlayController {
     private var waveformTask: Task<Void, Never>?
     private var timerTask: Task<Void, Never>?
     private var waveformProvider: (() -> [Float])?
+    /// K-23: injected by the app — pastes a held transcript into the current frontmost app.
+    private var pasteHeldTranscriptAction: (() -> Void)?
     private var recordingStartTime: CFAbsoluteTime = 0
     private var currentStateSetTime: CFAbsoluteTime = 0
     private let minStateDwellSeconds: Double = 0.25
@@ -44,6 +48,11 @@ final class DictationOverlayController {
 
     func setWaveformProvider(_ provider: @escaping () -> [Float]) {
         waveformProvider = provider
+    }
+
+    /// K-23: wire the held-transcript "Paste" action to the app (which owns the paste pipeline).
+    func setPasteHeldTranscriptAction(_ action: @escaping () -> Void) {
+        pasteHeldTranscriptAction = action
     }
 
     func showRecording(isHoldMode: Bool) {
@@ -68,7 +77,7 @@ final class DictationOverlayController {
         transition(to: .info(message: message), lockAnchor: false, autoHideAfter: 0.7)
     }
 
-    func showError(_ message: String, action: OverlayAction?, autoHideAfter: TimeInterval) {
+    func showError(_ message: String, action: OverlayAction?, autoHideAfter: TimeInterval? = nil) {
         transition(to: .error(message: message, action: action), lockAnchor: false, autoHideAfter: autoHideAfter)
     }
 
@@ -181,6 +190,8 @@ final class DictationOverlayController {
             return "Open"
         case .openMicrophoneSettings:
             return "Open"
+        case .pasteHeldTranscript:
+            return "Paste"
         case .none:
             return nil
         }
@@ -193,6 +204,8 @@ final class DictationOverlayController {
             _ = SystemSettingsNavigator.open(.accessibility)
         case .openMicrophoneSettings:
             _ = SystemSettingsNavigator.open(.microphone)
+        case .pasteHeldTranscript:
+            pasteHeldTranscriptAction?()
         }
         hide()
     }

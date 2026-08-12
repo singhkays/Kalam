@@ -114,6 +114,28 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertNil(readySnapshot.runtimePreparationMessage)
     }
 
+    func testRuntimePreparationMessageShowsEnginePreparingWhileModelReadyButASRLoading() {
+        let snapshot = makeSnapshot(
+            microphoneAuthorization: .authorized,
+            accessibilityTrusted: true,
+            hasAttemptedAccessibilitySetup: false,
+            selectedModelVersion: .v2,
+            modelLibraryURL: URL(fileURLWithPath: "/tmp/models", isDirectory: true),
+            selectedModelAvailability: .installed(path: "/tmp/models/parakeet-tdt-0.6b-v2"),
+            installedModelVersions: [.v2],
+            hasCompletedRequiredSetup: false,
+            isAudioReady: true,
+            isASRReady: false,
+            hasPickedHotkey: false
+        )
+
+        // Model files are present but the engine is still loading in the
+        // background — the user should see progress even before all four
+        // requirements are complete (first-run folder pick scenario).
+        XCTAssertEqual(snapshot.completedRequirements, 3)
+        XCTAssertEqual(snapshot.runtimePreparationMessage, "Preparing dictation engine…")
+    }
+
     func testEvaluateMarksInvalidModelFolderAsBrokenRequirement() {
         let snapshot = makeSnapshot(
             microphoneAuthorization: .authorized,
@@ -162,6 +184,40 @@ final class OnboardingFlowTests: XCTestCase {
         isTrusted = true
         controller.confirmAccessibilityEnabled()
         controller.apply(snapshot: readySnapshot())
+
+        XCTAssertEqual(controller.accessibilitySetupState, .idle)
+    }
+
+    // MARK: - K-24 (relaunch path reachability)
+
+    @MainActor
+    func testConfirmAccessibilityEnabledIfAttemptedTransitionsToPendingRelaunchWhenUntrusted() {
+        let controller = makeController(accessibilityTrustCheck: { false })
+
+        controller.requestAccessibilityAccess()   // → .needsExternalEnable
+        controller.confirmAccessibilityEnabledIfAttempted()
+
+        XCTAssertEqual(controller.accessibilitySetupState, .enabledPendingRelaunch)
+    }
+
+    @MainActor
+    func testConfirmAccessibilityEnabledIfAttemptedGoesIdleWhenTrusted() {
+        var isTrusted = false
+        let controller = makeController(accessibilityTrustCheck: { isTrusted })
+
+        controller.requestAccessibilityAccess()
+        isTrusted = true
+        controller.confirmAccessibilityEnabledIfAttempted()
+
+        XCTAssertEqual(controller.accessibilitySetupState, .idle)
+    }
+
+    @MainActor
+    func testConfirmAccessibilityEnabledIfAttemptedIsNoopWhenIdle() {
+        let controller = makeController(accessibilityTrustCheck: { false })
+
+        // Setup never attempted — the refresh hook must not force a relaunch state.
+        controller.confirmAccessibilityEnabledIfAttempted()
 
         XCTAssertEqual(controller.accessibilitySetupState, .idle)
     }

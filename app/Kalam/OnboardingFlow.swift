@@ -172,11 +172,20 @@ struct OnboardingStatusSnapshot: Equatable {
     }
 
     var runtimePreparationMessage: String? {
-        guard completedRequirements == 4 else { return nil }
-        if !isAudioReady {
-            return "Preparing microphone…"
+        if completedRequirements == 4 {
+            if !isAudioReady {
+                return "Preparing microphone…"
+            }
+            if !isASRReady {
+                return "Preparing dictation engine…"
+            }
+            return nil
         }
-        if !isASRReady {
+        // First-run folder-pick: the model files are already present but the
+        // engine is still loading in the background — surface that progress
+        // even before the remaining requirements are complete, instead of
+        // leaving the window looking frozen on "Choose Folder…".
+        if modelStatus.isReady && !isASRReady {
             return "Preparing dictation engine…"
         }
         return nil
@@ -430,6 +439,16 @@ final class OnboardingFlowController: ObservableObject {
         accessibilitySetupState = .enabledPendingRelaunch
     }
 
+    /// K-24: called on every snapshot refresh. Once the user has attempted Accessibility
+    /// setup (state == `.needsExternalEnable`), surface the relaunch path whenever the
+    /// running process still isn't trusted — previously `.enabledPendingRelaunch` (and the
+    /// "Quit & Reopen Kalam" button) was unreachable because nothing called
+    /// `confirmAccessibilityEnabled()` from the app.
+    func confirmAccessibilityEnabledIfAttempted() {
+        guard accessibilitySetupState == .needsExternalEnable else { return }
+        confirmAccessibilityEnabled()
+    }
+
     func relaunchApp() {
         relaunchAppAction()
     }
@@ -529,7 +548,9 @@ final class OnboardingFlowController: ObservableObject {
         do {
             let config = try ModelSetupSupport.applyingModelLibraryFolder(folderURL, to: ModelsConfiguration.load())
             config.save()
-            NotificationCenter.default.post(name: .modelsConfigurationDidChange, object: nil)
+            // Single trigger: refreshAction runs refresh → prepare → refresh.
+            // Posting modelsConfigurationDidChange here too would double-fire
+            // the same path (the observer also calls prepareRuntimeIfPossible).
             refreshAction()
         } catch {
             let alert = NSAlert(error: error)
@@ -730,9 +751,13 @@ struct OnboardingView: View {
     private var footer: some View {
         VStack(alignment: .center, spacing: 10) {
             if let runtimeMessage = controller.snapshot.runtimePreparationMessage {
-                Text(runtimeMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(runtimeMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Button("Start Dictating") {
