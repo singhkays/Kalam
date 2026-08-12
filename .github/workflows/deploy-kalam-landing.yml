@@ -43,9 +43,12 @@ jobs:
           set -e
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          # Use credential helper to avoid leaking PAT in logs/URL history
+          # Use credential helper to avoid leaking PAT in logs/URL history.
+          # NOTE: store format is URL lines (https://user:pass@host), not
+          # git-credential key-value blocks — the latter breaks the push.
           git config --global credential.helper 'store'
-          printf "protocol=https\nhost=github.com\nusername=x-access-token\npassword=%s\n" "$PAGES_PAT" > ~/.git-credentials
+          printf "https://x-access-token:%s@github.com\n" "$PAGES_PAT" > ~/.git-credentials
+          chmod 600 ~/.git-credentials
           git clone https://github.com/singhkays/singhkays.github.io.git out
           cd out
           git checkout gh-pages || git checkout -b gh-pages
