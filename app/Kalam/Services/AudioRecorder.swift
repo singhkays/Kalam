@@ -41,12 +41,27 @@ enum AudioRecorderError: LocalizedError {
     }
 }
 
+/// Decides whether `prepare()` must rebuild the audio graph. Extracted from
+/// `AudioRecorder.prepare` so the early-return logic is headless-testable
+/// (K-26; the test host cannot touch `engine.inputNode`).
+enum AudioPrepareDecision {
+    static func shouldReconfigure(
+        isPrepared: Bool,
+        lastDeviceID: AudioDeviceID?,
+        preferredDeviceID: AudioDeviceID?,
+        invalidated: Bool
+    ) -> Bool {
+        !(isPrepared && lastDeviceID == preferredDeviceID && !invalidated)
+    }
+}
+
 final class AudioRecorder: @unchecked Sendable {
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "AudioRecorder")
     private let engine = AVAudioEngine()
     private var isPrepared = false
     private var tapInstalled = false
     private var preparedInputDeviceID: AudioDeviceID?
+    private var preparedStateInvalidated = false
 
     // K-10: all capture state (buffers, converter, counters) lives behind
     // AudioCaptureExchange; the render thread publishes non-blockingly
@@ -74,9 +89,15 @@ final class AudioRecorder: @unchecked Sendable {
     }
     
     func prepare(preferredInputDeviceID: AudioDeviceID?) throws {
-        if isPrepared && preparedInputDeviceID == preferredInputDeviceID {
+        if !AudioPrepareDecision.shouldReconfigure(
+            isPrepared: isPrepared,
+            lastDeviceID: preparedInputDeviceID,
+            preferredDeviceID: preferredInputDeviceID,
+            invalidated: preparedStateInvalidated
+        ) {
             return
         }
+        preparedStateInvalidated = false
 
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
@@ -136,38 +157,62 @@ final class AudioRecorder: @unchecked Sendable {
         
         // Prepare engine but don't start it yet - we'll start it when recording begins
         engine.prepare()
-        logger.info("Audio engine prepared tapBufferSize=\(self.tapBufferSizeFrames, privacy: .public)")
+        logger.info("Audio engine prepared tapBufferSize=\\(self.tapBufferSizeFrames, privacy: .public)")
         isPrepared = true
         preparedInputDeviceID = preferredInputDeviceID
     }
+
+    /// Forces the next `prepare()` call to fully rebuild the audio graph
+    /// (engine stop, tap removal, device re-bind). Called on CoreAudio device
+    /// changes and system wake (K-26) — without it, prepare() early-returns
+    /// on an unchanged device ID and stays bound to a stale device.
+    func invalidatePreparedState() {
+        preparedStateInvalidated = true
+    }
+
+    var isPreparedForTesting: Bool { isPrepared }
+    var preparedDeviceIDForTesting: AudioDeviceID? { preparedInputDeviceID }
+    var isPreparedStateInvalidatedForTesting: Bool { preparedStateInvalidated }
     
-    func startCollecting() {
-        // Start engine when we begin collecting
+    func startCollecting() throws {
+        // K-26: reset capture state BEFORE touching the engine — the old
+        // order (reset at the end) left stale state when engine.start()
+        // failed, and the failure was silently swallowed.
+        exchange.resetForNewSession()
+
         if !engine.isRunning {
             do {
                 try engine.start()
                 logger.info("Audio engine started for recording")
                 let liveOutputFormat = engine.inputNode.outputFormat(forBus: 0)
                 let liveInputBusFormat = engine.inputNode.inputFormat(forBus: 0)
-                logger.info("Live input output format sampleRate=\(liveOutputFormat.sampleRate, privacy: .public) channels=\(liveOutputFormat.channelCount, privacy: .public)")
-                logger.info("Live input bus format sampleRate=\(liveInputBusFormat.sampleRate, privacy: .public) channels=\(liveInputBusFormat.channelCount, privacy: .public)")
+                logger.info("Live input output format sampleRate=\\(liveOutputFormat.sampleRate, privacy: .public) channels=\\(liveOutputFormat.channelCount, privacy: .public)")
+                logger.info("Live input bus format sampleRate=\\(liveInputBusFormat.sampleRate, privacy: .public) channels=\\(liveInputBusFormat.channelCount, privacy: .public)")
             } catch {
-                logger.warning("Failed to start audio engine errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
-                return
+                // One recovery attempt: invalidate the stale graph binding
+                // (sleep/wake, dock reconnect) and retry from a fresh prepare.
+                logger.warning("Audio engine start failed errorSummary=\\(privacySafeErrorSummary(error), privacy: .public); attempting re-prepare")
+                invalidatePreparedState()
+                do {
+                    try prepare(preferredInputDeviceID: preparedInputDeviceID)
+                    try engine.start()
+                    logger.info("Audio engine started after re-prepare")
+                } catch {
+                    throw AudioRecorderError.engineStartFailed(error)
+                }
             }
         }
 
         if !tapInstalled {
             // For input node taps, AVAudioEngine expects the input bus hardware format.
             let tapFormat = engine.inputNode.inputFormat(forBus: 0)
-            logger.info("Installing tap sampleRate=\(tapFormat.sampleRate, privacy: .public) channels=\(tapFormat.channelCount, privacy: .public)")
+            logger.info("Installing tap sampleRate=\\(tapFormat.sampleRate, privacy: .public) channels=\\(tapFormat.channelCount, privacy: .public)")
             engine.inputNode.installTap(onBus: 0, bufferSize: tapBufferSizeFrames, format: tapFormat) { [weak self] (buffer, _) in
                 self?.process(buffer: buffer)
             }
             tapInstalled = true
         }
-        
-        exchange.resetForNewSession()
+
         logger.info("Started collecting audio samples")
     }
     

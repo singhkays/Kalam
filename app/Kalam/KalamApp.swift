@@ -828,9 +828,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
 
+        // K-26: the state sync happens only after startCollecting succeeds —
+        // a failed start must leave the PTT machine idle (K-14 invariant).
         _ = recordingSessions.beginNewRecording()
-        pttState.recordingDidStart(triggerMode)
-        
+
         // Play chime (so user hears it at full volume)
         let chimeDuration = playRecordingChime()
         
@@ -864,7 +865,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dictationTargetElement = nil
         }
 
-        audio.startCollecting()
+        do {
+            try audio.startCollecting()
+        } catch {
+            logger.warning("Audio collection start failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
+            dictationTargetPID = nil
+            dictationTargetElement = nil
+            overlay.showError("Microphone unavailable", action: .openMicrophoneSettings, autoHideAfter: 4.0)
+            return false
+        }
+        pttState.recordingDidStart(triggerMode)
         overlay.showRecording(isHoldMode: triggerMode == .hold)
         return true
     }
