@@ -58,6 +58,22 @@ import Foundation
     #expect(result.stats.backtrackEdits == 0)
 }
 
+@Test func backtrackNoCueDoesNotCancelNoProblemSentence() {
+    // K-29 (user-reported on the v1.1 build): "no problem" at the end of a
+    // sentence must not cancel the preceding clause.
+    let result = TextCleanupEngine().clean("Yep, there is a roadmap meeting, so no problem", configuration: config())
+    #expect(result.text.contains("no problem"))
+    #expect(result.text.contains("roadmap meeting"))
+    #expect(result.stats.backtrackEdits == 0)
+}
+
+@Test func backtrackNoCueDoesNotCancelContractedNoWay() {
+    // K-29: contraction variant of the existing "there is no way" pin.
+    let result = TextCleanupEngine().clean("there's no way to do this for them", configuration: config())
+    #expect(result.text.contains("no way to do this for them"))
+    #expect(result.stats.backtrackEdits == 0)
+}
+
 @Test func numberedListFormatting() {
     let result = TextCleanupEngine().clean("plan is one gather logs two isolate bug three ship fix", configuration: config())
     #expect(result.text == "plan is:\n1. gather logs\n2. isolate bug\n3. ship fix")

@@ -103,7 +103,7 @@ Current ordering in code:
 
 1. `ASR -> String`
 2. `TextCleanupEngine.clean(...)`
-3. `NemoTextProcessing.normalizeSentence(...)` (if ITN enabled + available)
+3. `NemoTextProcessing.normalizeSentence(...)` (if ITN enabled + available), wrapped by `ITNSpanProtector` so ranges ("two to three"), idioms ("one of us"), and digit-by-digit sequences survive normalization (K-28)
 4. `CustomDictionaryManager.apply(...)`
 5. paste
 
