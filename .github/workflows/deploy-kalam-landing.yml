@@ -28,6 +28,10 @@ jobs:
         run: npm ci
         working-directory: landing-page
 
+      - name: Audit dependencies
+        run: npm audit --audit-level=high --omit=dev || true
+        working-directory: landing-page
+
       - name: Build landing page
         run: npm run build
         working-directory: landing-page
@@ -39,7 +43,10 @@ jobs:
           set -e
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git clone https://x-access-token:${PAGES_PAT}@github.com/singhkays/singhkays.github.io.git out
+          # Use credential helper to avoid leaking PAT in logs/URL history
+          git config --global credential.helper 'store'
+          printf "protocol=https\nhost=github.com\nusername=x-access-token\npassword=%s\n" "$PAGES_PAT" > ~/.git-credentials
+          git clone https://github.com/singhkays/singhkays.github.io.git out
           cd out
           git checkout gh-pages || git checkout -b gh-pages
           rm -rf kalam
@@ -53,3 +60,4 @@ jobs:
           else
             echo "No changes to deploy"
           fi
+          rm -f ~/.git-credentials
