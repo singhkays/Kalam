@@ -28,31 +28,8 @@ enum SilenceTrimmer {
             return []
         }
         
+        let energiesDb = windowedEnergiesDb(samples: samples, sampleRate: sampleRate, windowMs: windowMs)
         let winSamples = max(1, (sampleRate * windowMs) / 1000)
-        var energiesDb: [Float] = []
-        energiesDb.reserveCapacity(samples.count / winSamples + 1)
-        
-        // Compute per-window RMS energy, then convert to dB (20*log10 for amplitude scale)
-        let eps: Float = 1e-6  // Epsilon for RMS to avoid log(0); yields ~ -120 dB floor before clamp
-        var i = 0
-        while i < samples.count {
-            let end = min(i + winSamples, samples.count)
-            var sum: Float = 0
-            var j = i
-            while j < end {
-                let s = samples[j]
-                sum += s * s
-                j += 1
-            }
-            let count = Float(end - i)
-            let meanSquare = sum / count
-            let rms = sqrt(meanSquare)
-            let db = 20.0 * log10(max(rms, eps))
-            // Clamp to [-60, 0] dB: -60 floor avoids overestimating silence in low-level speech; 0 caps peaks
-            let clampedDb = max(-60.0, min(0.0, db))
-            energiesDb.append(clampedDb)
-            i = end
-        }
         
         guard !energiesDb.isEmpty else { return samples }
         
@@ -190,7 +167,40 @@ enum SilenceTrimmer {
         return samples.map { min(max($0 * scale, -1.0), 1.0) }
     }
     
-    private static func percentile(_ xs: [Float], p: Float) -> Float {
+    // MARK: - Energy analysis (shared with SpeechQualityGuard, K-27)
+
+    /// Per-window RMS energy in clamped dB ([-60, 0]). Extracted verbatim
+    /// from `trim` so the speech-quality guard and the endpointer agree.
+    static func windowedEnergiesDb(samples: [Float], sampleRate: Int, windowMs: Int = 20) -> [Float] {
+        let winSamples = max(1, (sampleRate * windowMs) / 1000)
+        var energiesDb: [Float] = []
+        energiesDb.reserveCapacity(samples.count / winSamples + 1)
+
+        // Compute per-window RMS energy, then convert to dB (20*log10 for amplitude scale)
+        let eps: Float = 1e-6  // Epsilon for RMS to avoid log(0); yields ~ -120 dB floor before clamp
+        var i = 0
+        while i < samples.count {
+            let end = min(i + winSamples, samples.count)
+            var sum: Float = 0
+            var j = i
+            while j < end {
+                let s = samples[j]
+                sum += s * s
+                j += 1
+            }
+            let count = Float(end - i)
+            let meanSquare = sum / count
+            let rms = sqrt(meanSquare)
+            let db = 20.0 * log10(max(rms, eps))
+            // Clamp to [-60, 0] dB: -60 floor avoids overestimating silence in low-level speech; 0 caps peaks
+            let clampedDb = max(-60.0, min(0.0, db))
+            energiesDb.append(clampedDb)
+            i = end
+        }
+        return energiesDb
+    }
+
+    static func percentile(_ xs: [Float], p: Float) -> Float {
         if xs.isEmpty { return -120.0 }
         let pClamped = max(0.0, min(1.0, p))
         let sorted = xs.sorted()

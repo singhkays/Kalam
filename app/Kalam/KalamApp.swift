@@ -939,6 +939,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 return
             }
+
+            // K-27: never feed noise-only clips to ASR — Parakeet TDT
+            // hallucinates filler words ("yeah") on boosted room tone.
+            guard SpeechQualityGuard.isSpeechLike(samples: trimmed, sampleRate: 16_000) else {
+                self.logger.info("Clip rejected by speech-quality guard")
+                await MainActor.run {
+                    self.overlay.showInfoAndAutoHide("No speech detected")
+                }
+                return
+            }
             
             do {
                 // Normalize before ASR without spawning an extra child task; this keeps the
