@@ -103,10 +103,11 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
 /* Dive layout */
 .jour .body{flex:1;display:flex;min-height:0}
 .contents{width:248px;flex:none;border-right:1px solid var(--hair);padding:24px 16px 16px;display:flex;flex-direction:column;gap:4px}
-.chapter{position:relative;padding:12px 12px 11px 38px;border:1px solid transparent;border-radius:11px;display:block;color:inherit;cursor:pointer;transition:background .2s ease,border-color .2s ease}
-.chapter .no{position:absolute;left:11px;top:13px;font-family:var(--mono);font-size:10px;color:var(--ink3);width:18px}
-.chapter .nm{font-size:13px;font-weight:560;letter-spacing:-.005em;color:var(--ink2)}
-.chapter .sub{font-size:10.5px;color:var(--ink3);margin-top:1px;line-height:1.4}
+.chapter{position:relative;padding:10px 12px 10px 12px;border:1px solid transparent;border-radius:11px;display:flex;flex-direction:row;align-items:flex-start;gap:10px;color:inherit;cursor:pointer;transition:background .2s ease,border-color .2s ease}
+.chapter .no{position:static;left:auto;top:auto;flex:none;font-family:var(--mono);font-size:10px;line-height:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;color:var(--ink3);width:18px;margin-top:0;/* optical: 10px mono on 18px line matches 13px title line-box */}
+.chapter .chapter-body{flex:1;min-width:0;padding-top:0}
+.chapter .nm{font-size:13px;font-weight:560;letter-spacing:-.005em;line-height:18px;color:var(--ink2)}
+.chapter .sub{font-size:10.5px;color:var(--ink3);margin-top:2px;line-height:1.4}
 .chapter .state{margin-top:6px;display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;letter-spacing:.04em;text-transform:none;color:var(--ink3)}
 .chapter .state i{width:6px;height:6px;border-radius:50%;background:var(--ink3)}
 .chapter.on{background:var(--green-tint);border-color:rgba(26,92,58,.22)}
@@ -177,9 +178,9 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
 .why-card{background:var(--panel);border:1px solid var(--hair);border-radius:14px;box-shadow:0 1px 2px rgba(70,60,40,.04);margin-top:14px;padding:16px 18px}
 .why-card .lbl{font-family:var(--mono);font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink3);margin-bottom:7px}
 .why-card p{font-size:12.5px;color:var(--ink2);line-height:1.66;max-width:54ch}
-.mic{display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 18px;border-top:1px solid var(--hair2)}
-.card>.h+.mic{border-top:0}
-.mic .grip{color:var(--ink3);opacity:.5;cursor:grab}
+
+
+
 .mic-empty{padding:22px 18px 20px;color:var(--ink2);font-size:13px;line-height:1.55}
 .mic-empty b{display:block;color:var(--ink);font-size:13.5px;font-weight:600;margin-bottom:4px}
 .mode{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:center;padding:13px 18px;border-top:1px solid var(--hair2);cursor:pointer;transition:background .2s ease}
@@ -199,7 +200,7 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
 .dict-row:first-of-type{border-top:0}
 .dict-row .sp{font-family:var(--mono);font-size:13px;color:var(--ink)}
 .dict-row .arr{color:var(--green);text-align:center;font-size:14px}
-.dict-row .out{font-size:13.5px;color:var(--ink)}
+.dict-row .out{font-size:13.5px;color:var(--ink);font-family:var(--sf)}
 .d-type{font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);white-space:nowrap}
 .ops{display:flex;gap:2px;color:var(--ink3);opacity:.55;transition:opacity .15s ease}
 .dict-row:hover .ops{opacity:1}
@@ -208,7 +209,7 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
 .dict-form{padding:16px 18px 18px;border-top:1px solid var(--hair);background:var(--well);box-shadow:inset 0 1px 2px rgba(40,36,28,.06)}
 .dict-form .fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .dict-form label{display:block;font-family:var(--mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink3);margin-bottom:6px}
-.dict-form input{width:100%;border:1px solid var(--hair);border-radius:8px;padding:8px 11px;font-size:13px;font-family:var(--mono);background:var(--panel);color:var(--ink);box-shadow:inset 0 1px 1px rgba(40,36,28,.05);cursor:text}
+.dict-form input{width:100%;border:1px solid var(--hair);border-radius:8px;padding:8px 11px;font-size:13.5px;font-family:var(--sf);background:var(--panel);color:var(--ink);box-shadow:inset 0 1px 1px rgba(40,36,28,.05);cursor:text}
 .dict-form input:focus{outline:none;border-color:rgba(26,92,58,.45);box-shadow:0 0 0 3px rgba(26,92,58,.10),inset 0 1px 1px rgba(40,36,28,.04)}
 .compass input:focus,.jour input:focus{outline:none}
 .dict-form .match{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:14px}
@@ -281,6 +282,21 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
 .card:has(.hotkey-anchor.open){z-index:6}
 
 .sel.hotkey-chip .chev{color:var(--ink3);font-size:10px;margin-left:8px}
+
+
+/* Microphone priority — rank + step, not drag */
+.mic{display:grid;grid-template-columns:28px minmax(0,1fr) auto auto;gap:10px 12px;align-items:center;padding:12px 18px;border-top:1px solid var(--hair2)}
+.card>.h+.mic{border-top:0}
+.mic .rank{font-family:var(--mono);font-size:11px;color:var(--ink3);letter-spacing:.04em;width:28px;text-align:center}
+.mic .nm{font-size:13.5px;font-weight:600;letter-spacing:-.005em;color:var(--ink)}
+.mic .nm .meta{display:block;font-size:11px;font-weight:400;color:var(--ink3);margin-top:2px}
+.mic-steps{display:inline-flex;flex-direction:column;gap:2px}
+.mic-step{width:28px;height:18px;border-radius:6px;border:1px solid var(--hair);background:var(--panel);color:var(--ink2);display:grid;place-items:center;cursor:pointer;padding:0;font-size:9px;line-height:1}
+.mic-step:hover:not(:disabled){border-color:rgba(26,92,58,.35);color:var(--green)}
+.mic-step:disabled{opacity:.28;cursor:default}
+.mic.in-use .rank{color:var(--green);font-weight:600}
+.mic.offline{opacity:.72}
+.mic.offline .nm{color:var(--ink2)}
 
 </style>
 </head>
@@ -547,8 +563,8 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
           <div class="idx">D.1</div>
           <div>
             <h4>Dive · Being heard</h4>
-            <p>First push from the map. Left nav appears. Back (chevron + grid) returns to the map. Close is gone from this bar; back is not close. Microphone list is ordered priority. Each row has a six-dot grip on the left. Drag reorders. The highest connected device is IN USE, not necessarily row one.</p>
-            <p class="swift"><b>Swift map.</b> path = [.beingHeard]. Microphone list: onMove. The grip is the drag handle, not the whole row.</p>
+            <p>First push from the map. Left nav appears. Back (chevron + grid) returns to the map. Close is gone from this bar; back is not close. Microphones are a priority list. Rank and up/down step change order; the highest connected device is IN USE. No drag handles.</p>
+            <p class="swift"><b>Swift map.</b> path = [.beingHeard]. Priority list with moveUp/moveDown (or move offset ±1). First connected = IN USE. Prefer step buttons over List onMove drag previews.</p>
           </div>
         </div>
         <div class="frame">
@@ -556,13 +572,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">Your words stay home</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter on"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-                <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-                <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-                <a class="chapter"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
-                <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+                <a class="chapter on"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+                <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+                <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+                <a class="chapter"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
+                <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">Being heard</div>
@@ -577,10 +593,34 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
                   <div class="row"><div><div class="nm">Recording indicator</div><div class="ds">Where the listening pill appears.</div></div><span class="sel">Top center <svg width="11" height="11"><use href="#i-updown"/></svg></span></div>
                 </div>
                 <div class="card">
-                  <div class="h"><span class="t">Microphone priority</span></div>
-                  <div class="mic"><span class="grip" title="Drag to reorder"><svg width="12" height="12"><use href="#i-grip"/></svg></span><div class="nm">HD Pro Webcam C920</div><span class="tag-live">IN USE</span></div>
-                  <div class="mic"><span class="grip" title="Drag to reorder"><svg width="12" height="12"><use href="#i-grip"/></svg></span><div class="nm">MacBook Pro Microphone</div><span class="tag-dim">LAST USED</span></div>
-                  <div class="mic"><span class="grip" title="Drag to reorder"><svg width="12" height="12"><use href="#i-grip"/></svg></span><div class="nm">USB audio CODEC</div><span class="tag-dim">OFFLINE</span></div>
+                  <div class="h"><span class="t">Microphone priority</span><span class="st dim">Highest connected wins</span></div>
+                                  <div class="mic in-use">
+                  <span class="rank">1</span>
+                  <div class="nm">HD Pro Webcam C920</div>
+                  <span class="tag-live">IN USE</span>
+                  <div class="mic-steps" aria-label="Change priority">
+                    <button type="button" class="mic-step" title="Move up" disabled>▲</button>
+                    <button type="button" class="mic-step" title="Move down">▼</button>
+                  </div>
+                </div>
+                <div class="mic">
+                  <span class="rank">2</span>
+                  <div class="nm">MacBook Pro Microphone</div>
+                  <span class="tag-dim">LAST USED</span>
+                  <div class="mic-steps" aria-label="Change priority">
+                    <button type="button" class="mic-step" title="Move up">▲</button>
+                    <button type="button" class="mic-step" title="Move down">▼</button>
+                  </div>
+                </div>
+                <div class="mic offline">
+                  <span class="rank">3</span>
+                  <div class="nm">USB audio CODEC</div>
+                  <span class="tag-dim">OFFLINE</span>
+                  <div class="mic-steps" aria-label="Change priority">
+                    <button type="button" class="mic-step" title="Move up">▲</button>
+                    <button type="button" class="mic-step" title="Move down" disabled>▼</button>
+                  </div>
+                </div>
                 </div>
               </div>
             </div>
@@ -603,13 +643,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">Off the grid</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-                <a class="chapter on"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-                <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-                <a class="chapter"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
-                <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+                <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+                <a class="chapter on"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+                <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+                <a class="chapter"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
+                <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">The trigger</div>
@@ -668,13 +708,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">Nothing leaves</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-                <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-                <a class="chapter on"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-                <a class="chapter"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
-                <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+                <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+                <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+                <a class="chapter on"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>4/4</span></div></a>
+                <a class="chapter"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
+                <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">Cleanup</div>
@@ -682,13 +722,15 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
                 <p class="lede">Fixed rules run on every transcript before it is typed; turn them off to type exactly what was heard.</p>
                 <div class="card">
                   <div class="h"><span class="t">Master</span></div>
-                  <div class="row"><div><div class="nm">Deterministic cleanup</div><div class="ds">Master switch — off skips every rule below.</div></div><span class="sw on"></span></div>
+                  <div class="row"><div><div class="nm">Deterministic cleanup</div><div class="ds">Turns the whole cleanup pass on or off.</div></div><span class="sw on"></span></div>
                 </div>
                 <div class="card">
-                  <div class="h"><span class="t">Rules</span><span class="st">3 of 4</span></div>
+                  <div class="h"><span class="t">Rules</span><span class="st">4 of 4</span></div>
                   <div class="row"><div><div class="nm">Remove filler words</div></div><span class="sw on"></span></div>
                   <div class="ba"><div><div class="l">Messy input</div><p>So <s>um</s> I think we should ship it</p></div><div><div class="l">Clean output</div><p class="after">So I think we should ship it</p></div></div>
-                  <div class="row"><div><div class="nm">Handle backtracks</div></div><span class="sw"></span></div>
+                  <div class="row"><div><div class="nm">Handle backtracks</div></div><span class="sw on"></span></div>
+
+                  <div class="ba"><div><div class="l">Messy input</div><p>send this now <s>scratch that</s> send it tomorrow</p></div><div><div class="l">Clean output</div><p class="after">send it tomorrow</p></div></div>
                   <div class="row"><div><div class="nm">Format spoken numbered lists</div></div><span class="sw on"></span></div>
                   <div class="ba"><div><div class="l">Messy input</div><p>one buy milk, <s>two call Sam</s></p></div><div><div class="l">Clean output</div><p class="after">1. Buy milk / 2. Call Sam</p></div></div>
                   <div class="row"><div><div class="nm">Normalize punctuation and spacing</div></div><span class="sw on"></span></div>
@@ -718,13 +760,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">Your pen, your page</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-                <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-                <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-                <a class="chapter on"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
-                <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+                <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+                <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+                <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+                <a class="chapter on"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
+                <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">The dictionary</div>
@@ -756,13 +798,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">On-device</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-                <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-                <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-                <a class="chapter on"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
-                <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+                <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+                <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+                <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+                <a class="chapter on"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
+                <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">The dictionary</div>
@@ -799,13 +841,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">Your pen, your page</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-                <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-                <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-                <a class="chapter on"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
-                <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+                <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+                <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+                <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+                <a class="chapter on"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
+                <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">The dictionary</div>
@@ -853,13 +895,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">Your pen, your page</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-                <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-                <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-                <a class="chapter on"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
-                <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+                <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+                <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+                <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+                <a class="chapter on"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
+                <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">The dictionary</div>
@@ -907,13 +949,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">On-device</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-                <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-                <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-                <a class="chapter on"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>1 rule</span></div></a>
-                <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+                <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+                <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+                <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+                <a class="chapter on"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>1 rule</span></div></a>
+                <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">The dictionary</div>
@@ -948,13 +990,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">On-device</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-                <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-                <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-                <a class="chapter on"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
-                <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+                <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+                <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+                <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+                <a class="chapter on"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
+                <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">The dictionary</div>
@@ -1004,13 +1046,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">On-device</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-                <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-                <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-                <a class="chapter on"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
-                <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+                <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+                <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+                <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+                <a class="chapter on"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
+                <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">The dictionary</div>
@@ -1051,13 +1093,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">On-device</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-                <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-                <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-                <a class="chapter on"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
-                <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+                <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+                <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+                <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+                <a class="chapter on"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
+                <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">The dictionary</div>
@@ -1091,13 +1133,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">On-device</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-                <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-                <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-                <a class="chapter on"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
-                <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+                <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+                <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+                <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+                <a class="chapter on"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
+                <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">The dictionary</div>
@@ -1131,13 +1173,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">No signal, no sweat</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-                <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-                <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-                <a class="chapter"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
-                <a class="chapter on"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+                <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+                <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+                <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+                <a class="chapter"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
+                <a class="chapter on"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">The engine</div>
@@ -1177,13 +1219,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">Off the grid</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter on"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Offline</span></div></a>
-                <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-                <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-                <a class="chapter"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
-                <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+                <a class="chapter on"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Offline</span></div></a>
+                <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+                <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+                <a class="chapter"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
+                <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">Being heard</div>
@@ -1199,9 +1241,33 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
                 </div>
                 <div class="card">
                   <div class="h"><span class="t">Microphone priority</span><span class="st">None connected</span></div>
-                  <div class="mic"><span class="grip" title="Drag to reorder"><svg width="12" height="12"><use href="#i-grip"/></svg></span><div class="nm">HD Pro Webcam C920</div><span class="tag-dim">OFFLINE</span></div>
-                  <div class="mic"><span class="grip" title="Drag to reorder"><svg width="12" height="12"><use href="#i-grip"/></svg></span><div class="nm">MacBook Pro Microphone</div><span class="tag-dim">OFFLINE</span></div>
-                  <div class="mic"><span class="grip" title="Drag to reorder"><svg width="12" height="12"><use href="#i-grip"/></svg></span><div class="nm">USB audio CODEC</div><span class="tag-dim">OFFLINE</span></div>
+                                  <div class="mic offline">
+                  <span class="rank">1</span>
+                  <div class="nm">HD Pro Webcam C920</div>
+                  <span class="tag-dim">OFFLINE</span>
+                  <div class="mic-steps" aria-label="Change priority">
+                    <button type="button" class="mic-step" title="Move up" disabled>▲</button>
+                    <button type="button" class="mic-step" title="Move down">▼</button>
+                  </div>
+                </div>
+                <div class="mic offline">
+                  <span class="rank">2</span>
+                  <div class="nm">MacBook Pro Microphone</div>
+                  <span class="tag-dim">OFFLINE</span>
+                  <div class="mic-steps" aria-label="Change priority">
+                    <button type="button" class="mic-step" title="Move up">▲</button>
+                    <button type="button" class="mic-step" title="Move down">▼</button>
+                  </div>
+                </div>
+                <div class="mic offline">
+                  <span class="rank">3</span>
+                  <div class="nm">USB audio CODEC</div>
+                  <span class="tag-dim">OFFLINE</span>
+                  <div class="mic-steps" aria-label="Change priority">
+                    <button type="button" class="mic-step" title="Move up">▲</button>
+                    <button type="button" class="mic-step" title="Move down" disabled>▼</button>
+                  </div>
+                </div>
                 </div>
               </div>
             </div>
@@ -1224,13 +1290,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">Your pen, your page</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-                <a class="chapter on"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Unset</span></div></a>
-                <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-                <a class="chapter"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
-                <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+                <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+                <a class="chapter on"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Unset</span></div></a>
+                <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+                <a class="chapter"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
+                <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">The trigger</div>
@@ -1289,13 +1355,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">Off the grid</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-                <a class="chapter on"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Waiting</span></div></a>
-                <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-                <a class="chapter"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
-                <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+                <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+                <a class="chapter on"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Waiting</span></div></a>
+                <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+                <a class="chapter"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
+                <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">The trigger</div>
@@ -1335,13 +1401,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">On-device</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-                <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-                <a class="chapter on"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>Off</span></div></a>
-                <a class="chapter"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
-                <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+                <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+                <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+                <a class="chapter on"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>Off</span></div></a>
+                <a class="chapter"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
+                <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">Cleanup</div>
@@ -1349,7 +1415,7 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
                 <p class="lede">Cleanup is off, so Kalam types exactly what it heard. Turn the master on to use the rules below.</p>
                 <div class="card">
                   <div class="h"><span class="t">Master</span></div>
-                  <div class="row"><div><div class="nm">Deterministic cleanup</div><div class="ds">Master switch — off skips every rule below.</div></div><span class="sw"></span></div>
+                  <div class="row"><div><div class="nm">Deterministic cleanup</div><div class="ds">Turns the whole cleanup pass on or off.</div></div><span class="sw"></span></div>
                 </div>
                 <div class="card dim">
                   <div class="h"><span class="t">Rules</span><span class="st">Skipped</span></div>
@@ -1383,13 +1449,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">Nothing leaves</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-                <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-                <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-                <a class="chapter"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
-                <a class="chapter on"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>Missing</span></div></a>
+                <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+                <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+                <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+                <a class="chapter"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
+                <a class="chapter on"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>Missing</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">The engine</div>
@@ -1429,13 +1495,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12" class="pp-shield"><use href="#i-shield"/></svg><span class="stat">Your pen, your page</span></span></span></div>
             <div class="body">
               <div class="contents">
-                <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-                <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-                <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-                <a class="chapter"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
-                <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+                <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+                <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+                <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+                <a class="chapter"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
+                <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
                 <div class="divider"></div>
-                <a class="chapter maint on"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+                <a class="chapter maint on"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
               </div>
               <div class="main">
                 <div class="kicker">Maintenance</div>
@@ -1509,13 +1575,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
         <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12"><use href="#i-shield"/></svg><span class="stat">Off the grid</span></span></span></div>
         <div class="body">
           <div class="contents">
-            <a class="chapter on"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Offline</span></div></a>
-            <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-            <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-            <a class="chapter"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
-            <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+            <a class="chapter on"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Offline</span></div></a>
+            <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+            <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+            <a class="chapter"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
+            <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
             <div class="divider"></div>
-            <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+            <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
           </div>
           <div class="main">
             <div class="kicker">Being heard</div>
@@ -1561,13 +1627,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
         <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12"><use href="#i-shield"/></svg><span class="stat">Your words stay home</span></span></span></div>
         <div class="body">
           <div class="contents">
-            <a class="chapter on"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Offline</span></div></a>
-            <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-            <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-            <a class="chapter"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
-            <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+            <a class="chapter on"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Offline</span></div></a>
+            <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+            <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+            <a class="chapter"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
+            <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
             <div class="divider"></div>
-            <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+            <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
           </div>
           <div class="main">
             <div class="kicker">Being heard</div>
@@ -1617,13 +1683,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
         <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12"><use href="#i-shield"/></svg><span class="stat">On-device</span></span></span></div>
         <div class="body">
           <div class="contents">
-            <a class="chapter on"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-            <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-            <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-            <a class="chapter"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
-            <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+            <a class="chapter on"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+            <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+            <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+            <a class="chapter"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
+            <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
             <div class="divider"></div>
-            <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+            <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
           </div>
           <div class="main">
             <div class="kicker">Being heard</div>
@@ -1649,9 +1715,25 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
               </div>
             </div>
             <div class="card">
-              <div class="h"><span class="t">Microphone priority</span></div>
-              <div class="mic"><span class="grip"><svg width="12" height="12"><use href="#i-grip"></use></svg></span><div class="nm">HD Pro Webcam C920</div><span class="tag-live">IN USE</span></div>
-              <div class="mic"><span class="grip"><svg width="12" height="12"><use href="#i-grip"></use></svg></span><div class="nm">MacBook Pro Microphone</div><span class="tag-dim">LAST USED</span></div>
+              <div class="h"><span class="t">Microphone priority</span><span class="st dim">Highest connected wins</span></div>
+                              <div class="mic in-use">
+                  <span class="rank">1</span>
+                  <div class="nm">HD Pro Webcam C920</div>
+                  <span class="tag-live">IN USE</span>
+                  <div class="mic-steps" aria-label="Change priority">
+                    <button type="button" class="mic-step" title="Move up" disabled>▲</button>
+                    <button type="button" class="mic-step" title="Move down">▼</button>
+                  </div>
+                </div>
+                <div class="mic">
+                  <span class="rank">2</span>
+                  <div class="nm">MacBook Pro Microphone</div>
+                  <span class="tag-dim">LAST USED</span>
+                  <div class="mic-steps" aria-label="Change priority">
+                    <button type="button" class="mic-step" title="Move up">▲</button>
+                    <button type="button" class="mic-step" title="Move down" disabled>▼</button>
+                  </div>
+                </div>
             </div>
           </div>
         </div>
@@ -1678,13 +1760,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
         <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12"><use href="#i-shield"/></svg><span class="stat">Off the grid</span></span></span></div>
         <div class="body">
           <div class="contents">
-            <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-            <a class="chapter on"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Waiting</span></div></a>
-            <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-            <a class="chapter"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
-            <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+            <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+            <a class="chapter on"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Waiting</span></div></a>
+            <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+            <a class="chapter"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
+            <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
             <div class="divider"></div>
-            <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+            <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
           </div>
           <div class="main">
             <div class="kicker">The trigger</div>
@@ -1720,7 +1802,7 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
           Lists on → well visible. Punctuation on → no well by design. This frame freezes the “only two wells” rule
           and shows filler well present while backtracks sits quiet above lists.
         </p>
-        <p class="swift"><b>Swift map.</b> if cleanupEnabled &amp;&amp; removeFillers { FillerWell() }. Same for formatLists. Never show wells for backtracks or punctuation.</p>
+        <p class="swift"><b>Swift map.</b> if cleanupEnabled &amp;&amp; removeFillers { FillerWell() }. Same for formatLists. Wells for filler, backtracks, and lists when those rules are on. No well for punctuation.</p>
       </div>
     </div>
     <div class="frame">
@@ -1728,13 +1810,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
         <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12"><use href="#i-shield"/></svg><span class="stat">Nothing leaves</span></span></span></div>
         <div class="body">
           <div class="contents">
-            <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-            <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-            <a class="chapter on"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-            <a class="chapter"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
-            <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+            <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+            <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+            <a class="chapter on"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+            <a class="chapter"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
+            <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
             <div class="divider"></div>
-            <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+            <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
           </div>
           <div class="main">
             <div class="kicker">Cleanup</div>
@@ -1742,7 +1824,7 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
             <p class="lede">Fixed rules run on every transcript before it is typed; turn them off to type exactly what was heard.</p>
             <div class="card">
               <div class="h"><span class="t">Master</span></div>
-              <div class="row"><div><div class="nm">Deterministic cleanup</div><div class="ds">Master switch — off skips every rule below.</div></div><span class="sw on"></span></div>
+              <div class="row"><div><div class="nm">Deterministic cleanup</div><div class="ds">Turns the whole cleanup pass on or off.</div></div><span class="sw on"></span></div>
             </div>
             <div class="card">
               <div class="h"><span class="t">Rules</span><span class="st">3 of 4</span></div>
@@ -1781,13 +1863,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
         <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12"><use href="#i-shield"/></svg><span class="stat">Your pen, your page</span></span></span></div>
         <div class="body">
           <div class="contents">
-            <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-            <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-            <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-            <a class="chapter on"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
-            <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+            <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+            <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+            <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+            <a class="chapter on"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>Empty</span></div></a>
+            <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
             <div class="divider"></div>
-            <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+            <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
           </div>
           <div class="main">
             <div class="kicker">The dictionary</div>
@@ -1839,13 +1921,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
         <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12"><use href="#i-shield"/></svg><span class="stat">On-device</span></span></span></div>
         <div class="body">
           <div class="contents">
-            <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-            <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-            <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-            <a class="chapter on"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
-            <a class="chapter"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
+            <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+            <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+            <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+            <a class="chapter on"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
+            <a class="chapter"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>v3</span></div></a>
             <div class="divider"></div>
-            <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+            <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
           </div>
           <div class="main">
             <div class="kicker">The dictionary</div>
@@ -1896,13 +1978,13 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
         <div class="bar"><button class="backoverview" aria-label="Back to overview"><span class="bk"><svg width="13" height="13" style="transform:rotate(180deg)"><use href="#i-chev"/></svg></span><span class="grid-ic"><svg width="12" height="12"><use href="#i-grid"/></svg></span></button><span class="ttl" style="margin-left:12px">Kalam</span><span class="rt"><span class="priv-pill"><svg width="12" height="12"><use href="#i-shield"/></svg><span class="stat">No signal, no sweat</span></span></span></div>
         <div class="body">
           <div class="contents">
-            <a class="chapter"><span class="no">01</span><div><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
-            <a class="chapter"><span class="no">02</span><div><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
-            <a class="chapter"><span class="no">03</span><div><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
-            <a class="chapter"><span class="no">04</span><div><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
-            <a class="chapter on"><span class="no">05</span><div><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>Incomplete</span></div></a>
+            <a class="chapter"><span class="no">01</span><div class="chapter-body"><div class="nm">Being heard</div><div class="sub">Microphone · behavior</div><span class="state"><i></i>Ready</span></div></a>
+            <a class="chapter"><span class="no">02</span><div class="chapter-body"><div class="nm">The trigger</div><div class="sub">Hotkey · modes</div><span class="state"><i></i>Right Cmd</span></div></a>
+            <a class="chapter"><span class="no">03</span><div class="chapter-body"><div class="nm">Cleanup</div><div class="sub">Filler · lists · grammar</div><span class="state"><i></i>3/4</span></div></a>
+            <a class="chapter"><span class="no">04</span><div class="chapter-body"><div class="nm">The dictionary</div><div class="sub">Replacement rules</div><span class="state"><i></i>3 rules</span></div></a>
+            <a class="chapter on"><span class="no">05</span><div class="chapter-body"><div class="nm">The engine</div><div class="sub">Recognition model</div><span class="state"><i></i>Incomplete</span></div></a>
             <div class="divider"></div>
-            <a class="chapter maint"><span class="no">¶</span><div><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
+            <a class="chapter maint"><span class="no">¶</span><div class="chapter-body"><div class="nm">Updates</div><div class="sub">Version · release</div><span class="state"><i></i>v1.1</span></div></a>
           </div>
           <div class="main">
             <div class="kicker">The engine</div>
@@ -2055,6 +2137,42 @@ a{color:inherit;text-decoration:none}svg{display:block}code,pre,.mono{font-famil
       var m = a.querySelector('.menu-pop'); if (m) m.classList.remove('is-open');
       var s = a.querySelector('.sel'); if (s) s.classList.remove('open');
     });
+  });
+
+
+  // Mic priority steps (mock)
+  document.querySelectorAll('.card').forEach(function (card) {
+    var rows = card.querySelectorAll('.mic');
+    if (rows.length < 2) return;
+    function reindex() {
+      var list = card.querySelectorAll('.mic');
+      list.forEach(function (row, i) {
+        var rank = row.querySelector('.rank');
+        if (rank) rank.textContent = String(i + 1);
+        var ups = row.querySelectorAll('.mic-step');
+        if (ups[0]) ups[0].disabled = i === 0;
+        if (ups[1]) ups[1].disabled = i === list.length - 1;
+      });
+    }
+    rows.forEach(function (row) {
+      var steps = row.querySelectorAll('.mic-step');
+      if (steps.length < 2) return;
+      steps[0].addEventListener('click', function () {
+        var prev = row.previousElementSibling;
+        if (prev && prev.classList.contains('mic')) {
+          row.parentNode.insertBefore(row, prev);
+          reindex();
+        }
+      });
+      steps[1].addEventListener('click', function () {
+        var next = row.nextElementSibling;
+        if (next && next.classList.contains('mic')) {
+          row.parentNode.insertBefore(next, row);
+          reindex();
+        }
+      });
+    });
+    reindex();
   });
 
   // Hotkey preset menus

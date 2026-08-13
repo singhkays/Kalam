@@ -6,19 +6,19 @@ struct CleanupPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Cleanup")
-                .font(CompassFont.mono(9.5))
-                .tracking(2.4)
+                .font(CompassType.styleDiveKicker)
+                .compassTracking(CompassType.trackDiveKicker)
                 .textCase(.uppercase)
                 .foregroundStyle(Color.kGreen)
 
             (
-                Text("Messy in, ").font(CompassFont.display(CompassType.diveDisplay)).foregroundStyle(Color.kInk)
-                    + Text("Clean out.").font(CompassFont.display(CompassType.diveDisplay).italic()).foregroundStyle(Color.kInk2)
+                Text("Messy in, ").font(CompassType.styleDiveDisplay).foregroundStyle(Color.kInk)
+                    + Text("Clean out.").font(CompassType.styleDiveDisplay.italic()).foregroundStyle(Color.kInk2)
             )
             .padding(.top, 9)
 
             Text(lede)
-                .font(CompassFont.body(CompassType.diveLede))
+                .font(CompassType.styleLede)
                 .foregroundStyle(Color.kInk2)
                 .padding(.top, 10)
 
@@ -28,9 +28,9 @@ struct CleanupPane: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Deterministic cleanup")
-                            .font(CompassFont.body(CompassType.rowTitle).weight(.semibold))
-                        Text("Master switch — off skips every rule below.")
-                            .font(CompassFont.body(CompassType.rowDetail))
+                            .font(CompassType.styleRowTitle).compassTracking(CompassType.trackRowTitle)
+                        Text("Turns the whole cleanup pass on or off.")
+                            .font(CompassType.styleRowDetail)
                             .foregroundStyle(Color.kInk2)
                     }
                     Spacer()
@@ -58,6 +58,13 @@ struct CleanupPane: View {
                     )
                 }
                 ruleRow("Handle backtracks", $model.handleBacktracks)
+                if model.cleanupEnabled && model.handleBacktracks {
+                    sampleWell(
+                        messy: "send this now scratch that send it tomorrow",
+                        strike: "scratch that",
+                        clean: "send it tomorrow"
+                    )
+                }
                 ruleRow("Format spoken numbered lists", $model.formatLists)
                 if model.cleanupEnabled && model.formatLists {
                     sampleWell(
@@ -81,9 +88,9 @@ struct CleanupPane: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("How much to rewrite")
-                            .font(CompassFont.body(CompassType.rowTitle).weight(.semibold))
+                            .font(CompassType.styleRowTitle).compassTracking(CompassType.trackRowTitle)
                         Text(model.cleanupEnabled ? "Skipped past about 400 words." : "Skipped while cleanup is off.")
-                            .font(CompassFont.body(CompassType.rowDetail))
+                            .font(CompassType.styleRowDetail)
                             .foregroundStyle(Color.kInk2)
                     }
                     Spacer()
@@ -112,8 +119,8 @@ struct CleanupPane: View {
     private func header(_ title: String, trailing: String? = nil) -> some View {
         HStack {
             Text(title)
-                .font(CompassFont.body(11).weight(.bold))
-                .tracking(0.6)
+                .font(CompassType.styleCardHeaderLabel)
+                .compassTracking(CompassType.trackCardHeaderLabel)
                 .textCase(.uppercase)
                 .foregroundStyle(Color.kInk3)
             Spacer()
@@ -131,7 +138,7 @@ struct CleanupPane: View {
     private func ruleRow(_ title: String, _ binding: Binding<Bool>) -> some View {
         HStack {
             Text(title)
-                .font(CompassFont.body(CompassType.rowTitle).weight(.semibold))
+                .font(CompassType.styleRowTitle).compassTracking(CompassType.trackRowTitle)
             Spacer()
             PaperToggle(isOn: binding, disabled: !model.cleanupEnabled)
         }

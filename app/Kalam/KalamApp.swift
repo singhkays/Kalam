@@ -122,6 +122,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // No-network invariant: set before any FluidAudio loader can run
         // (see ASRService.enforceOfflineMode and the adoption dev-design doc).
         ASRService.enforceOfflineMode()
+        // K-31: bundled OFL web fonts for the Compass settings window (Instrument Serif ·
+        // Plus Jakarta Sans · IBM Plex Mono). Process-scope registration; counts-only log.
+        FontRegistration.registerBundledFonts()
         let generalSettings = GeneralSettingsConfiguration.load()
         NSApp.setActivationPolicy(generalSettings.showInDock ? .regular : .accessory)
         prepareRecordingChime()

@@ -126,6 +126,17 @@ final class SettingsModel {
         store.moveMicrophone(from: source, to: destination)
     }
 
+    /// Step priority without drag previews (preferred UX).
+    func moveMicrophoneUp(id: String) {
+        guard let i = microphones.firstIndex(where: { $0.id == id }), i > 0 else { return }
+        store.moveMicrophone(from: IndexSet(integer: i), to: i - 1)
+    }
+
+    func moveMicrophoneDown(id: String) {
+        guard let i = microphones.firstIndex(where: { $0.id == id }), i < microphones.count - 1 else { return }
+        store.moveMicrophone(from: IndexSet(integer: i), to: i + 2)
+    }
+
     func refreshMicrophones() { store.refreshMicrophones() }
 
     func chooseModelFolder() async {

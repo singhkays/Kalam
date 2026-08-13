@@ -20,7 +20,7 @@ struct DictionaryPane: View {
 
             (
                 Text("Teach Kalam the words ").font(CompassType.styleDiveDisplay).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk)
-                    + Text("it keeps getting wrong.").font(CompassType.styleDiveDisplay.italic()).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk2)
+                    + Text("it keeps getting wrong.").font(CompassType.styleDiveDisplayItalic).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk2)
             )
             .padding(.top, 9)
 
@@ -393,9 +393,8 @@ struct FlexibleChipRow: View {
             spacing: 6
         ) {
             ForEach(Array(pairs.enumerated()), id: \.offset) { _, pair in
-                (Text(pair.0).fontWeight(.medium).foregroundStyle(Color.kInk)
-                    + Text(" → \(pair.1)").foregroundStyle(Color.kInk2))
-                    .font(CompassFont.mono(11))
+                (Text(pair.0).font(CompassFont.mono(11, weight: CompassType.wMedium)).foregroundStyle(Color.kInk)
+                    + Text(" → \(pair.1)").font(CompassFont.mono(11)).foregroundStyle(Color.kInk2))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(Color.kPanel)

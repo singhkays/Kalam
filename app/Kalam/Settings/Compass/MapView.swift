@@ -88,7 +88,7 @@ struct MapView: View {
         if let range = full.range(of: italic, options: [.backwards]) {
             let prefix = String(full[..<range.lowerBound])
             return Text(prefix).font(CompassType.styleMapHero).compassTracking(CompassType.trackMapHero).foregroundStyle(Color.kInk)
-                + Text(italic).font(CompassType.styleMapHero.italic()).compassTracking(CompassType.trackMapHero).foregroundStyle(Color.kInk2)
+                + Text(italic).font(CompassType.styleMapHeroItalic).compassTracking(CompassType.trackMapHero).foregroundStyle(Color.kInk2)
         }
         return Text(full).font(CompassType.styleMapHero).compassTracking(CompassType.trackMapHero).foregroundStyle(Color.kInk)
             + Text("").font(CompassType.styleMapHero).compassTracking(CompassType.trackMapHero)

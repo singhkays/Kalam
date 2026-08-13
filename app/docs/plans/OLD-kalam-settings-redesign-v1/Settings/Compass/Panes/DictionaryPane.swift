@@ -11,19 +11,19 @@ struct DictionaryPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("The dictionary")
-                .font(CompassFont.mono(9.5))
-                .tracking(2.4)
+                .font(CompassType.styleDiveKicker)
+                .compassTracking(CompassType.trackDiveKicker)
                 .textCase(.uppercase)
                 .foregroundStyle(Color.kGreen)
 
             (
-                Text("Teach Kalam the words ").font(CompassFont.display(CompassType.diveDisplay)).foregroundStyle(Color.kInk)
-                    + Text("it keeps getting wrong.").font(CompassFont.display(CompassType.diveDisplay).italic()).foregroundStyle(Color.kInk2)
+                Text("Teach Kalam the words ").font(CompassType.styleDiveDisplay).foregroundStyle(Color.kInk)
+                    + Text("it keeps getting wrong.").font(CompassType.styleDiveDisplay.italic()).foregroundStyle(Color.kInk2)
             )
             .padding(.top, 9)
 
             Text("When you say a rule’s phrase, Kalam types the replacement instead.")
-                .font(CompassFont.body(CompassType.diveLede))
+                .font(CompassType.styleLede)
                 .foregroundStyle(Color.kInk2)
                 .padding(.top, 10)
 
@@ -281,7 +281,7 @@ struct DictionaryPane: View {
                 .foregroundStyle(Color.kInk3)
             TextField(placeholder, text: text)
                 .textFieldStyle(.plain)
-                .font(CompassFont.mono(13))
+                .font(CompassFont.body(13.5))
                 .padding(8)
                 .background(Color.kPanel)
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.kHair))

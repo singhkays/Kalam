@@ -181,3 +181,21 @@ Convert to `CompassType` styles so nothing in Compass renders SF:
 - Live token layer: `app/Kalam/Settings/Compass/CompassTokens.swift` (sibling-session NEW-spec sync, uncommitted at plan time)
 - K-30 plan: `app/docs/dev-design/2026-08-13-k30-settings-compass-redesign.md`
 - Licenses: SIL OFL 1.1 — `ofl/instrumentserif/OFL.txt`, `ofl/plusjakartasans/OFL.txt`, `ofl/ibmplexmono/OFL.txt` (google/fonts, pinned commit)
+
+---
+
+## 11. Execution notes (2026-08-13, machine evidence)
+
+**P0 — Concurrency.** Sibling session's NEW-spec sync was still uncommitted (14 Compass files + tests) → executed in isolated worktree `feat/k31-web-fonts` at `/Volumes/My Shared Files/GitHub/kalam-k31` (snapshot of the main working tree ported via `git diff` + untracked copies). Main tree untouched. Baseline build in the worktree: green.
+
+**P1 — Fonts vendored.** 6 TTF files + 3 OFL licenses at pinned `google/fonts` SHA `73fc2ff52147e34a74804b500cf89ca219eac55d` → `app/Kalam/Resources/Fonts/` (Instrument Serif ×2 static, Plus Jakarta Sans variable `PlusJakartaSans[wght].ttf`, IBM Plex Mono ×3 static). The Xcode project uses `PBXFileSystemSynchronizedRootGroup` — **no pbxproj edits needed**; fonts auto-copy, flattened into `Contents/Resources/` (verified in the built product). *Deviation from plan §4: 6 TTFs, not 7* (three families = 2+1+3 files).
+
+**P2 — Registration.** `FontRegistration.swift` (`CTFontManagerRegisterFontsForURL`, `.process`, tolerant of already-registered, counts-only log); called first in `applicationDidFinishLaunching` (`KalamApp.swift:126`). Pre-flight probe confirmed all PostScript names resolve and the `wght` axis (id 2003265652) accepts exact 400–700 requests.
+
+**P3 — Token swap.** `CompassFont.variable` now resolves web faces: serif → Instrument Serif (400), sans → Plus Jakarta Sans variable via `.variation ["wght": w]`, mono → IBM Plex Mono static (400/500/600). `displayItalic` + `styleMapHeroItalic`/`styleDiveDisplayItalic` added; 6 faux-`.italic()` sites converted to the real italic face. `nsWeight` replaced with the probe-verified anchor mapping (plan §5.3 table) — now the degraded fallback path. Header comment rewritten (deviation from the spec's LOCKED rule recorded in code).
+
+**P4 — Straggler audit (plan refinement).** All 9 pre-audited `.font(.system)` sites are **SF Symbol icon sizing** (chevrons, magnifyingglass, grid) or the `✕` chrome glyph — kept on the system font deliberately: SF Symbols require SF to render, and the mockups' icons are SVG equivalents (documented deviation from plan's convert-everything wording). One *real* straggler found beyond the audit: `DictionaryPane.swift` `FlexibleChipRow` used `.fontWeight(.medium)` which the parent `.font()` silently overrode (mockup: `.cv b` = 500) → now explicit `CompassFont.mono(11, weight: wMedium)`.
+
+**P5 — Tests.** `FontRegistrationTests` (5 tests) GREEN: clean registration, all six faces resolve, exact 560/640 on the variable axis, Instrument Serif Italic carries the real italic trait, all three families available. (Test import module is `Kalam_test` in this build config.)
+
+**P7 — Verification pending at note time:** full Xcode suite, engine suite, live AX smoke (fonts render in map + dives), 🧑 visual QA (§8), then commit on user approval.

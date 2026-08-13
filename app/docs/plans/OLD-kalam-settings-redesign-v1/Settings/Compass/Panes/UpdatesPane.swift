@@ -7,8 +7,8 @@ struct UpdatesPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Maintenance")
-                .font(CompassFont.mono(9.5))
-                .tracking(2.4)
+                .font(CompassType.styleDiveKicker)
+                .compassTracking(CompassType.trackDiveKicker)
                 .textCase(.uppercase)
                 .foregroundStyle(Color.kGreen)
 
@@ -26,9 +26,9 @@ struct UpdatesPane: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Check for a newer release")
-                        .font(CompassFont.body(CompassType.rowTitle).weight(.semibold))
+                        .font(CompassType.styleRowTitle).compassTracking(CompassType.trackRowTitle)
                     Text("Opens the release page in your browser without sending anything from this Mac.")
-                        .font(CompassFont.body(CompassType.rowDetail))
+                        .font(CompassType.styleRowDetail)
                         .foregroundStyle(Color.kInk2)
                 }
                 Spacer()
