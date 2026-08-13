@@ -122,6 +122,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // No-network invariant: set before any FluidAudio loader can run
         // (see ASRService.enforceOfflineMode and the adoption dev-design doc).
         ASRService.enforceOfflineMode()
+        // K-31: bundled OFL web fonts for the Compass settings window (Instrument Serif ·
+        // Plus Jakarta Sans · IBM Plex Mono). Process-scope registration; counts-only log.
+        FontRegistration.registerBundledFonts()
         let generalSettings = GeneralSettingsConfiguration.load()
         NSApp.setActivationPolicy(generalSettings.showInDock ? .regular : .accessory)
         prepareRecordingChime()
@@ -368,8 +371,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.identifier = NSUserInterfaceItemIdentifier("KalamSettingsWindow")
         w.styleMask = [.borderless]
         w.isMovableByWindowBackground = true
-        w.isOpaque = true
-        w.backgroundColor = NSColor(Color.kPaper)
+        // K-30 follow-up (2026-08-13): rounded 12 pt card corners per mockup `.frame` rule
+        // (was isOpaque=true + kPaper background → square rect).
+        w.applyRoundedCorners()
         w.isReleasedWhenClosed = false
         let size = NSSize(width: 980, height: 660)
         w.setContentSize(size)

@@ -56,7 +56,8 @@ struct DiveView: View {
             .accessibilityLabel("Back to overview")
 
             Text("Kalam")
-                .font(CompassFont.body(12).weight(.semibold))
+                .font(CompassType.styleBarWordmark)
+                .compassTracking(CompassType.trackBarWordmark)
                 .padding(.leading, 4)
 
             Spacer()

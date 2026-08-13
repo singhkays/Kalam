@@ -87,6 +87,21 @@ struct CompassRoot: View {
 final class CompassWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+
+    /// Rounded-card chrome per mockup `.frame { border-radius: 12px; … }` (compass-mockups.html).
+    /// The window is non-opaque with a clear background; the hosting view's layer is clipped
+    /// to a continuous 12 pt radius, and AppKit draws the window shadow around that shape.
+    /// Must be called after the contentViewController is assigned (contentView non-nil).
+    func applyRoundedCorners(radius: CGFloat = 12) {
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = true
+        guard let view = contentView else { return }
+        view.wantsLayer = true
+        view.layer?.cornerRadius = radius
+        view.layer?.cornerCurve = .continuous
+        view.layer?.masksToBounds = true
+    }
 }
 
 #if DEBUG

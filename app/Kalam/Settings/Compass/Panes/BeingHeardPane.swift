@@ -1,12 +1,8 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct BeingHeardPane: View {
     @Bindable var model: SettingsModel
-    /// K-30: drag source (grip-only dragging — the grip is the handle, not the row).
-    @State private var draggingMicID: String?
-    @State private var dropTargets: [String: Bool] = [:]
 
     private var behaviorOnCount: Int {
         [model.launchAtLogin, model.showInDock, model.escapeCancels, model.muteOtherAudio]
@@ -16,19 +12,19 @@ struct BeingHeardPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Being heard")
-                .font(CompassFont.mono(9.5))
-                .tracking(2.4)
+                .font(CompassType.styleDiveKicker)
+                .compassTracking(CompassType.trackDiveKicker)
                 .textCase(.uppercase)
                 .foregroundStyle(Color.kGreen)
 
             (
-                Text("How Kalam ").font(CompassFont.display(CompassType.diveDisplay)).foregroundStyle(Color.kInk)
-                    + Text("hears you.").font(CompassFont.display(CompassType.diveDisplay).italic()).foregroundStyle(Color.kInk2)
+                Text("How Kalam ").font(CompassType.styleDiveDisplay).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk)
+                    + Text("hears you.").font(CompassType.styleDiveDisplayItalic).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk2)
             )
             .padding(.top, 9)
 
             Text(lede)
-                .font(CompassFont.body(CompassType.diveLede))
+                .font(CompassType.styleLede)
                 .foregroundStyle(Color.kInk2)
                 .padding(.top, 10)
                 .fixedSize(horizontal: false, vertical: true)
@@ -72,9 +68,10 @@ struct BeingHeardPane: View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Recording indicator")
-                    .font(CompassFont.body(CompassType.rowTitle).weight(.semibold))
+                    .font(CompassType.styleRowTitle)
+                    .compassTracking(CompassType.trackRowTitle)
                 Text("Where the listening pill appears.")
-                    .font(CompassFont.body(CompassType.rowDetail))
+                    .font(CompassType.styleRowDetail)
                     .foregroundStyle(Color.kInk2)
             }
             Spacer()
@@ -95,7 +92,7 @@ struct BeingHeardPane: View {
             } label: {
                 HStack(spacing: 8) {
                     Text(model.indicator.label)
-                        .font(CompassFont.mono(12))
+                        .font(CompassFont.mono(CompassType.hotkeyChip))
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(Color.kInk3)
@@ -117,7 +114,7 @@ struct BeingHeardPane: View {
         VStack(spacing: 0) {
             cardHeader(
                 "Microphone priority",
-                trailing: micHeaderTrailing,
+                trailing: micHeaderTrailing ?? "Highest connected wins",
                 trailingDim: model.connectedMicrophone == nil
             )
 
@@ -148,8 +145,55 @@ struct BeingHeardPane: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(18)
             } else {
-                ForEach(Array(model.microphones.enumerated()), id: \.element.id) { _, mic in
-                    micRow(mic)
+                ForEach(Array(model.microphones.enumerated()), id: \.element.id) { index, mic in
+                    let status = model.microphoneStatus(for: mic)
+                    let inUse = status == "IN USE"
+                    let offline = status == "OFFLINE"
+                    HStack(spacing: 12) {
+                        Text("\(index + 1)")
+                            .font(CompassType.styleMicRank)
+                            .foregroundStyle(inUse ? Color.kGreen : Color.kInk3)
+                            .frame(width: 28, alignment: .center)
+
+                        Text(mic.name)
+                            .font(CompassType.styleMicName)
+                            .compassTracking(CompassType.trackRowTitle)
+                            .foregroundStyle(offline ? Color.kInk2 : Color.kInk)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Text(status)
+                            .font(CompassType.styleStatusTag)
+                            .compassTracking(CompassType.trackStatusTag)
+                            .foregroundStyle(inUse ? Color.kGreen : Color.kInk3)
+
+                        VStack(spacing: 2) {
+                            Button {
+                                model.moveMicrophoneUp(id: mic.id)
+                            } label: {
+                                Image(systemName: "chevron.up")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .frame(width: 28, height: 18)
+                            }
+                            .buttonStyle(MicStepButtonStyle())
+                            .disabled(index == 0)
+                            .accessibilityLabel("Move \(mic.name) up")
+
+                            Button {
+                                model.moveMicrophoneDown(id: mic.id)
+                            } label: {
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .frame(width: 28, height: 18)
+                            }
+                            .buttonStyle(MicStepButtonStyle())
+                            .disabled(index >= model.microphones.count - 1)
+                            .accessibilityLabel("Move \(mic.name) down")
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
+                    .opacity(offline ? 0.72 : 1)
+                    .overlay(alignment: .top) { Divider().background(Color.kHair2) }
                 }
             }
         }
@@ -157,64 +201,6 @@ struct BeingHeardPane: View {
         .overlay(RoundedRectangle(cornerRadius: CompassLayout.cardRadius).stroke(Color.kHair))
         .cornerRadius(CompassLayout.cardRadius)
         .padding(.top, 18)
-    }
-
-    /// Grip-drag reorder: the six-dot grip is the drag handle, not the whole row (D.1).
-    private func micRow(_ mic: Microphone) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "circle.grid.3x3")
-                .font(.system(size: 10))
-                .foregroundStyle(Color.kInk3.opacity(0.5))
-                .frame(width: 16)
-                .onDrag {
-                    draggingMicID = mic.id
-                    return NSItemProvider(object: mic.id as NSString)
-                }
-            Text(mic.name)
-                .font(CompassFont.body(13.5).weight(.semibold))
-            Spacer()
-            let status = model.microphoneStatus(for: mic)
-            Text(status)
-                .font(CompassFont.mono(10))
-                .tracking(0.8)
-                .foregroundStyle(status == "IN USE" ? Color.kGreen : Color.kInk3)
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
-        .overlay(alignment: .top) { Divider().background(Color.kHair2) }
-        .overlay(
-            // Contract: target = 2px green inset hairline @ 45%.
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(dropTargets[mic.id] == true ? Color.kGreen.opacity(0.45) : Color.clear, lineWidth: 2)
-                .padding(2)
-        )
-        .onDrop(of: [UTType.text.identifier], isTargeted: dropTargetBinding(for: mic.id)) { _ in
-            handleDrop(on: mic.id)
-            return true
-        }
-    }
-
-    private func dropTargetBinding(for id: String) -> Binding<Bool> {
-        Binding(
-            get: { dropTargets[id] ?? false },
-            set: { dropTargets[id] = $0 }
-        )
-    }
-
-    private func handleDrop(on targetID: String) {
-        let mics = model.microphones
-        guard let sourceIndex = mics.firstIndex(where: { $0.id == draggingMicID }),
-              let targetIndex = mics.firstIndex(where: { $0.id == targetID }),
-              sourceIndex != targetIndex
-        else {
-            draggingMicID = nil
-            return
-        }
-        // Drop on a row = place at that row's position (move(fromOffsets:toOffset:) semantics:
-        // element lands just before the element at `to`).
-        let to = sourceIndex < targetIndex ? targetIndex + 1 : targetIndex
-        model.moveMicrophone(from: IndexSet(integer: sourceIndex), to: to)
-        draggingMicID = nil
     }
 
     private var micHeaderTrailing: String? {
@@ -227,8 +213,8 @@ struct BeingHeardPane: View {
     private func toggleRow(_ title: String, _ detail: String, _ binding: Binding<Bool>) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(CompassFont.body(CompassType.rowTitle).weight(.semibold))
-                Text(detail).font(CompassFont.body(CompassType.rowDetail)).foregroundStyle(Color.kInk2)
+                Text(title).font(CompassType.styleRowTitle).compassTracking(CompassType.trackRowTitle)
+                Text(detail).font(CompassType.styleRowDetail).foregroundStyle(Color.kInk2)
             }
             Spacer()
             PaperToggle(isOn: binding)
@@ -240,8 +226,8 @@ struct BeingHeardPane: View {
     private func cardHeader(_ title: String, trailing: String? = nil, trailingDim: Bool = false) -> some View {
         HStack {
             Text(title)
-                .font(CompassFont.body(11).weight(.bold))
-                .tracking(0.6)
+                .font(CompassType.styleCardHeaderLabel)
+                .compassTracking(CompassType.trackCardHeaderLabel)
                 .textCase(.uppercase)
                 .foregroundStyle(Color.kInk3)
             Spacer()
@@ -274,5 +260,20 @@ struct CompassPrimaryButtonStyle: ButtonStyle {
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.kGreenD))
             .cornerRadius(8)
             .opacity(disabled ? CompassLayout.disabledPrimaryOpacity : (configuration.isPressed ? 0.9 : 1))
+    }
+}
+
+struct MicStepButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isEnabled ? Color.kInk2 : Color.kInk3.opacity(0.35))
+            .background(Color.kPanel)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.kHair)
+            )
+            .cornerRadius(6)
+            .opacity(configuration.isPressed && isEnabled ? 0.85 : 1)
     }
 }

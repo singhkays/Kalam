@@ -34,21 +34,18 @@ extension Color {
     static let kOff = Color(hex: "D4D4CC")
 }
 
-// MARK: - Typography (K-31: web-brand families; system fonts are the fallback)
+// MARK: - Typography (LOCKED — do not improvise)
 //
-// K-31 (2026-08-13, user-authorized deviation from the spec's "LOCKED — do not improvise"
-// rule): the Compass settings window carries the landing-page brand typography —
-//   .serif  → Instrument Serif    (map/dive display, map-card titles, updates figure)
-//   .sans   → Plus Jakarta Sans   (body, UI chrome; variable wght 200–800, exact weights)
-//   .mono   → IBM Plex Mono       (kickers, ranks, states, hotkey symbols, code paths)
-// Fonts are bundled OFL assets registered at launch (FontRegistration); the system
-// design families (New York / SF Pro / SF Mono) remain the degraded fallback path.
+// Three families only, via system design:
+//   .serif       → New York (map/dive display, map-card titles, updates figure)
+//   .default     → SF Pro Text (body, UI chrome)
+//   .monospaced  → SF Mono (kickers, ranks, states, hotkey symbols, code paths)
 //
-// NEVER use: Inter, Roboto, Helvetica, Geist, Clash, or any other bundled UI font.
+// NEVER use: Inter, Roboto, Helvetica, Geist, Clash, bundled custom UI fonts.
 // NEVER use Font.Weight.bold (700) for card headers — mockup is weight 640.
 // NEVER use .title / .headline / .body text styles — they fight the fixed utility chrome.
 //
-// Non-standard weights (560, 640) resolve exactly via the Plus Jakarta Sans wght axis.
+// Non-standard weights (560, 640) use CompassFont.variable via NSFontDescriptor.
 // Tracking values are point offsets ≈ CSS em * fontSize (e.g. -0.022em * 32 ≈ -0.70).
 
 enum CompassFont {
@@ -57,49 +54,8 @@ enum CompassFont {
     }
 
     /// Preferred entry point. `weight` is 100…900 (CSS-like). Common: 400 regular, 500 medium,
-    /// 560 chapter title, 600 semibold, 640 card header label. Falls back to the system
-    /// design family when the bundled face is unavailable.
+    /// 560 chapter title, 600 semibold, 640 card header label.
     static func variable(_ family: Family, size: CGFloat, weight: CGFloat) -> Font {
-        let w = min(900, max(100, weight))
-        switch family {
-        case .serif:
-            // Instrument Serif: 400 only (no heavier faces); the italic face is displayItalic.
-            if let f = NSFont(name: "InstrumentSerif-Regular", size: size) {
-                return Font(f)
-            }
-        case .sans:
-            // Plus Jakarta Sans variable — exact CSS-like weight via the wght variation axis.
-            if let base = NSFont(name: "PlusJakartaSans-Regular", size: size) {
-                let desc = base.fontDescriptor.addingAttributes([.variation: ["wght": w]])
-                if let f = NSFont(descriptor: desc, size: size) {
-                    return Font(f)
-                }
-            }
-        case .mono:
-            // IBM Plex Mono static faces.
-            let name: String
-            switch w {
-            case ..<450: name = "IBMPlexMono-Regular"
-            case ..<550: name = "IBMPlexMono-Medium"
-            default: name = "IBMPlexMono-SemiBold"
-            }
-            if let f = NSFont(name: name, size: size) {
-                return Font(f)
-            }
-        }
-        return fallback(family, size: size, weight: w)
-    }
-
-    /// Real italic face (Instrument Serif Italic) for hero/display emphasis — never faux.
-    static func displayItalic(_ size: CGFloat) -> Font {
-        if let f = NSFont(name: "InstrumentSerif-Italic", size: size) {
-            return Font(f)
-        }
-        return .system(size: size, design: .serif).italic()
-    }
-
-    /// Degraded path: system design font at the probe-verified anchor weight mapping.
-    private static func fallback(_ family: Family, size: CGFloat, weight: CGFloat) -> Font {
         let design: NSFontDescriptor.SystemDesign
         switch family {
         case .serif: design = .serif
@@ -108,40 +64,31 @@ enum CompassFont {
         }
         let base = NSFont.systemFont(ofSize: size)
         guard var desc = base.fontDescriptor.withDesign(design) else {
-            return systemNamed(family, size: size, weight: weight)
+            return fallback(family, size: size, weight: weight)
         }
         desc = desc.addingAttributes([
             .traits: [NSFontDescriptor.TraitKey.weight: nsWeight(weight)]
         ])
         guard let ns = NSFont(descriptor: desc, size: size) else {
-            return systemNamed(family, size: size, weight: weight)
+            return fallback(family, size: size, weight: weight)
         }
         return Font(ns)
     }
 
-    private static func systemNamed(_ family: Family, size: CGFloat, weight: CGFloat) -> Font {
+    private static func nsWeight(_ w: CGFloat) -> CGFloat {
+        // Map 100…900 onto NSFontWeightApprox range (-0.8…0.8-ish).
+        // 400 → 0, 500 → ~0.23, 600 → ~0.4, 700 → ~0.56
+        let clamped = min(900, max(100, w))
+        return (clamped - 400) / 500 * 0.8
+    }
+
+    private static func fallback(_ family: Family, size: CGFloat, weight: CGFloat) -> Font {
         let w = nearestWeight(weight)
         switch family {
         case .serif: return .system(size: size, weight: w, design: .serif)
         case .sans: return .system(size: size, weight: w, design: .default)
         case .mono: return .system(size: size, weight: w, design: .monospaced)
         }
-    }
-
-    /// CSS weight → NSFontDescriptor weight trait. Probe-verified 2026-08-13 (K-31 plan §5.3):
-    /// anchors are the NSFont.Weight raw values; linear between. The old linear formula
-    /// (w−400)/500×0.8 rendered 640 → wght ≈ 682 (near-bold) vs the mockup's true 640.
-    private static func nsWeight(_ w: CGFloat) -> CGFloat {
-        let anchors: [(CGFloat, CGFloat)] = [(400, 0.0), (500, 0.23), (600, 0.3), (700, 0.4), (800, 0.56), (900, 0.62)]
-        let clamped = min(900, max(100, w))
-        for i in 0..<(anchors.count - 1) {
-            let (w0, t0) = anchors[i]
-            let (w1, t1) = anchors[i + 1]
-            if clamped >= w0, clamped <= w1 {
-                return t0 + (clamped - w0) / (w1 - w0) * (t1 - t0)
-            }
-        }
-        return anchors.last!.1
     }
 
     private static func nearestWeight(_ w: CGFloat) -> Font.Weight {
@@ -226,7 +173,6 @@ enum CompassType {
     static let whyBody: CGFloat = 12.5
     static let sampleWellLabel: CGFloat = 8.5
     static let sampleWellBody: CGFloat = 11.5
-    static let trackSampleWellLabel: CGFloat = 1.53 // 0.18em * 8.5
     static let emptyTitle: CGFloat = 15
     static let emptyBody: CGFloat = 13
 
@@ -260,12 +206,8 @@ enum CompassType {
 
     /// Map hero “Everything is ready.”
     static var styleMapHero: Font { CompassFont.display(mapHero, weight: wRegular) }
-    /// Map hero italic emphasis (“Everything is *ready.*”) — real Instrument Serif Italic.
-    static var styleMapHeroItalic: Font { CompassFont.displayItalic(mapHero) }
     /// Dive “How Kalam hears you.”
     static var styleDiveDisplay: Font { CompassFont.display(diveDisplay, weight: wRegular) }
-    /// Dive display italic emphasis (“How Kalam *hears you.*”) — real Instrument Serif Italic.
-    static var styleDiveDisplayItalic: Font { CompassFont.displayItalic(diveDisplay) }
     static var styleMapCardTitle: Font { CompassFont.display(mapCardTitle, weight: wRegular) }
     static var styleMapCardTitleLarge: Font { CompassFont.display(mapCardTitleLarge, weight: wRegular) }
     static var styleMapFootTitle: Font { CompassFont.display(mapFootTitle, weight: wRegular) }
@@ -327,14 +269,6 @@ enum CompassType {
 }
 
 // MARK: - Tracking helper
-
-extension Text {
-    /// Apply a Compass tracking value (points). Text-preserving overload so
-    /// `Text + Text` concatenation keeps working after `.compassTracking`.
-    func compassTracking(_ points: CGFloat) -> Text {
-        tracking(points)
-    }
-}
 
 extension View {
     /// Apply a Compass tracking value (points).

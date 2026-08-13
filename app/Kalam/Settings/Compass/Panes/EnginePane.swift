@@ -7,19 +7,19 @@ struct EnginePane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("The engine")
-                .font(CompassFont.mono(9.5))
-                .tracking(2.4)
+                .font(CompassType.styleDiveKicker)
+                .compassTracking(CompassType.trackDiveKicker)
                 .textCase(.uppercase)
                 .foregroundStyle(Color.kGreen)
 
             (
-                Text("The engine ").font(CompassFont.display(CompassType.diveDisplay)).foregroundStyle(Color.kInk)
-                    + Text("lives on your disk.").font(CompassFont.display(CompassType.diveDisplay).italic()).foregroundStyle(Color.kInk2)
+                Text("The engine ").font(CompassType.styleDiveDisplay).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk)
+                    + Text("lives on your disk.").font(CompassType.styleDiveDisplayItalic).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk2)
             )
             .padding(.top, 9)
 
             Text(lede)
-                .font(CompassFont.body(CompassType.diveLede))
+                .font(CompassType.styleLede)
                 .foregroundStyle(Color.kInk2)
                 .padding(.top, 10)
                 .fixedSize(horizontal: false, vertical: true)
@@ -30,9 +30,9 @@ struct EnginePane: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Model folder")
-                            .font(CompassFont.body(CompassType.rowTitle).weight(.semibold))
+                            .font(CompassType.styleRowTitle).compassTracking(CompassType.trackRowTitle)
                         Text(displayPath)
-                            .font(CompassFont.body(CompassType.rowDetail))
+                            .font(CompassType.styleRowDetail)
                             .foregroundStyle(Color.kInk2)
                     }
                     Spacer()
@@ -56,9 +56,9 @@ struct EnginePane: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Copy to install")
-                            .font(CompassFont.body(CompassType.rowTitle).weight(.semibold))
+                            .font(CompassType.styleRowTitle).compassTracking(CompassType.trackRowTitle)
                         Text(model.installCommand)
-                            .font(CompassFont.mono(11))
+                            .font(CompassType.stylePathMono)
                             .foregroundStyle(Color.kInk2)
                             .lineLimit(2)
                     }
@@ -93,9 +93,9 @@ struct EnginePane: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(activeTitle)
-                            .font(CompassFont.display(CompassType.modelName))
+                            .font(CompassType.styleModelName).compassTracking(CompassType.trackModelName)
                         Text(activeDetail)
-                            .font(CompassFont.body(CompassType.rowDetail))
+                            .font(CompassType.styleRowDetail)
                             .foregroundStyle(Color.kInk2)
                     }
                     Spacer()
@@ -186,8 +186,8 @@ struct EnginePane: View {
     private func header(_ title: String, trailing: String? = nil, trailingDim: Bool = false) -> some View {
         HStack {
             Text(title)
-                .font(CompassFont.body(11).weight(.bold))
-                .tracking(0.6)
+                .font(CompassType.styleCardHeaderLabel)
+                .compassTracking(CompassType.trackCardHeaderLabel)
                 .textCase(.uppercase)
                 .foregroundStyle(Color.kInk3)
             Spacer()

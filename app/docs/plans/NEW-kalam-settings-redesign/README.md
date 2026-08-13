@@ -33,6 +33,22 @@ If it is not in mockups or impl, **do not invent it**.
 
 See `Settings/Compass/CompassTokens.swift`.
 
+
+## Typography (non-negotiable)
+
+Use **only** `CompassType.style…` / `CompassFont.variable` from `CompassTokens.swift`.
+
+| Must | Value |
+|------|--------|
+| Families | System serif (New York), SF Pro, SF Mono |
+| Dive display size | **30pt** regular serif (not 32, not semibold) |
+| Card header labels | weight **640**, tracked, uppercase SF Pro (not `.bold`) |
+| Mic names | **regular** 13.5 (not semibold) |
+| Contents titles | weight **560** (not 600) |
+| Tracking | use `CompassType.track…` constants |
+
+Full table: `spec/compass-impl.html` § Typography. Visual QA = side-by-side with `spec/compass-mockups.html`.
+
 ## Architecture (do not reopen)
 
 - Utility window: `.windowStyle(.plain)`, not resizable, custom Close on map only.
@@ -79,6 +95,10 @@ Port `smartCovers()` from the live app — do not keep the stub pluralizer.
 ## Optional
 
 - `spec/palette-lab.html` — surface A/B explorer (**not** production SoT; Fog card is locked).
+
+## Microphone priority
+
+Numbered list with up/down step controls. **No drag handles.** First connected device is IN USE.
 
 ## Hotkey presets
 

@@ -10,9 +10,9 @@ struct PrivacyPill: View {
                 .font(.system(size: 11, weight: .regular))
             Text(line.rawValue)
         }
-        .font(CompassFont.mono(CompassType.privacy))
+        .font(CompassType.stylePrivacy)
         .textCase(.uppercase)
-        .tracking(1.0)
+        .compassTracking(CompassType.trackPrivacy)
         .foregroundStyle(Color.kInk3)
         .accessibilityElement(children: .combine)
     }

@@ -223,6 +223,45 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertEqual(model.microphones.map(\.id), ["mbp", "usb", "cam"])
     }
 
+    // MARK: - Mic priority steps (D.1 rank + up/down, no drag handles)
+
+    func testMoveMicrophoneUpSwapsWithPreviousRow() {
+        let store = InMemoryCompassStore()
+        let model = makeModel(store)
+        XCTAssertEqual(model.microphones.map(\.id), ["cam", "mbp", "usb"])
+        model.moveMicrophoneUp(id: "mbp")
+        XCTAssertEqual(model.microphones.map(\.id), ["mbp", "cam", "usb"])
+    }
+
+    func testMoveMicrophoneUpOnFirstRowIsNoOp() {
+        let store = InMemoryCompassStore()
+        let model = makeModel(store)
+        model.moveMicrophoneUp(id: "cam")
+        XCTAssertEqual(model.microphones.map(\.id), ["cam", "mbp", "usb"])
+    }
+
+    func testMoveMicrophoneDownSwapsWithNextRow() {
+        let store = InMemoryCompassStore()
+        let model = makeModel(store)
+        model.moveMicrophoneDown(id: "cam")
+        XCTAssertEqual(model.microphones.map(\.id), ["mbp", "cam", "usb"])
+    }
+
+    func testMoveMicrophoneDownOnLastRowIsNoOp() {
+        let store = InMemoryCompassStore()
+        let model = makeModel(store)
+        model.moveMicrophoneDown(id: "usb")
+        XCTAssertEqual(model.microphones.map(\.id), ["cam", "mbp", "usb"])
+    }
+
+    func testMoveMicrophoneStepWithUnknownIDIsNoOp() {
+        let store = InMemoryCompassStore()
+        let model = makeModel(store)
+        model.moveMicrophoneUp(id: "nope")
+        model.moveMicrophoneDown(id: "nope")
+        XCTAssertEqual(model.microphones.map(\.id), ["cam", "mbp", "usb"])
+    }
+
     // MARK: - Revision mechanism (plan §4.1 — the @Observable reactivity fix)
 
     func testRevisionBumpsOnExternalStoreChange() async {

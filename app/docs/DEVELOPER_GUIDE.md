@@ -77,6 +77,7 @@ Core files:
   - `LiveCompassBacking.swift` — the ONLY live-store access: Compass protocol over `GeneralSettingsConfiguration` / `MicrophonePriorityConfiguration` / `PTTHotkeyConfiguration` / `ModelsConfiguration.textCleanup` / `CustomDictionaryManager`; `onChange` stream drives `SettingsModel`'s revision counter
   - `SettingsModel.swift` — `@Observable` façade; attention priority (engine > mic > key > empty dictionary), spanning, hero, map strings
   - `MapView` / `DiveView` / `ContentsNav` + `Controls/` + `Panes/` — Compass UI (spec: `app/docs/plans/kalam-settings-redesign/`)
+  - Typography (K-31, 2026-08-13): bundled OFL web fonts — Instrument Serif (display), Plus Jakarta Sans variable (body; exact CSS-like weights via the `wght` axis), IBM Plex Mono (kickers/states) — vendored under `Resources/Fonts/` and registered process-scope at launch by `FontRegistration` (counts-only log). `CompassFont` resolves faces with a system-font fallback; SF Symbols stay on the system font (icons are not typography)
   - Window presentation: AppDelegate `openSettingsWindow` hosts `CompassRoot` (menu-bar "Settings…"); `.selectModelsSettingsTab` deep-links to the Engine dive
 - `Packages/KalamTextEngine/Sources/KalamTextEngine/TextCleanupEngine.swift` / `TextCleanupConfiguration.swift`
   - Deterministic low-latency transcript cleanup pipeline

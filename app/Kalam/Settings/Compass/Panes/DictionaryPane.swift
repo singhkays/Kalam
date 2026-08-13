@@ -8,23 +8,24 @@ struct DictionaryPane: View {
     @State private var draftSpoken: String = ""
     @State private var draftTyped: String = ""
     @State private var draftMode: MatchMode = .smart
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("The dictionary")
-                .font(CompassFont.mono(9.5))
-                .tracking(2.4)
+                .font(CompassType.styleDiveKicker)
+                .compassTracking(CompassType.trackDiveKicker)
                 .textCase(.uppercase)
                 .foregroundStyle(Color.kGreen)
 
             (
-                Text("Teach Kalam the words ").font(CompassFont.display(CompassType.diveDisplay)).foregroundStyle(Color.kInk)
-                    + Text("it keeps getting wrong.").font(CompassFont.display(CompassType.diveDisplay).italic()).foregroundStyle(Color.kInk2)
+                Text("Teach Kalam the words ").font(CompassType.styleDiveDisplay).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk)
+                    + Text("it keeps getting wrong.").font(CompassType.styleDiveDisplayItalic).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk2)
             )
             .padding(.top, 9)
 
             Text("When you say a rule’s phrase, Kalam types the replacement instead.")
-                .font(CompassFont.body(CompassType.diveLede))
+                .font(CompassType.styleLede)
                 .foregroundStyle(Color.kInk2)
                 .padding(.top, 10)
 
@@ -46,9 +47,9 @@ struct DictionaryPane: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("No rules yet")
-                .font(CompassFont.body(15).weight(.semibold))
+                .font(CompassType.styleEmptyTitle)
             Text("Kalam types exactly what it heard.")
-                .font(CompassFont.body(13))
+                .font(CompassType.styleEmptyBody)
                 .foregroundStyle(Color.kInk2)
             Button {
                 beginAdd()
@@ -84,19 +85,41 @@ struct DictionaryPane: View {
             HStack(spacing: 12) {
                 HStack(spacing: 9) {
                     Image(systemName: "magnifyingglass")
+                        .font(.system(size: 14))
                         .foregroundStyle(Color.kInk3)
                     TextField("Search rules…", text: $query)
                         .textFieldStyle(.plain)
                         .font(CompassFont.body(13))
+                        .focused($searchFocused)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .background(Color.kWell)
-                .overlay(RoundedRectangle(cornerRadius: CompassLayout.searchRadius).stroke(Color.kHair))
+                .overlay(
+                    // Recessed well per mockup `.dict-head .search` (well bg + inset top shade).
+                    RoundedRectangle(cornerRadius: CompassLayout.searchRadius)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.black.opacity(0.07), Color.clear],
+                                startPoint: .top, endPoint: .center
+                            )
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: CompassLayout.searchRadius))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: CompassLayout.searchRadius)
+                        .stroke(searchFocused ? Color.kGreen.opacity(0.4) : Color.kHair)
+                )
                 .cornerRadius(CompassLayout.searchRadius)
+                .overlay(
+                    // Focus ring: 3 pt halo @ 8% green (mockup `.search:focus-within`).
+                    RoundedRectangle(cornerRadius: CompassLayout.searchRadius + 3)
+                        .stroke(Color.kGreen.opacity(searchFocused ? 0.08 : 0), lineWidth: 6)
+                )
 
                 Text(countLabel)
                     .font(CompassFont.mono(10))
+                    .tracking(1.0)
                     .foregroundStyle(Color.kInk3)
 
                 if showPlus {
@@ -166,13 +189,13 @@ struct DictionaryPane: View {
     private func ruleRow(_ rule: ReplacementRule) -> some View {
         HStack(spacing: 10) {
             Text("“\(rule.spoken)”")
-                .font(CompassFont.mono(13))
+                .font(CompassType.styleDictSpoken)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text("→")
                 .foregroundStyle(Color.kGreen)
                 .frame(width: 18)
             Text(rule.typed)
-                .font(CompassFont.body(13.5))
+                .font(CompassType.styleDictTyped)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(rule.mode == .smart ? "Smart" : "Literal")
                 .font(CompassFont.mono(9))
@@ -292,13 +315,14 @@ struct DictionaryPane: View {
     private func field(_ label: String, text: Binding<String>, placeholder: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
-                .font(CompassFont.mono(9))
+                .font(CompassType.styleDictLabel)
                 .tracking(1.6)
                 .textCase(.uppercase)
                 .foregroundStyle(Color.kInk3)
             TextField(placeholder, text: text)
                 .textFieldStyle(.plain)
-                .font(CompassFont.mono(13))
+                // D.4: real words type in SF Pro, not mono (only spoken tokens read as code).
+                .font(CompassType.styleDictField)
                 .padding(8)
                 .background(Color.kPanel)
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.kHair))
@@ -369,9 +393,8 @@ struct FlexibleChipRow: View {
             spacing: 6
         ) {
             ForEach(Array(pairs.enumerated()), id: \.offset) { _, pair in
-                (Text(pair.0).fontWeight(.medium).foregroundStyle(Color.kInk)
-                    + Text(" → \(pair.1)").foregroundStyle(Color.kInk2))
-                    .font(CompassFont.mono(11))
+                (Text(pair.0).font(CompassFont.mono(11, weight: CompassType.wMedium)).foregroundStyle(Color.kInk)
+                    + Text(" → \(pair.1)").font(CompassFont.mono(11)).foregroundStyle(Color.kInk2))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(Color.kPanel)

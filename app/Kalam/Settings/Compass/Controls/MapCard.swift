@@ -16,20 +16,21 @@ struct MapCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
                     Text(destination.title)
-                        .font(CompassFont.mono(CompassType.mapCardKicker))
-                        .tracking(1.6)
+                        .font(CompassType.styleMapCardKicker)
+                        .compassTracking(CompassType.trackMapCardKicker)
                         .textCase(.uppercase)
                         .foregroundStyle(Color.kInk3)
                     Spacer()
                     if let n = destination.number {
                         Text(n)
-                            .font(CompassFont.mono(9.5))
+                            .font(CompassType.styleMapCardNum)
                             .foregroundStyle(Color.kInk3)
                     }
                 }
 
                 Text(title)
-                    .font(CompassFont.display(isAttentionLarge ? CompassType.mapCardTitleLarge : CompassType.mapCardTitle))
+                    .font(isAttentionLarge ? CompassType.styleMapCardTitleLarge : CompassType.styleMapCardTitle)
+                    .compassTracking(CompassType.trackMapCardTitle)
                     .foregroundStyle(Color.kInk)
                     .padding(.top, isAttentionLarge ? 6 : 8)
                     .lineLimit(2)
@@ -40,8 +41,8 @@ struct MapCard: View {
                         .fill(state.ok ? Color.kGreen : Color.kInk3)
                         .frame(width: 6, height: 6)
                     Text(state.text)
-                        .font(CompassFont.mono(9))
-                        .tracking(1.2)
+                        .font(CompassType.styleMapCardState)
+                        .compassTracking(CompassType.trackMonoState)
                         .textCase(.uppercase)
                         .foregroundStyle(Color.kInk3)
                 }
@@ -49,7 +50,7 @@ struct MapCard: View {
                 .accessibilityHidden(true)
 
                 Text(description)
-                    .font(CompassFont.body(CompassType.mapCardBody))
+                    .font(CompassFont.body(CompassType.mapCardBody, weight: CompassType.wRegular))
                     .foregroundStyle(Color.kInk2)
                     .padding(.top, 5)
                     .fixedSize(horizontal: false, vertical: true)

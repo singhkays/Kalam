@@ -6,19 +6,19 @@ struct TriggerPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("The trigger")
-                .font(CompassFont.mono(9.5))
-                .tracking(2.4)
+                .font(CompassType.styleDiveKicker)
+                .compassTracking(CompassType.trackDiveKicker)
                 .textCase(.uppercase)
                 .foregroundStyle(Color.kGreen)
 
             (
-                Text("One key, ").font(CompassFont.display(CompassType.diveDisplay)).foregroundStyle(Color.kInk)
-                    + Text("two ways to press it.").font(CompassFont.display(CompassType.diveDisplay).italic()).foregroundStyle(Color.kInk2)
+                Text("One key, ").font(CompassType.styleDiveDisplay).foregroundStyle(Color.kInk)
+                    + Text("two ways to press it.").font(CompassType.styleDiveDisplay.italic()).foregroundStyle(Color.kInk2)
             )
             .padding(.top, 9)
 
             Text(lede)
-                .font(CompassFont.body(CompassType.diveLede))
+                .font(CompassType.styleLede)
                 .foregroundStyle(Color.kInk2)
                 .padding(.top, 10)
 
@@ -26,8 +26,8 @@ struct TriggerPane: View {
             VStack(spacing: 0) {
                 HStack {
                     Text("Key")
-                        .font(CompassFont.body(11).weight(.bold))
-                        .tracking(0.6)
+                        .font(CompassType.styleCardHeaderLabel)
+                        .compassTracking(CompassType.trackCardHeaderLabel)
                         .textCase(.uppercase)
                         .foregroundStyle(Color.kInk3)
                     Spacer()
@@ -37,9 +37,9 @@ struct TriggerPane: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Key")
-                            .font(CompassFont.body(CompassType.rowTitle).weight(.semibold))
+                            .font(CompassType.styleRowTitle).compassTracking(CompassType.trackRowTitle)
                         Text(model.hotkey == nil ? "Pick a preset or record a shortcut." : "Pick a preset or record any shortcut.")
-                            .font(CompassFont.body(CompassType.rowDetail))
+                            .font(CompassType.styleRowDetail)
                             .foregroundStyle(Color.kInk2)
                             .opacity(model.hotkey == nil ? 1 : 0)
                     }
@@ -57,8 +57,8 @@ struct TriggerPane: View {
             VStack(spacing: 0) {
                 HStack {
                     Text("When you press it")
-                        .font(CompassFont.body(11).weight(.bold))
-                        .tracking(0.6)
+                        .font(CompassType.styleCardHeaderLabel)
+                        .compassTracking(CompassType.trackCardHeaderLabel)
                         .textCase(.uppercase)
                         .foregroundStyle(Color.kInk3)
                     Spacer()
@@ -73,7 +73,7 @@ struct TriggerPane: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(mode.title)
-                                    .font(CompassFont.body(13.5).weight(.semibold))
+                                    .font(CompassType.styleRowTitle).compassTracking(CompassType.trackRowTitle)
                                     .foregroundStyle(Color.kInk)
                                 Text(mode.detail)
                                     .font(CompassFont.body(11.5))

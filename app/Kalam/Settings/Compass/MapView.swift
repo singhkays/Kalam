@@ -9,12 +9,12 @@ struct MapView: View {
     var body: some View {
         VStack(spacing: 0) {
             mapBar
-            ScrollView {
+            CompassScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("The map")
-                        .font(CompassFont.mono(11))
+                        .font(CompassType.styleMapKicker)
                         .foregroundStyle(Color.kGreen)
-                        .tracking(2.8)
+                        .compassTracking(CompassType.trackMapKicker)
                         .textCase(.uppercase)
                         .padding(.top, CompassLayout.mapPad.top)
 
@@ -52,7 +52,8 @@ struct MapView: View {
             .accessibilityLabel("Close")
 
             Text("Kalam")
-                .font(CompassFont.body(12).weight(.semibold))
+                .font(CompassType.styleBarWordmark)
+                .compassTracking(CompassType.trackBarWordmark)
                 .foregroundStyle(Color.kInk)
 
             Spacer()
@@ -69,12 +70,12 @@ struct MapView: View {
         heroTitle(hero)
         if let cta = model.mapNeedCTA {
             Text(cta)
-                .font(CompassFont.body(14).weight(.semibold))
+                .font(CompassType.styleNeedCTA)
                 .foregroundStyle(Color.kGreen)
                 .padding(.top, 12)
         } else {
             Text("Open one to change how it works.")
-                .font(CompassFont.body(13.5))
+                .font(CompassType.styleLede)
                 .foregroundStyle(Color.kInk2)
                 .padding(.top, 8)
         }
@@ -83,14 +84,14 @@ struct MapView: View {
     private func heroTitle(_ hero: MapHero) -> some View {
         let full = hero.text
         let italic = hero.italicSuffix
-        // Render trailing italic emphasis per contract.
+        // Render trailing italic emphasis per contract. Mockup `.hero`: serif 32 w400, ls -.022em.
         if let range = full.range(of: italic, options: [.backwards]) {
             let prefix = String(full[..<range.lowerBound])
-            return Text(prefix).font(CompassFont.display(CompassType.hero)).foregroundStyle(Color.kInk)
-                + Text(italic).font(CompassFont.display(CompassType.hero).italic()).foregroundStyle(Color.kInk2)
+            return Text(prefix).font(CompassType.styleMapHero).compassTracking(CompassType.trackMapHero).foregroundStyle(Color.kInk)
+                + Text(italic).font(CompassType.styleMapHeroItalic).compassTracking(CompassType.trackMapHero).foregroundStyle(Color.kInk2)
         }
-        return Text(full).font(CompassFont.display(CompassType.hero)).foregroundStyle(Color.kInk)
-            + Text("").font(CompassFont.display(CompassType.hero))
+        return Text(full).font(CompassType.styleMapHero).compassTracking(CompassType.trackMapHero).foregroundStyle(Color.kInk)
+            + Text("").font(CompassType.styleMapHero).compassTracking(CompassType.trackMapHero)
     }
 
     private var mapGrid: some View {
@@ -128,10 +129,11 @@ struct MapFoot: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Updates")
-                        .font(CompassFont.display(15))
+                        .font(CompassType.styleMapFootTitle)
+                        .compassTracking(CompassType.trackMapFootTitle)
                         .foregroundStyle(Color.kInk)
                     Text("v\(version) · No auto-check")
-                        .font(CompassFont.body(12))
+                        .font(CompassFont.body(CompassType.mapCardBody))
                         .foregroundStyle(Color.kInk2)
                 }
                 Spacer()

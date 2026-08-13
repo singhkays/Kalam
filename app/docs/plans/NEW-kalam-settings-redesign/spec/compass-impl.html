@@ -96,6 +96,7 @@ table.t td.nowrap{white-space:nowrap}
   <a href="#types">Types</a>
   <a href="#copy">Copy &amp; italics</a>
   <a href="#tokens">Tokens</a>
+  <a href="#type">Type</a>
   <a href="#hotkey">Hotkey</a>
   <a href="#controls">Controls</a>
   <a href="#live">Live settings audit</a>
@@ -155,6 +156,9 @@ table.t td.nowrap{white-space:nowrap}
 </section>
 
 <div class="rule"></div>
+
+  <div class="okn"><b>Close on dive.</b> Do not put Close on the dive bar. Back returns to the map; Close lives on the map only. System Cmd-W still dismisses the window from any depth (same as Close). Escape is already cancel-recording / cancel-capture — not window close.</div>
+
 <section class="sec" id="arch">
   <div class="h-kicker">Architecture</div>
   <h2 class="h2">Two screens. One path slot.</h2>
@@ -327,6 +331,98 @@ table.t td.nowrap{white-space:nowrap}
 <div class="rule"></div>
 
 <div class="rule"></div>
+
+<div class="rule"></div>
+<section class="sec" id="type">
+  <div class="h-kicker">Typography · locked</div>
+  <h2 class="h2">Foolproof type ramp</h2>
+  <p>
+    Implementers must use <code>CompassType.style…</code> and <code>CompassFont.variable</code> from
+    <code>CompassTokens.swift</code>. Do not invent sizes, do not use
+    <code>.font(.title)</code> / <code>.headline</code> / <code>.body</code>, and do not use
+    <code>Font.Weight.bold</code> (700) for card headers.
+  </p>
+  <div class="warn"><b>Screenshot failure mode.</b> If dive titles look heavier or larger than the HTML mock, you used 32pt or .bold/.semibold where the mock uses 30pt regular serif. If card labels (BEHAVIOR) look like black stamps, you used .bold (700) instead of weight <b>640</b>.</div>
+
+  <h3>Families (system only)</h3>
+  <table class="t">
+    <thead><tr><th>Role</th><th>Swift</th><th>Renders as</th><th>Use for</th></tr></thead>
+    <tbody>
+      <tr><td>Serif</td><td><code>CompassFont.display</code> / <code>.variable(.serif,…)</code></td><td>New York</td><td>Map hero, dive display, map-card titles, Updates figure, model name</td></tr>
+      <tr><td>Sans</td><td><code>CompassFont.body</code> / <code>.variable(.sans,…)</code></td><td>SF Pro Text</td><td>UI chrome, row titles, ledes, fields, buttons</td></tr>
+      <tr><td>Mono</td><td><code>CompassFont.mono</code> / <code>.variable(.mono,…)</code></td><td>SF Mono</td><td>Kickers, indices, states, ranks, tags, hotkey symbols, paths</td></tr>
+    </tbody>
+  </table>
+  <p><b>Banned:</b> Inter, Roboto, Helvetica, Geist, Clash, any bundled marketing font.</p>
+
+  <h3>Weights (CSS-like 100–900)</h3>
+  <table class="t">
+    <thead><tr><th>Token</th><th>Value</th><th>Where</th><th>Do not</th></tr></thead>
+    <tbody>
+      <tr><td><code>wRegular</code></td><td>400</td><td>Display serif, ledes, details, mic names, most body</td><td>Semibold mic names</td></tr>
+      <tr><td><code>wMedium</code></td><td>500</td><td>Dive kicker, back button, hotkey chip text, maint idle</td><td></td></tr>
+      <tr><td><code>wChapter</code></td><td>560</td><td>Contents nav titles; segment selected; need CTA</td><td>Round up to 600 everywhere</td></tr>
+      <tr><td><code>wSemibold</code></td><td>600</td><td>Bar wordmark, row titles, mode titles, map kicker, empty title</td><td></td></tr>
+      <tr><td><code>wCardHeader</code></td><td><b>640</b></td><td>BEHAVIOR / MICROPHONE PRIORITY labels only</td><td><b>Font.Weight.bold (700)</b></td></tr>
+      <tr><td><code>wBold</code></td><td>700</td><td>Not used in Compass product UI</td><td>Use for “emphasis”</td></tr>
+    </tbody>
+  </table>
+  <p>Non-standard weights require <code>CompassFont.variable(_:size:weight:)</code> (NSFontDescriptor). Rounding 640→bold will fail visual QA.</p>
+
+  <h3>Size + tracking table (must match mockup CSS)</h3>
+  <table class="t">
+    <thead><tr><th>Role</th><th>Family</th><th>Size</th><th>Weight</th><th>Tracking (pt)</th><th>Swift style</th></tr></thead>
+    <tbody>
+      <tr><td>Map hero</td><td>serif</td><td>32</td><td>400</td><td>−0.70</td><td><code>styleMapHero</code> + <code>trackMapHero</code></td></tr>
+      <tr><td>Dive display</td><td>serif</td><td><b>30</b></td><td>400</td><td>−0.66</td><td><code>styleDiveDisplay</code> + <code>trackDiveDisplay</code></td></tr>
+      <tr><td>Map card title</td><td>serif</td><td>19</td><td>400</td><td>−0.23</td><td><code>styleMapCardTitle</code></td></tr>
+      <tr><td>Map card title large</td><td>serif</td><td>22</td><td>400</td><td>−0.23</td><td><code>styleMapCardTitleLarge</code></td></tr>
+      <tr><td>Map foot title</td><td>serif</td><td>15</td><td>400</td><td>−0.15</td><td><code>styleMapFootTitle</code></td></tr>
+      <tr><td>Model name</td><td>serif</td><td>20</td><td>400</td><td>−0.20</td><td><code>styleModelName</code></td></tr>
+      <tr><td>Updates figure</td><td>serif</td><td>44</td><td>400</td><td>−1.32</td><td><code>styleUpdatesFigure</code></td></tr>
+      <tr><td>Map kicker THE MAP</td><td>mono</td><td>11</td><td>600</td><td>+2.86</td><td><code>styleMapKicker</code> + uppercase</td></tr>
+      <tr><td>Dive kicker</td><td>mono</td><td>9.5</td><td>500</td><td>+2.28</td><td><code>styleDiveKicker</code> + uppercase</td></tr>
+      <tr><td>Card header label</td><td>sans</td><td>11</td><td><b>640</b></td><td>+0.55</td><td><code>styleCardHeaderLabel</code> + uppercase</td></tr>
+      <tr><td>Card header state</td><td>mono</td><td>9.5</td><td>400</td><td>+1.14</td><td><code>styleCardHeaderState</code> + uppercase</td></tr>
+      <tr><td>Privacy pill</td><td>mono</td><td>9.5</td><td>400</td><td>+0.95</td><td><code>stylePrivacy</code> + uppercase</td></tr>
+      <tr><td>Bar wordmark Kalam</td><td>sans</td><td>12</td><td>600</td><td>−0.10</td><td><code>styleBarWordmark</code></td></tr>
+      <tr><td>Lede / body copy</td><td>sans</td><td>13.5</td><td>400</td><td>0</td><td><code>styleLede</code></td></tr>
+      <tr><td>Need CTA</td><td>sans</td><td>14</td><td>560</td><td>0</td><td><code>styleNeedCTA</code></td></tr>
+      <tr><td>Row title</td><td>sans</td><td>13.5</td><td>600</td><td>−0.07</td><td><code>styleRowTitle</code></td></tr>
+      <tr><td>Row detail</td><td>sans</td><td>11.5</td><td>400</td><td>0</td><td><code>styleRowDetail</code></td></tr>
+      <tr><td>Mic device name</td><td>sans</td><td>13.5</td><td><b>400</b></td><td>−0.07</td><td><code>styleMicName</code> (not semibold)</td></tr>
+      <tr><td>Mic rank 1…n</td><td>mono</td><td>11</td><td>400</td><td>+0.04em</td><td><code>styleMicRank</code></td></tr>
+      <tr><td>Contents title</td><td>sans</td><td>13</td><td>560 (maint idle 500 / on 600)</td><td>−0.07</td><td><code>styleContentsTitle(selected:maintenance:)</code></td></tr>
+      <tr><td>Contents index</td><td>mono</td><td>10</td><td>400</td><td>0</td><td><code>styleContentsIndex</code> · 18×18 line box with title</td></tr>
+      <tr><td>Contents state</td><td>mono</td><td>10</td><td>400</td><td>0</td><td><code>styleContentsState</code> · no forced uppercase</td></tr>
+      <tr><td>Map card kicker</td><td>mono</td><td>9.5</td><td>400</td><td>+1.52</td><td><code>styleMapCardKicker</code> + uppercase</td></tr>
+      <tr><td>Map card body</td><td>sans</td><td>12</td><td>400</td><td>0</td><td>body(12)</td></tr>
+      <tr><td>Open →</td><td>sans</td><td>12</td><td>400</td><td>0</td><td>opacity 0.62 default / 0.92 hover</td></tr>
+      <tr><td>IN USE / OFFLINE</td><td>mono</td><td>10</td><td>400</td><td>+0.80</td><td><code>styleStatusTag</code></td></tr>
+      <tr><td>Dict field input</td><td>sans</td><td>13.5</td><td>400</td><td>0</td><td><code>styleDictField</code> · never mono</td></tr>
+      <tr><td>Dict spoken list</td><td>mono</td><td>13</td><td>400</td><td>0</td><td><code>styleDictSpoken</code></td></tr>
+      <tr><td>Dict typed list</td><td>sans</td><td>13.5</td><td>400</td><td>0</td><td><code>styleDictTyped</code></td></tr>
+      <tr><td>Hotkey chip “Not specified”</td><td>sans</td><td>12.5</td><td>500</td><td>−0.01em</td><td><code>styleHotkeyChipText</code></td></tr>
+      <tr><td>Hotkey symbols</td><td>mono</td><td>12.5</td><td>500</td><td>+0.02em</td><td><code>styleHotkeySymbol</code></td></tr>
+      <tr><td>Segment idle / on</td><td>sans</td><td>12</td><td>400 / 560</td><td>0</td><td><code>styleSegment</code> / <code>styleSegmentOn</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>Italic ranges (serif display only)</h3>
+  <p>Italic is the trailing emphasis in ink2. Rest is regular ink. See copy deck italic table. Apply with <code>Font.italic()</code> on the emphasized <code>Text</code> run only — do not italicize the whole line.</p>
+
+  <h3>Acceptance (type QA)</h3>
+  <ul>
+    <li>Dive title is 30pt serif regular, not 32, not semibold.</li>
+    <li>Card headers are weight 640 tracked uppercase SF Pro — not bold black stamps.</li>
+    <li>Mic names are regular 13.5 — not semibold.</li>
+    <li>Contents titles are 560 (not 600) when selected for journey items.</li>
+    <li>No pure-white fields; no system blue focus; no Dynamic Type scaling of this window.</li>
+    <li>Side-by-side screenshot vs <code>compass-mockups.html</code> Fog card at 100% zoom must match optical weight.</li>
+  </ul>
+  <div class="okn"><b>Single source in code.</b> All of the above lives in <code>CompassTokens.swift</code> as <code>CompassType</code> + <code>CompassFont</code>. Views only reference named styles. If a view needs a new size, add a named role to <code>CompassType</code> first — do not inline magic numbers.</div>
+</section>
+
 <section class="sec" id="hotkey">
   <div class="h-kicker">Hotkey</div>
   <h2 class="h2">Presets first. Record if needed.</h2>
@@ -369,7 +465,7 @@ table.t td.nowrap{white-space:nowrap}
     <li><b>KeyCapture</b> — local monitor only while capturing; onDisappear removes; no global monitor.</li>
     <li><b>Indicator Menu (D.1e)</b> — <code>Menu</code> labeled by chip OR overlay parented to chip only. Three text rows + checkmark. <b>Never toggles in the menu. Never window-absolute overlay over Behavior column.</b> No Off/bottoms.</li>
     <li><b>Map hover</b> — cards + Updates foot only; reduce-motion no lift.</li>
-    <li><b>Mic drag</b> — row opacity 0.45; target 2px green inset hairline @ 45%; grip left.</li>
+    <li><b>Mic priority</b> — numbered rank + up/down step buttons (no drag handles, no live drag preview). First connected = IN USE.</li>
     <li><b>Navigation</b> — default stack push/pop Map↔Dive; contents replace path length 1.</li>
     <li><b>Focus ring</b> — 3pt kGreen @ 8%; not system blue.</li>
   </ul>
