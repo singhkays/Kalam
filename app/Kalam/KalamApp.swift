@@ -368,8 +368,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         w.identifier = NSUserInterfaceItemIdentifier("KalamSettingsWindow")
         w.styleMask = [.borderless]
         w.isMovableByWindowBackground = true
-        w.isOpaque = true
-        w.backgroundColor = NSColor(Color.kPaper)
+        // K-30 follow-up (2026-08-13): rounded 12 pt card corners per mockup `.frame` rule
+        // (was isOpaque=true + kPaper background → square rect).
+        w.applyRoundedCorners()
         w.isReleasedWhenClosed = false
         let size = NSSize(width: 980, height: 660)
         w.setContentSize(size)

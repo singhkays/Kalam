@@ -9,7 +9,7 @@ struct MapView: View {
     var body: some View {
         VStack(spacing: 0) {
             mapBar
-            CompassScrollView {
+            ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("The map")
                         .font(CompassType.styleMapKicker)
@@ -84,14 +84,14 @@ struct MapView: View {
     private func heroTitle(_ hero: MapHero) -> some View {
         let full = hero.text
         let italic = hero.italicSuffix
-        // Render trailing italic emphasis per contract. Mockup `.hero`: serif 32 w400, ls -.022em.
+        // Render trailing italic emphasis per contract.
         if let range = full.range(of: italic, options: [.backwards]) {
             let prefix = String(full[..<range.lowerBound])
-            return Text(prefix).font(CompassType.styleMapHero).compassTracking(CompassType.trackMapHero).foregroundStyle(Color.kInk)
-                + Text(italic).font(CompassType.styleMapHero.italic()).compassTracking(CompassType.trackMapHero).foregroundStyle(Color.kInk2)
+            return Text(prefix).font(CompassType.styleMapHero).foregroundStyle(Color.kInk)
+                + Text(italic).font(CompassType.styleMapHero.italic()).foregroundStyle(Color.kInk2)
         }
-        return Text(full).font(CompassType.styleMapHero).compassTracking(CompassType.trackMapHero).foregroundStyle(Color.kInk)
-            + Text("").font(CompassType.styleMapHero).compassTracking(CompassType.trackMapHero)
+        return Text(full).font(CompassType.styleMapHero).foregroundStyle(Color.kInk)
+            + Text("").font(CompassFont.display(CompassType.mapHero))
     }
 
     private var mapGrid: some View {
@@ -138,7 +138,7 @@ struct MapFoot: View {
                 }
                 Spacer()
                 Text("Open →")
-                    .font(CompassFont.body(12))
+                    .font(CompassFont.body(CompassType.mapOpenHint))
                     .foregroundStyle(Color.kGreen.opacity(0.72))
                     .allowsHitTesting(false)
             }

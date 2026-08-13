@@ -12,8 +12,8 @@ struct TriggerPane: View {
                 .foregroundStyle(Color.kGreen)
 
             (
-                Text("One key, ").font(CompassType.styleDiveDisplay).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk)
-                    + Text("two ways to press it.").font(CompassType.styleDiveDisplay.italic()).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk2)
+                Text("One key, ").font(CompassType.styleDiveDisplay).foregroundStyle(Color.kInk)
+                    + Text("two ways to press it.").font(CompassType.styleDiveDisplay.italic()).foregroundStyle(Color.kInk2)
             )
             .padding(.top, 9)
 
@@ -73,7 +73,7 @@ struct TriggerPane: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(mode.title)
-                                    .font(CompassFont.body(13.5).weight(.semibold))
+                                    .font(CompassType.styleRowTitle).compassTracking(CompassType.trackRowTitle)
                                     .foregroundStyle(Color.kInk)
                                 Text(mode.detail)
                                     .font(CompassFont.body(11.5))

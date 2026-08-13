@@ -13,8 +13,8 @@ struct EnginePane: View {
                 .foregroundStyle(Color.kGreen)
 
             (
-                Text("The engine ").font(CompassType.styleDiveDisplay).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk)
-                    + Text("lives on your disk.").font(CompassType.styleDiveDisplay.italic()).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk2)
+                Text("The engine ").font(CompassType.styleDiveDisplay).foregroundStyle(Color.kInk)
+                    + Text("lives on your disk.").font(CompassType.styleDiveDisplay.italic()).foregroundStyle(Color.kInk2)
             )
             .padding(.top, 9)
 
@@ -58,7 +58,7 @@ struct EnginePane: View {
                         Text("Copy to install")
                             .font(CompassType.styleRowTitle).compassTracking(CompassType.trackRowTitle)
                         Text(model.installCommand)
-                            .font(CompassType.stylePathMono)
+                            .font(CompassFont.mono(11))
                             .foregroundStyle(Color.kInk2)
                             .lineLimit(2)
                     }
@@ -93,7 +93,7 @@ struct EnginePane: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(activeTitle)
-                            .font(CompassType.styleModelName).compassTracking(CompassType.trackModelName)
+                            .font(CompassFont.display(CompassType.modelName))
                         Text(activeDetail)
                             .font(CompassType.styleRowDetail)
                             .foregroundStyle(Color.kInk2)

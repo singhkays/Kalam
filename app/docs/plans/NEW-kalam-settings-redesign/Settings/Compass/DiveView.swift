@@ -21,7 +21,7 @@ struct DiveView: View {
                     .fill(Color.kHair)
                     .frame(width: 1)
 
-                CompassScrollView {
+                ScrollView {
                     pane
                         .padding(CompassLayout.diveMainPad)
                         .frame(maxWidth: .infinity, alignment: .leading)

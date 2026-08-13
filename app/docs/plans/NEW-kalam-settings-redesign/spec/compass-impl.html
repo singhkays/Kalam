@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kalam Compass — Implementation contract</title>
+<style>
+:root{--sf:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;--ser:ui-serif,"New York","Iowan Old Style",Charter,Georgia,serif;--mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;--page:#E4E2DC;--ink:#1C1B17;--ink-2:#5B574C;--ink-3:#8F897B;--hair:#D5D2CA;--hair-2:#E3E0D8;--green:#1A5C3A;--green-tint:rgba(26,92,58,.08);--amber:#8A6D3B}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;scroll-padding-top:72px}
+body{background:var(--page);color:var(--ink);font-family:var(--sf);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+::selection{background:var(--green-tint)}
+.wrap{max-width:980px;margin:0 auto;padding:0 40px}
+a{color:inherit}code,pre,.mono{font-family:var(--mono)}
+.rail{position:sticky;top:0;z-index:50;background:rgba(228,226,220,.92);backdrop-filter:blur(18px);border-bottom:1px solid var(--hair)}
+.rail-in{max-width:980px;margin:0 auto;padding:0 40px;height:56px;display:flex;align-items:center;gap:14px}
+.rail-mark{font-family:var(--ser);font-size:14px;font-weight:600}
+.rail-ver{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;color:var(--ink-3);text-transform:uppercase}
+.rail-links{display:flex;gap:2px;margin-left:auto;flex-wrap:wrap}
+.rail-links a{font-size:12.5px;color:var(--ink-2);padding:6px 10px;border-radius:999px;text-decoration:none}
+.rail-links a:hover,.rail-links a.on{color:var(--green);background:var(--green-tint)}
+.mast{padding:64px 0 8px;max-width:72ch}
+.kicker-page{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--green);font-weight:500}
+.mast h1{font-family:var(--ser);font-size:clamp(34px,4.5vw,52px);line-height:1.05;letter-spacing:-.03em;font-weight:400;margin-top:14px}
+.mast h1 em{font-style:italic;color:var(--ink-2)}
+.mast .lede{margin-top:16px;color:var(--ink-2);font-size:16px;line-height:1.7}
+.mast .lede b{color:var(--ink)}
+.badge-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.badge{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:6px 10px;border-radius:999px;border:1px solid var(--hair);color:var(--ink-2)}
+.badge.on{color:var(--green);border-color:rgba(26,92,58,.28);background:var(--green-tint)}
+.rule{height:1px;background:var(--hair);margin:44px 0}
+.h-kicker{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--green)}
+.h2{font-family:var(--ser);font-size:28px;letter-spacing:-.02em;font-weight:400;margin-top:8px}
+.sec p{margin-top:12px;color:var(--ink-2);font-size:15px;line-height:1.68;max-width:72ch}
+.sec p b{color:var(--ink);font-weight:560}
+.sec h3{margin-top:26px;font-size:16px;font-weight:620;letter-spacing:-.01em}
+.sec ul,.sec ol{margin:12px 0 0;padding:0;list-style:none;display:grid;gap:9px;max-width:78ch}
+.sec li{font-size:14px;color:var(--ink-2);line-height:1.6;padding-left:18px;position:relative}
+.sec li::before{content:"";position:absolute;left:0;top:9px;width:8px;height:1px;background:var(--green)}
+.sec ol{counter-reset:step}
+.sec ol li{counter-increment:step}
+.sec ol li::before{content:counter(step,decimal-leading-zero);width:auto;height:auto;top:0;font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--green);background:none}
+.warn{border-left:2px solid #B42318;padding:12px 16px;margin-top:16px;max-width:78ch;color:#7A271A;font-size:14px;line-height:1.6;background:rgba(180,35,24,.04)}
+.okn{border-left:2px solid var(--green);padding:12px 16px;margin-top:16px;max-width:78ch;color:var(--ink-2);font-size:14px;line-height:1.6}
+.note{border-left:2px solid var(--amber);padding:12px 16px;margin-top:16px;max-width:78ch;color:#5C4A24;font-size:14px;line-height:1.6;background:rgba(138,109,59,.06)}
+.okn b,.warn b,.note b{color:inherit}
+pre.spec{margin-top:14px;background:#1F1D17;color:#EFEAE0;border-radius:14px;padding:18px 20px;font-size:12px;line-height:1.55;overflow:auto;max-width:100%;white-space:pre-wrap}
+pre.spec .c{color:#8F8878}pre.spec .k{color:#8FCB9B}pre.spec .t{color:#E6C07B}pre.spec .s{color:#C3A6FF}
+table.t{width:100%;border-collapse:collapse;margin-top:14px;font-size:13.5px}
+table.t th{text-align:left;font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:400;padding:0 14px 10px 0;border-bottom:1px solid var(--hair)}
+table.t td{padding:11px 14px 11px 0;border-bottom:1px solid var(--hair-2);color:var(--ink-2);vertical-align:top;line-height:1.5}
+table.t td:first-child{color:var(--ink);font-weight:560}
+table.t td.nowrap{white-space:nowrap}
+.toc{display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;margin-top:18px}
+.toc a{font-size:13.5px;color:var(--ink-2);text-decoration:none;padding:6px 0;border-top:1px solid var(--hair-2)}
+.toc a:hover{color:var(--ink)}
+.foot-page{padding:56px 0 90px;color:var(--ink-2);font-size:14px;line-height:1.7;max-width:68ch}
+.audit-drop{color:#7A271A;font-weight:600}.audit-keep{color:var(--green);font-weight:600}.audit-open{color:#8A6D3B;font-weight:600}
+@media(max-width:820px){.wrap{padding:0 20px}.toc{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="rail"><div class="rail-in">
+  <div class="rail-mark">Kalam · Compass</div>
+  <div class="rail-ver">Impl contract · en-US</div>
+  <div class="rail-links">
+    <a href="index.html">Index</a>
+    <a href="compass-mockups.html">Mockups</a>
+    <a class="on" href="compass-impl.html">Implementation</a>
+  </div>
+</div></div>
+
+<div class="wrap">
+<section class="mast">
+  <div class="kicker-page">Implementation contract · macOS 14+ · SwiftUI</div>
+  <h1>Build rules, <em>not pictures.</em></h1>
+  <p class="lede">
+    This file is the coding source of truth: architecture, types, backing store, tokens, control behavior,
+    live-app migration, accessibility, and acceptance. <b>Visual frames live only in
+    <a href="compass-mockups.html">compass-mockups.html</a>.</b> American English (behavior, Normalize).
+    Where mockup and contract disagree on layout, mockup wins. On types and “do not,” this file wins.
+  </p>
+  <div class="badge-row">
+    <span class="badge on">No second settings store</span>
+    <span class="badge">Path length 0 or 1</span>
+    <span class="badge">No network client</span>
+    <span class="badge">en-US</span>
+  </div>
+</section>
+
+<div class="toc">
+  <a href="#split">Why two files</a>
+  <a href="#locked">Locked decisions</a>
+  <a href="#arch">Architecture</a>
+  <a href="#backing">Backing store</a>
+  <a href="#types">Types</a>
+  <a href="#copy">Copy &amp; italics</a>
+  <a href="#tokens">Tokens</a>
+  <a href="#type">Type</a>
+  <a href="#hotkey">Hotkey</a>
+  <a href="#controls">Controls</a>
+  <a href="#live">Live settings audit</a>
+  <a href="#swiftui">SwiftUI map</a>
+  <a href="#a11y">Accessibility</a>
+  <a href="#plan">Build plan</a>
+  <a href="#accept">Acceptance</a>
+</div>
+
+<div class="rule"></div>
+<section class="sec" id="split">
+  <div class="h-kicker">Doc strategy</div>
+  <h2 class="h2">Why not one mega-HTML?</h2>
+  <p>
+    One 3k-line file mixes two audiences and two change rates. Mockups churn when design tweaks a well;
+    the contract churns when the store API is named. Agents paste the wrong half into context.
+    <b>Split by job, not by version.</b>
+  </p>
+  <table class="t">
+    <thead><tr><th>File</th><th>Owns</th><th>Does not own</th></tr></thead>
+    <tbody>
+      <tr><td class="nowrap"><code>compass-mockups.html</code></td><td>Every 980×660 frame, on-screen copy, visual states</td><td>Protocols, persistence, Swift file tree</td></tr>
+      <tr><td class="nowrap"><code>compass-impl.html</code></td><td>Types, store, tokens, traps, migration, plan</td><td>Redundant full mockup gallery</td></tr>
+      <tr><td class="nowrap"><code>Settings/Compass/*.swift</code></td><td>Runnable stubs matching the contract</td><td>Product copy invented off-spec</td></tr>
+      <tr><td class="nowrap"><code>index.html</code></td><td>Entry + how to read the set</td><td>Normative rules</td></tr>
+    </tbody>
+  </table>
+  <div class="okn"><b>Rejected alternatives.</b> (1) One giant HTML — context bloat, merge pain. (2) One HTML per screen — navigation hell, token drift. (3) Markdown-only — mockups need pixel fidelity. (4) Figma link as SoT — agents cannot grep it. <b>Two HTML + Swift tree</b> is the stable split.</div>
+  <div class="note"><b>Spelling.</b> Entire Compass UI and this contract use American English: behavior, behaviors, Normalize, license (noun). Do not re-Britishize from the live app or old V1 strings.</div>
+</section>
+
+<div class="rule"></div>
+<section class="sec" id="locked">
+  <div class="h-kicker">Do not reopen</div>
+  <h2 class="h2">Locked decisions</h2>
+  <table class="t">
+    <thead><tr><th>Decision</th><th>Value</th><th>Do not</th></tr></thead>
+    <tbody>
+      <tr><td>Window size</td><td>980 × 660, not resizable</td><td>Grow chrome for Cleanup; content scrolls</td></tr>
+      <tr><td>Window chrome</td><td><code>.windowStyle(.plain)</code> + custom Close</td><td>Traffic lights; min/max</td></tr>
+      <tr><td>Map vs dive bar</td><td>Map: Close + wordmark + privacy. Dive: back motif + wordmark + privacy. No Close on dive</td><td>Label back “Map”; Close+Back same bar</td></tr>
+      <tr><td>Privacy pill</td><td>Mono ink-3; shield + line; rolled once per window lifetime; shared Map/Dive</td><td>Timer; green chip; “Listening”</td></tr>
+      <tr><td>Navigation</td><td><code>NavigationStack</code> path length 0 or 1; contents <em>replaces</em></td><td>Deep stack; NavigationSplitView for map</td></tr>
+      <tr><td>Updates</td><td>Maintenance; ¶; pinned bottom of contents; slim map foot</td><td>Chapter 06; grid card; URLSession</td></tr>
+      <tr><td>Map span</td><td>Always exactly one span-2: attention ?? engine fill</td><td>Five equal; vacant cell; two span-2</td></tr>
+      <tr><td>Attention order</td><td>engine missing|incomplete → no mic → key unset → empty dictionary</td><td>Cleanup off as attention; two large cards</td></tr>
+      <tr><td>Empty dictionary</td><td>Span-attention only; hero stays ready; no green CTA</td><td>Treat as equal to missing engine</td></tr>
+      <tr><td>Errors</td><td>No second hue; green “Open …” line; grey state labels</td><td>Red, banners, exclamation icons</td></tr>
+      <tr><td>Network</td><td>None. Updates opens browser URL. User copies models</td><td>Sparkle; download model; last-checked</td></tr>
+      <tr><td>Language</td><td>English UI, American spelling; no localization this pass</td><td>String catalogs; British spellings (e.g. old “behaviour”)</td></tr>
+      <tr><td>Shared state</td><td>One SettingsModel façade over live store</td><td>Compass-only UserDefaults schema</td></tr>
+      <tr><td>Indicator placements</td><td>Top left, top center, top right only</td><td>Bottom*; Off (coerce store on read)</td></tr>
+      <tr><td>Hotkey UI</td><td>Preset menu (live catalogue) + Record shortcut… + four mode radios</td><td>TextField; Activation dropdown duplicating modes</td></tr>
+      <tr><td>Engine UI</td><td>Folder, one cp command, name, presence</td><td>HF CLI; file checklist; multi-model picker; Finder; Clear</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<div class="rule"></div>
+
+  <div class="okn"><b>Close on dive.</b> Do not put Close on the dive bar. Back returns to the map; Close lives on the map only. System Cmd-W still dismisses the window from any depth (same as Close). Escape is already cancel-recording / cancel-capture — not window close.</div>
+
+<section class="sec" id="arch">
+  <div class="h-kicker">Architecture</div>
+  <h2 class="h2">Two screens. One path slot.</h2>
+<pre class="spec"><span class="k">enum</span> <span class="t">Destination</span>: String, CaseIterable, Hashable {
+    <span class="k">case</span> beingHeard, trigger, cleanup, dictionary, engine
+    <span class="k">case</span> updates
+    <span class="k">var</span> isMaintenance: Bool { <span class="k">self</span> == .updates }
+    <span class="c">// number "01"..."05", nil for updates — see Destination+Copy.swift</span>
+}
+
+<span class="c">// path = [] map; path = [dest] dive. Contents assigns path = [dest] (replace).</span>
+<span class="c">// Back: path = []. Close: dismiss(). Never NavigationLink in contents.</span></pre>
+  <div class="warn"><b>Trap.</b> Contents as NavigationLink builds a deep stack. Buttons that assign <code>path</code> only.</div>
+</section>
+
+<div class="rule"></div>
+<section class="sec" id="backing">
+  <div class="h-kicker">Integration</div>
+  <h2 class="h2">One store. Compass is a window on it.</h2>
+  <p>Implement <code>CompassSettingsBacking</code> against the live app. Preview uses <code>InMemoryCompassStore</code>. See stubs in <code>Settings/Compass/</code>.</p>
+<pre class="spec"><span class="k">@MainActor</span>
+<span class="k">protocol</span> <span class="t">CompassSettingsBacking</span>: AnyObject {
+    <span class="k">var</span> launchAtLogin: Bool { <span class="k">get set</span> }
+    <span class="k">var</span> showInDock: Bool { <span class="k">get set</span> }
+    <span class="k">var</span> escapeCancels: Bool { <span class="k">get set</span> }
+    <span class="k">var</span> muteOtherAudio: Bool { <span class="k">get set</span> }
+    <span class="k">var</span> indicator: IndicatorPlacement { <span class="k">get set</span> }
+
+    <span class="k">var</span> microphones: [Microphone] { <span class="k">get</span> }
+    <span class="k">var</span> lastUsedID: String? { <span class="k">get set</span> }
+    <span class="k">var</span> microphonePermission: MicrophonePermission { <span class="k">get</span> }
+    <span class="k">func</span> moveMicrophone(from: IndexSet, to: Int)
+    <span class="k">func</span> refreshMicrophones()
+
+    <span class="k">var</span> activation: ActivationMode { <span class="k">get set</span> }
+    <span class="k">var</span> hotkey: KeyChord? { <span class="k">get set</span> }
+
+    <span class="k">var</span> cleanupEnabled: Bool { <span class="k">get set</span> }
+    <span class="k">var</span> removeFillers: Bool { <span class="k">get set</span> }
+    <span class="k">var</span> handleBacktracks: Bool { <span class="k">get set</span> }
+    <span class="k">var</span> formatLists: Bool { <span class="k">get set</span> }
+    <span class="k">var</span> normalizePunctuation: Bool { <span class="k">get set</span> }
+    <span class="k">var</span> grammarPass: GrammarPass { <span class="k">get set</span> }
+
+    <span class="k">var</span> rules: [ReplacementRule] { <span class="k">get set</span> }
+
+    <span class="k">var</span> modelFolder: URL { <span class="k">get</span> }
+    <span class="k">var</span> engine: EnginePresence { <span class="k">get</span> }
+    <span class="k">func</span> chooseModelFolder() <span class="k">async</span> -> URL?
+    <span class="k">func</span> rescanEngine()
+    <span class="k">var</span> installCommand: String { <span class="k">get</span> }
+
+    <span class="k">var</span> releaseURL: URL { <span class="k">get</span> }
+    <span class="k">var</span> onChange: AsyncStream&lt;Void&gt; { <span class="k">get</span> }
+}
+
+<span class="c">// Engine scan: call existing app ModelFolderScanner.scan(at:) — do not reimplement in UI.</span>
+<span class="c">// Version: Bundle.main short version string. releaseURL from app constant / Info.plist.</span>
+<span class="c">// WindowGroup(id: "compass"); open focuses; never stack two.</span>
+<span class="c">// Privacy line: @State on root, pass into Map and Dive bars; roll once on appear.</span>
+<span class="c">// Refresh mics + engine on appear and when window becomes key.</span>
+<span class="c">// Cmd-W → dismiss. Opening Settings does not cancel recording.</span>
+<span class="c">// launchAtLogin failure: leave toggle off; no error banner.</span></pre>
+</section>
+
+<div class="rule"></div>
+<section class="sec" id="types">
+  <div class="h-kicker">Types</div>
+  <h2 class="h2">Shapes that ship</h2>
+<pre class="spec"><span class="k">struct</span> <span class="t">KeyChord</span>: Hashable, Codable {
+    <span class="k">var</span> keyCode: UInt16
+    <span class="k">var</span> modifiersRaw: UInt  <span class="c">// NSEvent.ModifierFlags.rawValue</span>
+    <span class="k">var</span> side: KeySide
+    <span class="k">var</span> displayVerbose: String  <span class="c">// map title: "Right Command"</span>
+    <span class="k">var</span> displayCompact: String  <span class="c">// keycap / contents: "Right ⌘"</span>
+}
+<span class="k">enum</span> <span class="t">KeySide</span>: String, Codable { <span class="k">case</span> left, right, either }
+
+<span class="c">// Capture: click keycap → local keyDown monitor. Escape or second click cancels.</span>
+<span class="c">// Bare modifiers allowed. Reject unstable keys with dashed flash + "That key cannot be used." (800ms).</span>
+<span class="c">// No Clear button. No preset catalogue. System shortcut conflicts: accept silently.</span>
+
+<span class="k">enum</span> <span class="t">ActivationMode</span>: String, CaseIterable, Codable {
+    <span class="k">case</span> holdOrToggle, toggle, hold, doubleTap
+    <span class="k">var</span> mapDescription: String {
+        <span class="k">switch</span> <span class="k">self</span> {
+        <span class="k">case</span> .holdOrToggle: <span class="s">"Hold or toggle."</span>
+        <span class="k">case</span> .toggle: <span class="s">"Toggle."</span>
+        <span class="k">case</span> .hold: <span class="s">"Hold."</span>
+        <span class="k">case</span> .doubleTap: <span class="s">"Double tap."</span>
+        }
+    }
+}
+
+<span class="k">enum</span> <span class="t">EnginePresence</span>: Equatable {
+    <span class="k">case</span> verified(ModelInfo)
+    <span class="k">case</span> missing
+    <span class="k">case</span> incomplete
+}
+
+<span class="k">enum</span> <span class="t">DictionaryEditorPhase</span>: Equatable {
+    <span class="k">case</span> browsing, adding, editing(UUID), confirmingDelete(UUID)
+}
+<span class="c">// One non-browsing phase. Back/nav discards draft. Trim on save; max 128 scalars/side; strip newlines.</span>
+<span class="c">// smartCovers: PORT live app function. Literal: one pair. No uniqueness check. Order = insertion order.</span>
+<span class="c">// Save labels: adding "Save replacement"; editing "Save". Disabled primary opacity 0.42 when invalid.</span>
+
+<span class="c">// Attention: engine (missing|incomplete) > no mic (denied OR no connected) > key nil > empty rules</span>
+<span class="c">// spanning = attention ?? .engine</span>
+<span class="c">// empty dict: spanning dictionary, hero .ready, needCTA nil</span>
+<span class="c">// Mic IN USE = first connected in ordered list — NOT row zero blindly (live HTML bug).</span>
+<span class="c">// LAST USED = lastUsedID still listed. Permission denied → attention beingHeard (D.1d).</span>
+<span class="c">// normalizePunctuation property name (American). Map cleanup title uses "N rules, light|full" or "Off".</span></pre>
+</section>
+
+<div class="rule"></div>
+<section class="sec" id="copy">
+  <div class="h-kicker">Copy</div>
+  <h2 class="h2">Italics, engine matrix, hotkey surfaces</h2>
+  <table class="t">
+    <thead><tr><th>Slot</th><th>Full string</th><th>Italic</th></tr></thead>
+    <tbody>
+      <tr><td>Hero ready</td><td>Everything is ready.</td><td>ready.</td></tr>
+      <tr><td>Hero engine</td><td>The engine needs a model.</td><td>model.</td></tr>
+      <tr><td>Hero mic</td><td>Nothing is listening.</td><td>listening.</td></tr>
+      <tr><td>Hero key</td><td>No key is set.</td><td>set.</td></tr>
+      <tr><td>Being heard</td><td>How Kalam hears you.</td><td>hears you.</td></tr>
+      <tr><td>Trigger</td><td>One key, two ways to press it.</td><td>two ways to press it.</td></tr>
+      <tr><td>Cleanup</td><td>Messy in, clean out.</td><td>Clean out.</td></tr>
+      <tr><td>Dictionary</td><td>Teach Kalam the words it keeps getting wrong.</td><td>it keeps getting wrong.</td></tr>
+      <tr><td>Engine</td><td>The engine lives on your disk.</td><td>lives on your disk.</td></tr>
+    </tbody>
+  </table>
+  <p>Map card titles use <code>displayVerbose</code> (“Right Command”). Keycap and contents use <code>displayCompact</code> (“Right ⌘”). Behavior card kicker and row copy use <b>behavior</b> (American). Cleanup rule: <b>Normalize punctuation and spacing</b>.</p>
+  <h3>Engine presence matrix</h3>
+  <table class="t">
+    <thead><tr><th>Surface</th><th>verified</th><th>missing</th><th>incomplete</th></tr></thead>
+    <tbody>
+      <tr><td>Map title</td><td>ModelInfo.name</td><td>No model found</td><td>Incomplete</td></tr>
+      <tr><td>Map state</td><td>Verified</td><td>Missing</td><td>Incomplete</td></tr>
+      <tr><td>Map desc large</td><td>—</td><td>Put the five Parakeet files in ~/Kalam/models/ and Kalam will load them from disk.</td><td>This folder has part of a model; add the rest of the Parakeet files so Kalam can load it from disk.</td></tr>
+      <tr><td>Dive lede</td><td>You supply the model…</td><td>No model in this folder…</td><td>This folder is not a full model yet…</td></tr>
+      <tr><td>Active title</td><td>name</td><td>No model found</td><td>Incomplete</td></tr>
+      <tr><td>Active detail</td><td>detail</td><td>The folder is empty, or no model is installed.</td><td>The folder does not have a full model yet.</td></tr>
+    </tbody>
+  </table>
+  <p>Incomplete and missing share dive chrome; hero string for both attention cases remains “The engine needs a model.” See mockups M.3 / M.8 / D.5b / D.5c.</p>
+  <h3>Cleanup wells</h3>
+  <ul>
+    <li>Only filler + format lists. Only when master on and that rule on.</li>
+    <li>No wells for backtracks or normalize punctuation (engine still implements them).</li>
+  </ul>
+</section>
+
+<div class="rule"></div>
+<section class="sec" id="tokens">
+  <div class="h-kicker">Tokens</div>
+  <h2 class="h2">Numbers</h2>
+  <p>Production surface set: <b>Fog card</b> — paper <code>#F3F3EF</code>, panel/control <code>#FCFBF9</code>, well <code>#EFEEEB</code>. Palette lab is archive only.</p>
+<pre class="spec"><span class="c">// Colors: kPaper F7F6F2, kPanel FBFAF7, kInk 1F1D17, kInk2 5B564A, kInk3 8F8878,</span>
+<span class="c">// kHair E3E0D8, kHair2 EBE8E1, kGreen 1A5C3A, kGreenD 0F3C24, kOff D8D5CC</span>
+<span class="c">// Always light. Ignore colorScheme. No Color.accentColor.</span>
+<span class="c">// Attention hairline: kGreen @ 0.42. Fill span-2: normal hair, title 19pt not 22.</span>
+<span class="c">// Toggle 40×23 knob 18 travel 17. Hover lift -2, shadow r26 y10, ease (0.22,1,0.36,1) 0.3s</span>
+<span class="c">// Dim cards 0.48. Disabled primary 0.42. Reject flash 800ms.</span>
+<span class="c">// Fixed Dynamic Type. Window 980×660. Contents 248. Bar 46.</span>
+<span class="c">// Full CompassLayout / CompassType in CompassTokens.swift stub.</span></pre>
+</section>
+
+<div class="rule"></div>
+
+<div class="rule"></div>
+
+<div class="rule"></div>
+<section class="sec" id="type">
+  <div class="h-kicker">Typography · locked</div>
+  <h2 class="h2">Foolproof type ramp</h2>
+  <p>
+    Implementers must use <code>CompassType.style…</code> and <code>CompassFont.variable</code> from
+    <code>CompassTokens.swift</code>. Do not invent sizes, do not use
+    <code>.font(.title)</code> / <code>.headline</code> / <code>.body</code>, and do not use
+    <code>Font.Weight.bold</code> (700) for card headers.
+  </p>
+  <div class="warn"><b>Screenshot failure mode.</b> If dive titles look heavier or larger than the HTML mock, you used 32pt or .bold/.semibold where the mock uses 30pt regular serif. If card labels (BEHAVIOR) look like black stamps, you used .bold (700) instead of weight <b>640</b>.</div>
+
+  <h3>Families (system only)</h3>
+  <table class="t">
+    <thead><tr><th>Role</th><th>Swift</th><th>Renders as</th><th>Use for</th></tr></thead>
+    <tbody>
+      <tr><td>Serif</td><td><code>CompassFont.display</code> / <code>.variable(.serif,…)</code></td><td>New York</td><td>Map hero, dive display, map-card titles, Updates figure, model name</td></tr>
+      <tr><td>Sans</td><td><code>CompassFont.body</code> / <code>.variable(.sans,…)</code></td><td>SF Pro Text</td><td>UI chrome, row titles, ledes, fields, buttons</td></tr>
+      <tr><td>Mono</td><td><code>CompassFont.mono</code> / <code>.variable(.mono,…)</code></td><td>SF Mono</td><td>Kickers, indices, states, ranks, tags, hotkey symbols, paths</td></tr>
+    </tbody>
+  </table>
+  <p><b>Banned:</b> Inter, Roboto, Helvetica, Geist, Clash, any bundled marketing font.</p>
+
+  <h3>Weights (CSS-like 100–900)</h3>
+  <table class="t">
+    <thead><tr><th>Token</th><th>Value</th><th>Where</th><th>Do not</th></tr></thead>
+    <tbody>
+      <tr><td><code>wRegular</code></td><td>400</td><td>Display serif, ledes, details, mic names, most body</td><td>Semibold mic names</td></tr>
+      <tr><td><code>wMedium</code></td><td>500</td><td>Dive kicker, back button, hotkey chip text, maint idle</td><td></td></tr>
+      <tr><td><code>wChapter</code></td><td>560</td><td>Contents nav titles; segment selected; need CTA</td><td>Round up to 600 everywhere</td></tr>
+      <tr><td><code>wSemibold</code></td><td>600</td><td>Bar wordmark, row titles, mode titles, map kicker, empty title</td><td></td></tr>
+      <tr><td><code>wCardHeader</code></td><td><b>640</b></td><td>BEHAVIOR / MICROPHONE PRIORITY labels only</td><td><b>Font.Weight.bold (700)</b></td></tr>
+      <tr><td><code>wBold</code></td><td>700</td><td>Not used in Compass product UI</td><td>Use for “emphasis”</td></tr>
+    </tbody>
+  </table>
+  <p>Non-standard weights require <code>CompassFont.variable(_:size:weight:)</code> (NSFontDescriptor). Rounding 640→bold will fail visual QA.</p>
+
+  <h3>Size + tracking table (must match mockup CSS)</h3>
+  <table class="t">
+    <thead><tr><th>Role</th><th>Family</th><th>Size</th><th>Weight</th><th>Tracking (pt)</th><th>Swift style</th></tr></thead>
+    <tbody>
+      <tr><td>Map hero</td><td>serif</td><td>32</td><td>400</td><td>−0.70</td><td><code>styleMapHero</code> + <code>trackMapHero</code></td></tr>
+      <tr><td>Dive display</td><td>serif</td><td><b>30</b></td><td>400</td><td>−0.66</td><td><code>styleDiveDisplay</code> + <code>trackDiveDisplay</code></td></tr>
+      <tr><td>Map card title</td><td>serif</td><td>19</td><td>400</td><td>−0.23</td><td><code>styleMapCardTitle</code></td></tr>
+      <tr><td>Map card title large</td><td>serif</td><td>22</td><td>400</td><td>−0.23</td><td><code>styleMapCardTitleLarge</code></td></tr>
+      <tr><td>Map foot title</td><td>serif</td><td>15</td><td>400</td><td>−0.15</td><td><code>styleMapFootTitle</code></td></tr>
+      <tr><td>Model name</td><td>serif</td><td>20</td><td>400</td><td>−0.20</td><td><code>styleModelName</code></td></tr>
+      <tr><td>Updates figure</td><td>serif</td><td>44</td><td>400</td><td>−1.32</td><td><code>styleUpdatesFigure</code></td></tr>
+      <tr><td>Map kicker THE MAP</td><td>mono</td><td>11</td><td>600</td><td>+2.86</td><td><code>styleMapKicker</code> + uppercase</td></tr>
+      <tr><td>Dive kicker</td><td>mono</td><td>9.5</td><td>500</td><td>+2.28</td><td><code>styleDiveKicker</code> + uppercase</td></tr>
+      <tr><td>Card header label</td><td>sans</td><td>11</td><td><b>640</b></td><td>+0.55</td><td><code>styleCardHeaderLabel</code> + uppercase</td></tr>
+      <tr><td>Card header state</td><td>mono</td><td>9.5</td><td>400</td><td>+1.14</td><td><code>styleCardHeaderState</code> + uppercase</td></tr>
+      <tr><td>Privacy pill</td><td>mono</td><td>9.5</td><td>400</td><td>+0.95</td><td><code>stylePrivacy</code> + uppercase</td></tr>
+      <tr><td>Bar wordmark Kalam</td><td>sans</td><td>12</td><td>600</td><td>−0.10</td><td><code>styleBarWordmark</code></td></tr>
+      <tr><td>Lede / body copy</td><td>sans</td><td>13.5</td><td>400</td><td>0</td><td><code>styleLede</code></td></tr>
+      <tr><td>Need CTA</td><td>sans</td><td>14</td><td>560</td><td>0</td><td><code>styleNeedCTA</code></td></tr>
+      <tr><td>Row title</td><td>sans</td><td>13.5</td><td>600</td><td>−0.07</td><td><code>styleRowTitle</code></td></tr>
+      <tr><td>Row detail</td><td>sans</td><td>11.5</td><td>400</td><td>0</td><td><code>styleRowDetail</code></td></tr>
+      <tr><td>Mic device name</td><td>sans</td><td>13.5</td><td><b>400</b></td><td>−0.07</td><td><code>styleMicName</code> (not semibold)</td></tr>
+      <tr><td>Mic rank 1…n</td><td>mono</td><td>11</td><td>400</td><td>+0.04em</td><td><code>styleMicRank</code></td></tr>
+      <tr><td>Contents title</td><td>sans</td><td>13</td><td>560 (maint idle 500 / on 600)</td><td>−0.07</td><td><code>styleContentsTitle(selected:maintenance:)</code></td></tr>
+      <tr><td>Contents index</td><td>mono</td><td>10</td><td>400</td><td>0</td><td><code>styleContentsIndex</code> · 18×18 line box with title</td></tr>
+      <tr><td>Contents state</td><td>mono</td><td>10</td><td>400</td><td>0</td><td><code>styleContentsState</code> · no forced uppercase</td></tr>
+      <tr><td>Map card kicker</td><td>mono</td><td>9.5</td><td>400</td><td>+1.52</td><td><code>styleMapCardKicker</code> + uppercase</td></tr>
+      <tr><td>Map card body</td><td>sans</td><td>12</td><td>400</td><td>0</td><td>body(12)</td></tr>
+      <tr><td>Open →</td><td>sans</td><td>12</td><td>400</td><td>0</td><td>opacity 0.62 default / 0.92 hover</td></tr>
+      <tr><td>IN USE / OFFLINE</td><td>mono</td><td>10</td><td>400</td><td>+0.80</td><td><code>styleStatusTag</code></td></tr>
+      <tr><td>Dict field input</td><td>sans</td><td>13.5</td><td>400</td><td>0</td><td><code>styleDictField</code> · never mono</td></tr>
+      <tr><td>Dict spoken list</td><td>mono</td><td>13</td><td>400</td><td>0</td><td><code>styleDictSpoken</code></td></tr>
+      <tr><td>Dict typed list</td><td>sans</td><td>13.5</td><td>400</td><td>0</td><td><code>styleDictTyped</code></td></tr>
+      <tr><td>Hotkey chip “Not specified”</td><td>sans</td><td>12.5</td><td>500</td><td>−0.01em</td><td><code>styleHotkeyChipText</code></td></tr>
+      <tr><td>Hotkey symbols</td><td>mono</td><td>12.5</td><td>500</td><td>+0.02em</td><td><code>styleHotkeySymbol</code></td></tr>
+      <tr><td>Segment idle / on</td><td>sans</td><td>12</td><td>400 / 560</td><td>0</td><td><code>styleSegment</code> / <code>styleSegmentOn</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>Italic ranges (serif display only)</h3>
+  <p>Italic is the trailing emphasis in ink2. Rest is regular ink. See copy deck italic table. Apply with <code>Font.italic()</code> on the emphasized <code>Text</code> run only — do not italicize the whole line.</p>
+
+  <h3>Acceptance (type QA)</h3>
+  <ul>
+    <li>Dive title is 30pt serif regular, not 32, not semibold.</li>
+    <li>Card headers are weight 640 tracked uppercase SF Pro — not bold black stamps.</li>
+    <li>Mic names are regular 13.5 — not semibold.</li>
+    <li>Contents titles are 560 (not 600) when selected for journey items.</li>
+    <li>No pure-white fields; no system blue focus; no Dynamic Type scaling of this window.</li>
+    <li>Side-by-side screenshot vs <code>compass-mockups.html</code> Fog card at 100% zoom must match optical weight.</li>
+  </ul>
+  <div class="okn"><b>Single source in code.</b> All of the above lives in <code>CompassTokens.swift</code> as <code>CompassType</code> + <code>CompassFont</code>. Views only reference named styles. If a view needs a new size, add a named role to <code>CompassType</code> first — do not inline magic numbers.</div>
+</section>
+
+<section class="sec" id="hotkey">
+  <div class="h-kicker">Hotkey</div>
+  <h2 class="h2">Presets first. Record if needed.</h2>
+  <p>
+    Match the live app catalogue. The chip opens a menu — not a blank capture field on first click.
+    <b>Record shortcut…</b> is the last item and enters capture (D.2c).
+  </p>
+  <table class="t">
+    <thead><tr><th>Preset id</th><th>Chip / menu label</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>none</code></td><td>Not specified</td><td><code>hotkey == nil</code>. Map title “No key”. Contents “Unset”.</td></tr>
+      <tr><td><code>rightCmd</code></td><td>Right ⌘</td><td>Physical right Command</td></tr>
+      <tr><td><code>rightOpt</code></td><td>Right ⌥</td><td>Physical right Option</td></tr>
+      <tr><td><code>rightShift</code></td><td>Right ⇧</td><td>Physical right Shift</td></tr>
+      <tr><td><code>rightCtrl</code></td><td>Right ⌃</td><td>Physical right Control</td></tr>
+      <tr><td><code>optCmd</code></td><td>⌥ + ⌘</td><td>Combo</td></tr>
+      <tr><td><code>ctrlCmd</code></td><td>⌃ + ⌘</td><td>Combo</td></tr>
+      <tr><td><code>ctrlOpt</code></td><td>⌃ + ⌥</td><td>Combo</td></tr>
+      <tr><td><code>shiftCmd</code></td><td>⇧ + ⌘</td><td>Combo</td></tr>
+      <tr><td><code>optShift</code></td><td>⌥ + ⇧</td><td>Combo</td></tr>
+      <tr><td><code>ctrlShift</code></td><td>⌃ + ⇧</td><td>Combo</td></tr>
+      <tr><td><code>fn</code></td><td>Fn</td><td>If platform delivers stable keyDown; else reject flash</td></tr>
+      <tr><td><code>record</code></td><td>Record shortcut…</td><td>Not stored. Enters capture. Separator above this row.</td></tr>
+    </tbody>
+  </table>
+  <p>
+    Menu footnote (quiet): “Right-side presets need the physical right key.”
+    Custom chords from record still use <code>KeyChord</code> (code + modifiers + side + display strings).
+    Map card title uses verbose form (“Right Command”); chip/menu/contents use compact symbols (“Right ⌘”) or “Right Cmd” in narrow mono if needed.
+  </p>
+  <div class="okn"><b>Do not.</b> Ship capture-only without the preset list. Do not keep a separate Activation <em>dropdown</em> — modes are the radio list only. Do not use system blue menu styling; paper menu + green selection.</div>
+</section>
+
+<section class="sec" id="controls">
+  <div class="h-kicker">Controls</div>
+  <h2 class="h2">Behavior contracts</h2>
+  <ul>
+    <li><b>PaperToggle</b> — custom shape; a11y button On/Off; reduce-motion snaps.</li>
+    <li><b>PaperSegment</b> — no trough; idle ink3; selected paper chip + hair. Grammar + Smart/Literal.</li>
+    <li><b>KeyCapture</b> — local monitor only while capturing; onDisappear removes; no global monitor.</li>
+    <li><b>Indicator Menu (D.1e)</b> — <code>Menu</code> labeled by chip OR overlay parented to chip only. Three text rows + checkmark. <b>Never toggles in the menu. Never window-absolute overlay over Behavior column.</b> No Off/bottoms.</li>
+    <li><b>Map hover</b> — cards + Updates foot only; reduce-motion no lift.</li>
+    <li><b>Mic priority</b> — numbered rank + up/down step buttons (no drag handles, no live drag preview). First connected = IN USE.</li>
+    <li><b>Navigation</b> — default stack push/pop Map↔Dive; contents replace path length 1.</li>
+    <li><b>Focus ring</b> — 3pt kGreen @ 8%; not system blue.</li>
+  </ul>
+</section>
+
+<div class="rule"></div>
+<section class="sec" id="live">
+  <div class="h-kicker">Live settings HTML</div>
+  <h2 class="h2">Port / drop / migrate</h2>
+  <table class="t">
+    <thead><tr><th>Live</th><th>Fate</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td>Tabs + traffic lights + setup note</td><td><span class="audit-drop">DROP</span></td><td>Map/dive IA</td></tr>
+      <tr><td>Four behavior toggles</td><td><span class="audit-keep">KEEP</span></td><td>American labels</td></tr>
+      <tr><td>Indicator 6 pos + Off</td><td><span class="audit-drop">DROP extras</span></td><td>Coerce bottom/Off → topCenter on read</td></tr>
+      <tr><td>Mic numbers + right grip + Active=row0</td><td><span class="audit-drop">DROP</span></td><td>Left grip; IN USE = first connected</td></tr>
+      <tr><td>Hotkey preset menu + mode dropdown</td><td><span class="audit-drop">DROP</span></td><td>Capture + radios</td></tr>
+      <tr><td>Cleanup checkboxes + always examples</td><td><span class="audit-open">RESHAPE</span></td><td>Toggles; wells only filler+lists when on</td></tr>
+      <tr><td>HF download / multi-model / Finder / Clear</td><td><span class="audit-drop">DROP</span></td><td>Engine simplified</td></tr>
+      <tr><td>Dictionary click-row + alert validate</td><td><span class="audit-drop">DROP</span></td><td>Pencil/trash; disabled Save</td></tr>
+      <tr><td>Dictionary delete</td><td><span class="audit-open">ADD</span></td><td>Live had none; Compass requires D.4g</td></tr>
+      <tr><td>Updates open URL</td><td><span class="audit-keep">KEEP</span></td><td>NSWorkspace only</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<div class="rule"></div>
+<section class="sec" id="swiftui">
+  <div class="h-kicker">SwiftUI</div>
+  <h2 class="h2">Files and bans</h2>
+<pre class="spec">Settings/Compass/
+  CompassWindow.swift
+  CompassTokens.swift
+  CompassSettingsBacking.swift
+  InMemoryCompassStore.swift
+  SettingsModel.swift
+  Destination.swift
+  MapView.swift
+  DiveView.swift
+  ContentsNav.swift
+  Panes/BeingHeardPane.swift
+  Panes/TriggerPane.swift
+  Panes/CleanupPane.swift
+  Panes/DictionaryPane.swift
+  Panes/EnginePane.swift
+  Panes/UpdatesPane.swift
+  Controls/PaperToggle.swift
+  Controls/PaperSegment.swift
+  Controls/KeyCapture.swift
+  Controls/MapCard.swift
+  Controls/PrivacyPill.swift</pre>
+  <table class="t">
+    <thead><tr><th>Do not use</th><th>Use</th></tr></thead>
+    <tbody>
+      <tr><td>Form, List insetGrouped</td><td>VStack paper cards + ScrollView</td></tr>
+      <tr><td>Picker(.segmented)</td><td>PaperSegment</td></tr>
+      <tr><td>System Toggle tint</td><td>PaperToggle</td></tr>
+      <tr><td>NavigationLink in contents</td><td>Button { path = [dest] }</td></tr>
+      <tr><td>NavigationSplitView for map</td><td>Stack root map</td></tr>
+      <tr><td>Color.accentColor / blue</td><td>kGreen only</td></tr>
+      <tr><td>Dark mode</td><td>preferredColorScheme(.light)</td></tr>
+    </tbody>
+  </table>
+  <div class="warn"><b>smartCovers.</b> Port live app verbatim. Do not ship a simplified pluralizer from old prose.</div>
+</section>
+
+<div class="rule"></div>
+<section class="sec" id="a11y">
+  <div class="h-kicker">Accessibility</div>
+  <h2 class="h2">Text carries state</h2>
+  <ul>
+    <li>Close “Close”; Back “Back to overview”.</li>
+    <li>Map card “{dest}, {state}, {title}”; Open → decorative hidden.</li>
+    <li>State dots ignored by VoiceOver.</li>
+    <li>Privacy not a live region.</li>
+    <li>Fixed Dynamic Type.</li>
+    <li>Reduce motion: no map hover lift; toggle snaps.</li>
+  </ul>
+</section>
+
+<div class="rule"></div>
+<section class="sec" id="plan">
+  <div class="h-kicker">Build plan</div>
+  <h2 class="h2">Order</h2>
+  <ol>
+    <li>Read mockups index once (all frames).</li>
+    <li>Wire <code>CompassSettingsBacking</code> to live store; keep InMemory for previews.</li>
+    <li>Window shell 980×660 plain drag dismiss Cmd-W privacy once.</li>
+    <li>SettingsModel derived attention/spanning/hero + fixtures.</li>
+    <li>MapView all map states including M.8.</li>
+    <li>Nav path 0/1 + Dive chrome + ContentsNav.</li>
+    <li>Panes: BeingHeard (empty/permission/menu), Trigger (capture/reject), Cleanup (wells), Dictionary (phase machine), Engine (missing/incomplete), Updates.</li>
+    <li>Live refresh + first-rule map flip.</li>
+    <li>A11y labels.</li>
+    <li>Stop — no dark mode, network, file checklist, preset hotkey menu, bulk import.</li>
+  </ol>
+</section>
+
+<div class="rule"></div>
+<section class="sec" id="accept">
+  <div class="h-kicker">Acceptance</div>
+  <h2 class="h2">Done when</h2>
+  <ul>
+    <li>M.1 → Dictionary → add rule → Back shows M.2; privacy line stable within session.</li>
+    <li>Incomplete → M.8 + D.5c strings (not missing).</li>
+    <li>D.1c / D.1d correct empty vs permission.</li>
+    <li>D.1e menu anchored to chip; no toggles; no overlay on Behavior switches.</li>
+    <li>Cleanup master off dims rules; values preserved.</li>
+    <li>Updates never URLSession.</li>
+    <li>No Compass-* UserDefaults keys.</li>
+    <li>UI strings American English.</li>
+    <li>Dictionary delete works; mic IN USE is first connected.</li>
+  </ul>
+  <div class="warn"><b>If lost.</b> Mockups for pixels. This file for law. Swift stubs for names. Do not invent a third root screen.</div>
+</section>
+
+<section class="foot-page">
+  Compass implementation contract · en-US · pair with compass-mockups.html and Settings/Compass stubs.
+</section>
+</div>
+</body>
+</html>

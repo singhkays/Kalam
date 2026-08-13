@@ -1,4 +1,3 @@
-import KalamTextEngine
 import SwiftUI
 
 struct DictionaryPane: View {
@@ -8,7 +7,6 @@ struct DictionaryPane: View {
     @State private var draftSpoken: String = ""
     @State private var draftTyped: String = ""
     @State private var draftMode: MatchMode = .smart
-    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -19,8 +17,8 @@ struct DictionaryPane: View {
                 .foregroundStyle(Color.kGreen)
 
             (
-                Text("Teach Kalam the words ").font(CompassType.styleDiveDisplay).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk)
-                    + Text("it keeps getting wrong.").font(CompassType.styleDiveDisplay.italic()).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk2)
+                Text("Teach Kalam the words ").font(CompassType.styleDiveDisplay).foregroundStyle(Color.kInk)
+                    + Text("it keeps getting wrong.").font(CompassType.styleDiveDisplay.italic()).foregroundStyle(Color.kInk2)
             )
             .padding(.top, 9)
 
@@ -47,9 +45,9 @@ struct DictionaryPane: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("No rules yet")
-                .font(CompassType.styleEmptyTitle)
+                .font(CompassFont.body(15).weight(.semibold))
             Text("Kalam types exactly what it heard.")
-                .font(CompassType.styleEmptyBody)
+                .font(CompassFont.body(13))
                 .foregroundStyle(Color.kInk2)
             Button {
                 beginAdd()
@@ -85,41 +83,19 @@ struct DictionaryPane: View {
             HStack(spacing: 12) {
                 HStack(spacing: 9) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 14))
                         .foregroundStyle(Color.kInk3)
                     TextField("Search rules…", text: $query)
                         .textFieldStyle(.plain)
                         .font(CompassFont.body(13))
-                        .focused($searchFocused)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .background(Color.kWell)
-                .overlay(
-                    // Recessed well per mockup `.dict-head .search` (well bg + inset top shade).
-                    RoundedRectangle(cornerRadius: CompassLayout.searchRadius)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.black.opacity(0.07), Color.clear],
-                                startPoint: .top, endPoint: .center
-                            )
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: CompassLayout.searchRadius))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: CompassLayout.searchRadius)
-                        .stroke(searchFocused ? Color.kGreen.opacity(0.4) : Color.kHair)
-                )
+                .overlay(RoundedRectangle(cornerRadius: CompassLayout.searchRadius).stroke(Color.kHair))
                 .cornerRadius(CompassLayout.searchRadius)
-                .overlay(
-                    // Focus ring: 3 pt halo @ 8% green (mockup `.search:focus-within`).
-                    RoundedRectangle(cornerRadius: CompassLayout.searchRadius + 3)
-                        .stroke(Color.kGreen.opacity(searchFocused ? 0.08 : 0), lineWidth: 6)
-                )
 
                 Text(countLabel)
                     .font(CompassFont.mono(10))
-                    .tracking(1.0)
                     .foregroundStyle(Color.kInk3)
 
                 if showPlus {
@@ -137,17 +113,6 @@ struct DictionaryPane: View {
             }
             .padding(13)
             .overlay(alignment: .bottom) { Divider().background(Color.kHair) }
-
-            if let notice = model.dictionaryLoadFailureNotice {
-                // K-20: corrupt-store recovery notice — quiet ink-3 line (no error chrome).
-                Text(notice)
-                    .font(CompassFont.mono(10))
-                    .foregroundStyle(Color.kInk3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 8)
-                    .overlay(alignment: .bottom) { Divider().background(Color.kHair) }
-            }
 
             if case .adding = phase {
                 form(isNew: true)
@@ -189,13 +154,13 @@ struct DictionaryPane: View {
     private func ruleRow(_ rule: ReplacementRule) -> some View {
         HStack(spacing: 10) {
             Text("“\(rule.spoken)”")
-                .font(CompassType.styleDictSpoken)
+                .font(CompassFont.mono(13))
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text("→")
                 .foregroundStyle(Color.kGreen)
                 .frame(width: 18)
             Text(rule.typed)
-                .font(CompassType.styleDictTyped)
+                .font(CompassFont.body(13.5))
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(rule.mode == .smart ? "Smart" : "Literal")
                 .font(CompassFont.mono(9))
@@ -297,32 +262,26 @@ struct DictionaryPane: View {
                     .font(CompassFont.mono(11))
                     .foregroundStyle(Color.kInk3)
 } else {
-    let pairs: [(String, String)] = {
-        if draftMode == .literal { return [(spoken, typed)] }
-        // K-30: port the live smart-cover logic verbatim (DictionaryEntry.exampleMatches)
-        // — do NOT keep the stub's simplified pluralizer.
-        let entry = DictionaryEntry(trigger: spoken, replacement: typed)
-        return entry.exampleMatches.compactMap { line -> (String, String)? in
-            guard let arrow = line.range(of: " → ") else { return (line, "") }
-            return (String(line[..<arrow.lowerBound]), String(line[arrow.upperBound...]))
-        }
-    }()
-    FlexibleChipRow(pairs: pairs)
-}
+                    let pairs: [(String, String)] = {
+                        if draftMode == .literal { return [(spoken, typed)] }
+                        // PORT live smartCovers() — placeholder only for stub compile:
+                        return LiveSmartCovers.port(spoken: spoken, typed: typed)
+                    }()
+                    FlexibleChipRow(pairs: pairs)
+                }
         }
     }
 
     private func field(_ label: String, text: Binding<String>, placeholder: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
-                .font(CompassType.styleDictLabel)
+                .font(CompassFont.mono(9))
                 .tracking(1.6)
                 .textCase(.uppercase)
                 .foregroundStyle(Color.kInk3)
             TextField(placeholder, text: text)
                 .textFieldStyle(.plain)
-                // D.4: real words type in SF Pro, not mono (only spoken tokens read as code).
-                .font(CompassType.styleDictField)
+                .font(CompassFont.body(13.5))
                 .padding(8)
                 .background(Color.kPanel)
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.kHair))
@@ -365,6 +324,25 @@ struct DictionaryPane: View {
             break
         }
         phase = .browsing
+    }
+}
+
+/// Stub: replace body with a call to the live app's smartCovers().
+enum LiveSmartCovers {
+    static func port(spoken: String, typed: String) -> [(String, String)] {
+        // TODO: call existing app function verbatim — do not keep this simplified copy in production.
+        var out: [(String, String)] = []
+        let pairs = [
+            (spoken, typed),
+            (spoken.lowercased(), typed.lowercased()),
+            (
+                spoken.prefix(1).uppercased() + spoken.dropFirst().lowercased(),
+                typed.prefix(1).uppercased() + typed.dropFirst().lowercased()
+            ),
+            (spoken.uppercased(), typed.uppercased()),
+        ]
+        out.append(contentsOf: pairs)
+        return out
     }
 }
 

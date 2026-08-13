@@ -5,8 +5,6 @@ struct ContentsNav: View {
     @Bindable var model: SettingsModel
     var onSelect: (Destination) -> Void
 
-    @State private var hoveringDest: Destination?
-
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(Destination.journey) { dest in
@@ -65,29 +63,16 @@ struct ContentsNav: View {
             }
             .padding(CompassLayout.contentsRowPad)
             .padding(.leading, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(rowBackground(on: on, for: dest))
+            .background(on ? Color.kGreenT : Color.clear)
             .overlay(
                 RoundedRectangle(cornerRadius: CompassLayout.contentsRowRadius)
                     .stroke(on ? Color.kGreen.opacity(0.22) : Color.clear)
             )
-            .contentShape(RoundedRectangle(cornerRadius: CompassLayout.contentsRowRadius))
             .cornerRadius(CompassLayout.contentsRowRadius)
             .opacity(maintenance && !on ? 0.8 : 1)
         }
         .buttonStyle(.plain)
-        .onHover { inside in
-            hoveringDest = inside ? dest : nil
-        }
-        .animation(.easeOut(duration: 0.15), value: hoveringDest)
         .accessibilityAddTraits(on ? .isSelected : [])
         .accessibilityLabel("\(dest.title), \(model.contentsState(for: dest))")
-    }
-
-    /// Mockup: `.chapter.on` = green-tint + hairline; `.chapter:hover:not(.on)` = 4% green tint.
-    private func rowBackground(on: Bool, for dest: Destination) -> Color {
-        if on { return Color.kGreenT }
-        if hoveringDest == dest { return Color.kGreen.opacity(0.04) }
-        return .clear
     }
 }

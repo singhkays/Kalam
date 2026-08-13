@@ -7,115 +7,95 @@ import Observation
 final class SettingsModel {
     private let store: any CompassSettingsBacking
 
-    /// Store-change revision counter (K-30 reactivity fix, plan §4.1).
-    /// Every computed property reads `revision`, so an external store change
-    /// (notification, dictionary edit, mic hot-plug) invalidates SwiftUI views.
-    /// Without this, @Observable never re-renders computed-only façades.
-    private(set) var revision = 0
-
-    @ObservationIgnored private var onChangeTask: Task<Void, Never>?
-
     init(store: any CompassSettingsBacking) {
         self.store = store
-        onChangeTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            for await _ in store.onChange {
-                self.revision += 1
-            }
-        }
-    }
-
-    deinit {
-        onChangeTask?.cancel()
     }
 
     // MARK: - Forwarded settings
 
     var launchAtLogin: Bool {
-        get { _ = revision; return store.launchAtLogin }
+        get { store.launchAtLogin }
         set { store.launchAtLogin = newValue }
     }
 
     var showInDock: Bool {
-        get { _ = revision; return store.showInDock }
+        get { store.showInDock }
         set { store.showInDock = newValue }
     }
 
     var escapeCancels: Bool {
-        get { _ = revision; return store.escapeCancels }
+        get { store.escapeCancels }
         set { store.escapeCancels = newValue }
     }
 
     var muteOtherAudio: Bool {
-        get { _ = revision; return store.muteOtherAudio }
+        get { store.muteOtherAudio }
         set { store.muteOtherAudio = newValue }
     }
 
     var indicator: IndicatorPlacement {
-        get { _ = revision; return store.indicator }
+        get { store.indicator }
         set { store.indicator = newValue }
     }
 
-    var microphones: [Microphone] { _ = revision; return store.microphones }
+    var microphones: [Microphone] { store.microphones }
 
     var lastUsedID: String? {
-        get { _ = revision; return store.lastUsedID }
+        get { store.lastUsedID }
         set { store.lastUsedID = newValue }
     }
 
-    var microphonePermission: MicrophonePermission { _ = revision; return store.microphonePermission }
+    var microphonePermission: MicrophonePermission { store.microphonePermission }
 
     var activation: ActivationMode {
-        get { _ = revision; return store.activation }
+        get { store.activation }
         set { store.activation = newValue }
     }
 
     var hotkey: KeyChord? {
-        get { _ = revision; return store.hotkey }
+        get { store.hotkey }
         set { store.hotkey = newValue }
     }
 
     var cleanupEnabled: Bool {
-        get { _ = revision; return store.cleanupEnabled }
+        get { store.cleanupEnabled }
         set { store.cleanupEnabled = newValue }
     }
 
     var removeFillers: Bool {
-        get { _ = revision; return store.removeFillers }
+        get { store.removeFillers }
         set { store.removeFillers = newValue }
     }
 
     var handleBacktracks: Bool {
-        get { _ = revision; return store.handleBacktracks }
+        get { store.handleBacktracks }
         set { store.handleBacktracks = newValue }
     }
 
     var formatLists: Bool {
-        get { _ = revision; return store.formatLists }
+        get { store.formatLists }
         set { store.formatLists = newValue }
     }
 
     var normalizePunctuation: Bool {
-        get { _ = revision; return store.normalizePunctuation }
+        get { store.normalizePunctuation }
         set { store.normalizePunctuation = newValue }
     }
 
     var grammarPass: GrammarPass {
-        get { _ = revision; return store.grammarPass }
+        get { store.grammarPass }
         set { store.grammarPass = newValue }
     }
 
     var rules: [ReplacementRule] {
-        get { _ = revision; return store.rules }
+        get { store.rules }
         set { store.rules = newValue }
     }
 
-    var dictionaryLoadFailureNotice: String? { _ = revision; return store.dictionaryLoadFailureNotice }
-
-    var modelFolder: URL { _ = revision; return store.modelFolder }
-    var engine: EnginePresence { _ = revision; return store.engine }
-    var installCommand: String { _ = revision; return store.installCommand }
-    var releaseURL: URL { _ = revision; return store.releaseURL }
+    var modelFolder: URL { store.modelFolder }
+    var engine: EnginePresence { store.engine }
+    var installCommand: String { store.installCommand }
+    var releaseURL: URL { store.releaseURL }
 
     var versionString: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0"
@@ -146,7 +126,7 @@ final class SettingsModel {
         store.moveMicrophone(from: source, to: destination)
     }
 
-    /// Step priority without drag previews (preferred UX — D.1 rank + up/down).
+    /// Step priority without drag previews (preferred UX).
     func moveMicrophoneUp(id: String) {
         guard let i = microphones.firstIndex(where: { $0.id == id }), i > 0 else { return }
         store.moveMicrophone(from: IndexSet(integer: i), to: i - 1)

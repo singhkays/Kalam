@@ -12,8 +12,8 @@ struct CleanupPane: View {
                 .foregroundStyle(Color.kGreen)
 
             (
-                Text("Messy in, ").font(CompassType.styleDiveDisplay).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk)
-                    + Text("Clean out.").font(CompassType.styleDiveDisplay.italic()).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk2)
+                Text("Messy in, ").font(CompassType.styleDiveDisplay).foregroundStyle(Color.kInk)
+                    + Text("Clean out.").font(CompassType.styleDiveDisplay.italic()).foregroundStyle(Color.kInk2)
             )
             .padding(.top, 9)
 
@@ -69,7 +69,7 @@ struct CleanupPane: View {
                 if model.cleanupEnabled && model.formatLists {
                     sampleWell(
                         messy: "one buy milk, two call Sam",
-                        strike: "two call Sam",
+                        strike: nil,
                         clean: "1. Buy milk / 2. Call Sam"
                     )
                 }
@@ -150,12 +150,12 @@ struct CleanupPane: View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Messy input")
-                    .font(CompassType.styleSampleWellLabel)
-                    .compassTracking(CompassType.trackSampleWellLabel)
+                    .font(CompassFont.mono(8.5))
+                    .tracking(1.8)
                     .textCase(.uppercase)
                     .foregroundStyle(Color.kInk3)
-                messyText(messy, strike: strike)
-                    .font(CompassFont.body(CompassType.sampleWellBody))
+                Text(messy)
+                    .font(CompassFont.body(11.5))
                     .foregroundStyle(Color.kInk2)
             }
             .padding(11)
@@ -163,12 +163,12 @@ struct CleanupPane: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Clean output")
-                    .font(CompassType.styleSampleWellLabel)
-                    .compassTracking(CompassType.trackSampleWellLabel)
+                    .font(CompassFont.mono(8.5))
+                    .tracking(1.8)
                     .textCase(.uppercase)
                     .foregroundStyle(Color.kInk3)
                 Text(clean)
-                    .font(CompassFont.body(CompassType.sampleWellBody))
+                    .font(CompassFont.body(11.5))
                     .foregroundStyle(Color.kInk)
             }
             .padding(11)
@@ -184,18 +184,5 @@ struct CleanupPane: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 14)
         .shadow(color: .black.opacity(0.04), radius: 1, y: 1)
-    }
-
-    /// Mockup `.ba p s`: struck span renders ink3 with a 2pt line at 45% ink.
-    private func messyText(_ messy: String, strike: String?) -> Text {
-        guard let strike, let range = messy.range(of: strike) else { return Text(messy) }
-        let pre = String(messy[..<range.lowerBound])
-        let mid = String(messy[range])
-        let post = String(messy[range.upperBound...])
-        return Text(pre)
-            + Text(mid)
-                .strikethrough(true, color: Color.kInk.opacity(0.45))
-                .foregroundStyle(Color.kInk3)
-            + Text(post)
     }
 }

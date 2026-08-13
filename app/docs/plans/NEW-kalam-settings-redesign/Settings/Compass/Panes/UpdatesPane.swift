@@ -14,7 +14,7 @@ struct UpdatesPane: View {
 
             HStack(alignment: .firstTextBaseline, spacing: 18) {
                 Text(model.versionString)
-                    .font(CompassType.styleUpdatesFigure).compassTracking(CompassType.trackUpdatesFigure)
+                    .font(CompassFont.display(CompassType.updatesFigure))
                     .foregroundStyle(Color.kInk)
                 Text("Universal build for Apple silicon and Intel.")
                     .font(CompassFont.body(13))

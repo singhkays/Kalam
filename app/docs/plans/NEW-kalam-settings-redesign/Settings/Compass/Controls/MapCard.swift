@@ -59,7 +59,7 @@ struct MapCard: View {
                 Spacer(minLength: 12)
 
                 Text("Open →")
-                    .font(CompassFont.body(CompassType.mapOpenHint))
+                    .font(CompassFont.body(CompassType.mapOpenHint, weight: CompassType.wRegular))
                     .foregroundStyle(Color.kGreen.opacity(hovering ? 0.92 : 0.62))
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)

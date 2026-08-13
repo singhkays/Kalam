@@ -173,7 +173,6 @@ enum CompassType {
     static let whyBody: CGFloat = 12.5
     static let sampleWellLabel: CGFloat = 8.5
     static let sampleWellBody: CGFloat = 11.5
-    static let trackSampleWellLabel: CGFloat = 1.53 // 0.18em * 8.5
     static let emptyTitle: CGFloat = 15
     static let emptyBody: CGFloat = 13
 
@@ -270,14 +269,6 @@ enum CompassType {
 }
 
 // MARK: - Tracking helper
-
-extension Text {
-    /// Apply a Compass tracking value (points). Text-preserving overload so
-    /// `Text + Text` concatenation keeps working after `.compassTracking`.
-    func compassTracking(_ points: CGFloat) -> Text {
-        tracking(points)
-    }
-}
 
 extension View {
     /// Apply a Compass tracking value (points).

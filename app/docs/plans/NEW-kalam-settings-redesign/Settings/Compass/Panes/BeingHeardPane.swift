@@ -18,8 +18,8 @@ struct BeingHeardPane: View {
                 .foregroundStyle(Color.kGreen)
 
             (
-                Text("How Kalam ").font(CompassType.styleDiveDisplay).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk)
-                    + Text("hears you.").font(CompassType.styleDiveDisplay.italic()).compassTracking(CompassType.trackDiveDisplay).foregroundStyle(Color.kInk2)
+                Text("How Kalam ").font(CompassType.styleDiveDisplay).foregroundStyle(Color.kInk)
+                    + Text("hears you.").font(CompassType.styleDiveDisplay.italic()).foregroundStyle(Color.kInk2)
             )
             .padding(.top, 9)
 
@@ -69,9 +69,9 @@ struct BeingHeardPane: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Recording indicator")
                     .font(CompassType.styleRowTitle)
-                    .compassTracking(CompassType.trackRowTitle)
+                        .compassTracking(CompassType.trackRowTitle)
                 Text("Where the listening pill appears.")
-                    .font(CompassType.styleRowDetail)
+                    .font(CompassFont.body(CompassType.rowDetail))
                     .foregroundStyle(Color.kInk2)
             }
             Spacer()
@@ -213,7 +213,8 @@ struct BeingHeardPane: View {
     private func toggleRow(_ title: String, _ detail: String, _ binding: Binding<Bool>) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(CompassType.styleRowTitle).compassTracking(CompassType.trackRowTitle)
+                Text(title).font(CompassType.styleRowTitle)
+                        .compassTracking(CompassType.trackRowTitle)
                 Text(detail).font(CompassType.styleRowDetail).foregroundStyle(Color.kInk2)
             }
             Spacer()
@@ -233,8 +234,8 @@ struct BeingHeardPane: View {
             Spacer()
             if let trailing {
                 Text(trailing)
-                    .font(CompassFont.mono(9.5))
-                    .tracking(1.2)
+                    .font(CompassType.styleCardHeaderState)
+                    .compassTracking(CompassType.trackMonoState)
                     .textCase(.uppercase)
                     .foregroundStyle(trailingDim ? Color.kInk3 : Color.kGreen)
             }
@@ -243,8 +244,16 @@ struct BeingHeardPane: View {
     }
 
     private func openMicrophonePrivacySettings() {
-        // Live helper with legacy + modern deep links (never requestAccess from this button).
-        SystemSettingsNavigator.open(.microphone)
+        let urls = [
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Microphone",
+        ]
+        for s in urls {
+            if let u = URL(string: s) {
+                NSWorkspace.shared.open(u)
+                return
+            }
+        }
     }
 }
 
@@ -277,3 +286,4 @@ struct MicStepButtonStyle: ButtonStyle {
             .opacity(configuration.isPressed && isEnabled ? 0.85 : 1)
     }
 }
+
