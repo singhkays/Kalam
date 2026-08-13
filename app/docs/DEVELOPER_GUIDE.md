@@ -70,12 +70,14 @@ Core files:
   - Permission handling (Microphone, Accessibility)
   - Model download and selection logic
 - `PTTHotkeyConfiguration.swift`
-  - Activation mode and key-combination modeling
+  - Activation mode and key-combination modeling (incl. K-30 custom captured chords under `pttHotkey.custom*`)
   - UserDefaults load/save and normalization
-- `SettingsUI.swift`
-  - Settings window shell (`SettingsView`): tab state, sidebar, config load/save orchestration
-- `Kalam/Settings/`
-  - Per-tab views: `GeneralSettingsTab` / `ShortcutSettingsTab` (hotkey + recorder sheet) / `CleanupSettingsTab` (refine + grammar) / `ModelsSettingsTab` / `UpdatesSettingsTab` / `WordReplacementView` (+ `EditableRow`); shared `SettingsSharedComponents.swift` (card surface, settings notification)
+- `Settings/Compass/` (K-30, 2026-08-13 — replaces the old tabbed settings UI)
+  - `CompassWindow.swift` — `CompassRoot` (map/dive `NavigationStack`, path 0 or 1) + `CompassWindow` (borderless 980×660 NSWindow subclass, injected `onClose`, Cmd-W local monitor)
+  - `LiveCompassBacking.swift` — the ONLY live-store access: Compass protocol over `GeneralSettingsConfiguration` / `MicrophonePriorityConfiguration` / `PTTHotkeyConfiguration` / `ModelsConfiguration.textCleanup` / `CustomDictionaryManager`; `onChange` stream drives `SettingsModel`'s revision counter
+  - `SettingsModel.swift` — `@Observable` façade; attention priority (engine > mic > key > empty dictionary), spanning, hero, map strings
+  - `MapView` / `DiveView` / `ContentsNav` + `Controls/` + `Panes/` — Compass UI (spec: `app/docs/plans/kalam-settings-redesign/`)
+  - Window presentation: AppDelegate `openSettingsWindow` hosts `CompassRoot` (menu-bar "Settings…"); `.selectModelsSettingsTab` deep-links to the Engine dive
 - `Packages/KalamTextEngine/Sources/KalamTextEngine/TextCleanupEngine.swift` / `TextCleanupConfiguration.swift`
   - Deterministic low-latency transcript cleanup pipeline
   - Optional grammar pass (`off` / `light` / `full`) with timeout budget (AppKit-gated)

@@ -20,7 +20,8 @@ tests verify the *behavior on real hardware* that unit tests cannot.
 | K-12 | Relaunch lifecycle (`Quit & Reopen Kalam`) |
 | K-14 🧑 gate | Per-mode hotkey smoke (Hold / Toggle / Double Tap / Hold or Toggle) |
 | K-19 | VoiceOver + Full Keyboard Access pass |
-| K-21 | Settings window width (900 pt, consistent) |
+| K-21 | Settings window width (900 pt, consistent) — **superseded by K-30**: the Compass window is fixed 980×660 and non-resizable |
+| K-30 🧑 gate | Compass settings window: fixed 980×660, borderless, draggable by background, Cmd-W closes, single instance; map states (settled / engine missing / incomplete / no mic / key unset / empty dict / cleanup off); per-pane smoke (being heard toggles + indicator menu + mic drag, trigger presets + Record shortcut…, cleanup master dim, dictionary CRUD + search + covers, engine choose/copy, updates opens browser) |
 
 **Not in this list:** K-11 (CI action pinning) is still `⬜ todo` — not implemented, nothing to
 test. All other K-IDs (K-03, K-05…K-07, K-13, K-15–K-18, K-20, K-22) are `✅` with automated

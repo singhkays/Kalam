@@ -81,7 +81,7 @@ struct PTTStateMachine {
 
     /// Feed one hotkey event into the machine. `now` is injected so tests
     /// control time; the production caller passes `CFAbsoluteTimeGetCurrent()`.
-    func handle(isDown: Bool, now: CFAbsoluteTime, activationMode: ActivationMode, state: inout State) -> [Event] {
+    func handle(isDown: Bool, now: CFAbsoluteTime, activationMode: PTTActivationMode, state: inout State) -> [Event] {
         if isDown {
             state.currentKeyDownTime = now
             switch activationMode {

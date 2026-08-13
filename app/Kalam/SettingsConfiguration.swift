@@ -13,44 +13,30 @@ enum GeneralSettingsKeys {
     static let muteWhileRecording = "general.muteWhileRecording"
 }
 
-enum IndicatorPlacementPreset: String, CaseIterable, Equatable {
-    case topCenter
-    case bottomCenter
-
-    var title: String {
-        switch self {
-        case .topCenter:
-            return "Top Center"
-        case .bottomCenter:
-            return "Bottom Center"
-        }
-    }
-}
-
 struct GeneralSettingsConfiguration: Equatable {
     static let defaults = GeneralSettingsConfiguration(
         launchAtLogin: false,
         showInDock: true,
         escapeCancelsRecording: false,
-        indicatorPlacementPreset: .topCenter,
+        indicatorPlacement: .topCenter,
         muteWhileRecording: true
     )
 
     var launchAtLogin: Bool
     var showInDock: Bool
     var escapeCancelsRecording: Bool
-    var indicatorPlacementPreset: IndicatorPlacementPreset
+    var indicatorPlacement: IndicatorPlacement
     var muteWhileRecording: Bool
 
     static func load(from defaults: UserDefaults = .standard) -> GeneralSettingsConfiguration {
-        let presetRaw = defaults.string(forKey: GeneralSettingsKeys.indicatorPlacementPreset) ?? Self.defaults.indicatorPlacementPreset.rawValue
-        let preset = IndicatorPlacementPreset(rawValue: presetRaw) ?? Self.defaults.indicatorPlacementPreset
-        
+        let presetRaw = defaults.string(forKey: GeneralSettingsKeys.indicatorPlacementPreset)
+        let preset = IndicatorPlacement.migrating(fromStored: presetRaw)
+
         return GeneralSettingsConfiguration(
             launchAtLogin: bool(forKey: GeneralSettingsKeys.launchAtLogin, defaults: defaults, fallback: Self.defaults.launchAtLogin),
             showInDock: bool(forKey: GeneralSettingsKeys.showInDock, defaults: defaults, fallback: Self.defaults.showInDock),
             escapeCancelsRecording: bool(forKey: GeneralSettingsKeys.escapeCancelsRecording, defaults: defaults, fallback: Self.defaults.escapeCancelsRecording),
-            indicatorPlacementPreset: preset,
+            indicatorPlacement: preset,
             muteWhileRecording: bool(forKey: GeneralSettingsKeys.muteWhileRecording, defaults: defaults, fallback: Self.defaults.muteWhileRecording)
         )
     }
@@ -59,7 +45,7 @@ struct GeneralSettingsConfiguration: Equatable {
         defaults.set(launchAtLogin, forKey: GeneralSettingsKeys.launchAtLogin)
         defaults.set(showInDock, forKey: GeneralSettingsKeys.showInDock)
         defaults.set(escapeCancelsRecording, forKey: GeneralSettingsKeys.escapeCancelsRecording)
-        defaults.set(indicatorPlacementPreset.rawValue, forKey: GeneralSettingsKeys.indicatorPlacementPreset)
+        defaults.set(indicatorPlacement.rawValue, forKey: GeneralSettingsKeys.indicatorPlacementPreset)
         defaults.set(muteWhileRecording, forKey: GeneralSettingsKeys.muteWhileRecording)
     }
 
@@ -187,6 +173,8 @@ extension Notification.Name {
     static let generalSettingsConfigurationDidChange = Notification.Name("generalSettingsConfigurationDidChange")
     static let microphonePriorityDidChange = Notification.Name("microphonePriorityDidChange")
     static let openSetupFlow = Notification.Name("openSetupFlow")
+    /// Compass deep link: open settings at the Engine dive (K-30; formerly the Models tab).
+    static let selectModelsSettingsTab = Notification.Name("selectModelsSettingsTab")
 }
 
 // MARK: - Audio Device Utilities

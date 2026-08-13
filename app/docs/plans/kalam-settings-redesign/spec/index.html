@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kalam Compass — Spec</title>
+<style>
+:root{--sf:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;--ser:ui-serif,"New York",Georgia,serif;--mono:ui-monospace,"SF Mono",Menlo,monospace;--page:#E8E7E4;--ink:#1C1B17;--ink-2:#5B574C;--ink-3:#8F897B;--hair:#D5D2CA;--green:#1A5C3A;--green-tint:rgba(26,92,58,.08);--panel:#FBFAF7}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--page);color:var(--ink);font-family:var(--sf);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:880px;margin:0 auto;padding:72px 40px 100px}
+.kicker{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--green)}
+h1{font-family:var(--ser);font-size:clamp(36px,5vw,52px);font-weight:400;letter-spacing:-.03em;line-height:1.05;margin-top:14px}
+h1 em{font-style:italic;color:var(--ink-2)}
+.lede{margin-top:18px;color:var(--ink-2);font-size:16.5px;line-height:1.7;max-width:62ch}
+.lede b{color:var(--ink)}
+.grid{display:grid;gap:14px;margin-top:36px}
+.card{display:block;background:var(--panel);border:1px solid var(--hair);border-radius:16px;padding:20px 22px;text-decoration:none;color:inherit;transition:border-color .2s,transform .2s}
+.card:hover{border-color:rgba(26,92,58,.35);transform:translateY(-2px)}
+.card .k{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--green)}
+.card h2{font-size:18px;font-weight:620;margin-top:8px;letter-spacing:-.015em}
+.card p{margin-top:8px;font-size:14px;color:var(--ink-2);line-height:1.55;max-width:56ch}
+.card .meta{margin-top:12px;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.sec{margin-top:44px}
+.sec h3{font-family:var(--ser);font-size:22px;font-weight:400}
+.sec p,.sec li{color:var(--ink-2);font-size:14.5px;line-height:1.65}
+.sec ol,.sec ul{margin:14px 0 0;padding:0;list-style:none;display:grid;gap:10px}
+.sec li{padding-left:28px;position:relative}
+.sec ol{counter-reset:n}
+.sec ol li{counter-increment:n}
+.sec ol li::before{content:counter(n,decimal-leading-zero);position:absolute;left:0;top:1px;font-family:var(--mono);font-size:11px;color:var(--green);letter-spacing:.06em}
+.sec ul li::before{content:"";position:absolute;left:0;top:10px;width:8px;height:1px;background:var(--green)}
+.okn{border-left:2px solid var(--green);padding:12px 16px;margin-top:18px;color:var(--ink-2);font-size:14px;line-height:1.6;max-width:68ch}
+.okn b{color:var(--ink)}
+.foot{margin-top:56px;font-size:13px;color:var(--ink-3);line-height:1.6}
+code{font-family:var(--mono);font-size:12.5px}
+table{width:100%;border-collapse:collapse;margin-top:14px;font-size:13.5px}
+th{text-align:left;font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:400;padding:0 12px 8px 0;border-bottom:1px solid var(--hair)}
+td{padding:10px 12px 10px 0;border-bottom:1px solid #E3E0D8;color:var(--ink-2);vertical-align:top;line-height:1.45}
+td:first-child{color:var(--ink);font-weight:560;white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="kicker">Kalam · Compass · Production spec</div>
+  <h1>Settings window, <em>specified.</em></h1>
+  <p class="lede">
+    On-device dictation settings for macOS 14+. Window is always <b>980 × 660</b>, plain chrome, American English. Surfaces locked to <b>Fog card</b>.
+    This index is the entry point for implementers and agents.
+  </p>
+
+  <div class="grid">
+    <a class="card" href="compass-mockups.html">
+      <div class="k">01 · Visual source of truth</div>
+      <h2>compass-mockups.html</h2>
+      <p>Every map and dive frame. Layout, chrome, copy on screen, empty and attention states. If it is drawn here, it ships. If it is not, do not invent it.</p>
+      <div class="meta">Open first for UI work</div>
+    </a>
+    <a class="card" href="compass-impl.html">
+      <div class="k">02 · Implementation contract</div>
+      <h2>compass-impl.html</h2>
+      <p>Architecture, <code>CompassSettingsBacking</code>, types, tokens, control behavior, live-store migration, traps, build order, acceptance.</p>
+      <div class="meta">Open for logic, persistence, bans</div>
+    </a>
+    <a class="card" href="swift-tree.html">
+      <div class="k">03 · Swift stubs</div>
+      <h2>Settings/Compass/</h2>
+      <p>File tree and stub sources: window shell, model, panes, controls. Bind the live app store; do not add a second settings schema.</p>
+      <div class="meta">Path: ../Settings/Compass/ · catalog in swift-tree.html</div>
+    </a>
+  </div>
+
+  <div class="sec">
+    <h3>How to navigate</h3>
+    <ol>
+      <li><b>Mockups</b> — skim M.1, M.3, M.8, D.1, D.1e, D.2 / D.2c, D.3, D.4a–g, D.5 / D.5c, D.6.</li>
+      <li><b>Contract</b> — Locked decisions, Backing store, Types, Tokens, Controls, Live audit, Build plan.</li>
+      <li><b>Swift</b> — start at <code>CompassSettingsBacking.swift</code> and <code>SettingsModel.swift</code>; implement panes against fixtures in <code>InMemoryCompassStore</code>.</li>
+      <li><b>Stop</b> when acceptance in the contract is met. Out of scope if absent from mockups and contract.</li>
+    </ol>
+  </div>
+
+  <div class="sec">
+    <h3>Precedence</h3>
+    <table>
+      <thead><tr><th>Conflict</th><th>Winner</th></tr></thead>
+      <tbody>
+        <tr><td>Layout / spacing / what is on screen</td><td>compass-mockups.html</td></tr>
+        <tr><td>Types, persistence, bans, migration</td><td>compass-impl.html</td></tr>
+        <tr><td>Symbol / file names</td><td>Settings/Compass stubs</td></tr>
+        <tr><td>Spelling</td><td>en-US (behavior, Normalize)</td></tr>
+      </tbody>
+    </table>
+    <div class="okn"><b>Rule.</b> Do not open a third settings store. Do not add network calls. Do not introduce a second accent or dark mode. Path length is only ever 0 (map) or 1 (dive).</div>
+  </div>
+
+  <div class="sec">
+    <h3>Regulated files</h3>
+    <ul>
+      <li><code>compass-spec/compass-mockups.html</code> — visual SoT</li>
+      <li><code>compass-spec/compass-impl.html</code> — implementation SoT</li>
+      <li><code>Settings/Compass/**</code> — code stubs (listed in <a href="swift-tree.html">swift-tree.html</a>)</li>
+    </ul>
+    <p style="margin-top:12px">Surface explorer (backup): <code>palette-lab.html</code>. Do not treat archive HTML under <code>uploads/</code> or root <code>kalam-compass-v2.html</code> as source of truth.</p>
+  </div>
+
+  <p class="foot">Compass · 980×660 · en-US · no network client in Settings UI</p>
+</div>
+</body>
+</html>

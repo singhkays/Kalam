@@ -27,10 +27,17 @@ private let pasteKeyCode: CGKeyCode = 9 // 'V' key (ANSI V) for Command+V
 struct KalamApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     var body: some Scene {
-        // macOS Settings window with our custom dictionary UI
+        // K-30 (Compass): the settings window is the AppDelegate-hosted Compass window
+        // (menu-bar "Settings…" → openSettings). The scene shell is inert: an empty
+        // Settings scene never auto-opens a window, and replacing the appSettings
+        // command group removes the system "Settings…" menu item that would otherwise
+        // open the blank scene window (observed live 2026-08-13). Only the custom
+        // menu item (Cmd+, → openSettings) remains.
         Settings {
-            SettingsView()
-                .environmentObject(CustomDictionaryManager.shared)
+            EmptyView()
+        }
+        .commands {
+            CommandGroup(replacing: .appSettings) { }
         }
     }
 }
@@ -127,7 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             GeneralSettingsKeys.launchAtLogin: GeneralSettingsConfiguration.defaults.launchAtLogin,
             GeneralSettingsKeys.showInDock: GeneralSettingsConfiguration.defaults.showInDock,
             GeneralSettingsKeys.escapeCancelsRecording: GeneralSettingsConfiguration.defaults.escapeCancelsRecording,
-            GeneralSettingsKeys.indicatorPlacementPreset: GeneralSettingsConfiguration.defaults.indicatorPlacementPreset.rawValue,
+            GeneralSettingsKeys.indicatorPlacementPreset: GeneralSettingsConfiguration.defaults.indicatorPlacement.rawValue,
             GeneralSettingsKeys.muteWhileRecording: GeneralSettingsConfiguration.defaults.muteWhileRecording,
             LatencyTuningOptions.postRollMinMsKey: LatencyTuningOptions.defaultPostRollMinMs,
             LatencyTuningOptions.postRollMaxMsKey: LatencyTuningOptions.defaultPostRollMaxMs,
@@ -345,50 +352,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func openSettingsWindow(selectModelsTab: Bool) {
         if let wc = settingsWC {
-            if let window = wc.window {
-                configureSettingsWindow(window)
-            }
             presentWindowController(wc, centerIfNeeded: wc.window?.isVisible != true)
             if selectModelsTab {
-                NotificationCenter.default.post(name: .selectModelsSettingsTab, object: nil)
+                postSelectModelsTab()
             }
             return
         }
-        let initialTab: SettingsView.SettingsTab = selectModelsTab ? .models : .general
-        let root = SettingsView(initialTab: initialTab).environmentObject(CustomDictionaryManager.shared)
+        // K-30 (Compass): the settings window is the fixed 980×660 borderless Compass window
+        // hosted in an AppDelegate NSWindow (no WindowGroup scene — user decision 2026-08-13).
+        let root = CompassRoot(store: LiveCompassBacking()) { [weak self] in
+            self?.settingsWC?.window?.close()
+        }
         let vc = NSHostingController(rootView: root)
-        let w = NSWindow(contentViewController: vc)
-        w.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        configureSettingsWindow(w)
-
-        w.setContentSize(NSSize(width: Self.settingsWindowWidth, height: 640))
-        w.minSize = NSSize(width: Self.settingsWindowWidth, height: 640)
-        w.maxSize = NSSize(width: Self.settingsWindowWidth, height: .greatestFiniteMagnitude)
+        let w = CompassWindow(contentViewController: vc)
+        w.identifier = NSUserInterfaceItemIdentifier("KalamSettingsWindow")
+        w.styleMask = [.borderless]
+        w.isMovableByWindowBackground = true
+        w.isOpaque = true
+        w.backgroundColor = NSColor(Color.kPaper)
+        w.isReleasedWhenClosed = false
+        let size = NSSize(width: 980, height: 660)
+        w.setContentSize(size)
+        w.minSize = size
+        w.maxSize = size
         let wc = NSWindowController(window: w)
         self.settingsWC = wc
         presentWindowController(wc, centerIfNeeded: true)
+        w.makeKeyAndOrderFront(nil)
         if selectModelsTab {
-            NotificationCenter.default.post(name: .selectModelsSettingsTab, object: nil)
+            postSelectModelsTab()
         }
     }
-    
-    // K-21: single source of truth for the settings window width.
-    private static let settingsWindowWidth: CGFloat = 900
 
-    private func configureSettingsWindow(_ window: NSWindow) {
-        let fixedWidth = Self.settingsWindowWidth
-        window.identifier = NSUserInterfaceItemIdentifier("KalamSettingsWindow")
-        window.title = "Settings"
-        window.titleVisibility = .visible
-        window.titlebarAppearsTransparent = false
-        window.styleMask.remove(.fullSizeContentView)
-        window.titlebarSeparatorStyle = .automatic
-        window.isMovableByWindowBackground = false
-        window.isOpaque = true
-        window.backgroundColor = .windowBackgroundColor
-        window.toolbar = nil
-        window.minSize = NSSize(width: fixedWidth, height: 640)
-        window.maxSize = NSSize(width: fixedWidth, height: CGFloat.greatestFiniteMagnitude)
+    /// Compass deep link (`.selectModelsSettingsTab` → Engine dive). Posted on the next
+    /// runloop turn so the freshly created CompassRoot has registered its observer.
+    private func postSelectModelsTab() {
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .selectModelsSettingsTab, object: nil)
+        }
     }
 
     private func currentOnboardingSnapshot() -> OnboardingStatusSnapshot {

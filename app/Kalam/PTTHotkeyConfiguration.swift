@@ -4,7 +4,7 @@ import HotKey
 
 // MARK: - Activation Mode
 
-enum ActivationMode: String, CaseIterable, Identifiable {
+enum PTTActivationMode: String, CaseIterable, Identifiable {
     case holdOrToggle = "holdOrToggle"
     case toggle = "toggle"
     case hold = "hold"
@@ -311,6 +311,61 @@ enum PTTHotkeyKey: String, CaseIterable, Identifiable {
         default: return nil
         }
     }
+
+    /// Reverse of `fromKeyCode` — the ANSI virtual key code for this key (K-30 custom capture).
+    var keyCode: UInt16 {
+        switch self {
+        case .a: return 0
+        case .b: return 11
+        case .c: return 8
+        case .d: return 2
+        case .e: return 14
+        case .f: return 3
+        case .g: return 5
+        case .h: return 4
+        case .i: return 34
+        case .j: return 38
+        case .k: return 40
+        case .l: return 37
+        case .m: return 46
+        case .n: return 45
+        case .o: return 31
+        case .p: return 35
+        case .q: return 12
+        case .r: return 15
+        case .s: return 1
+        case .t: return 17
+        case .u: return 32
+        case .v: return 9
+        case .w: return 13
+        case .x: return 7
+        case .y: return 16
+        case .z: return 6
+        case .zero: return 29
+        case .one: return 18
+        case .two: return 19
+        case .three: return 20
+        case .four: return 21
+        case .five: return 23
+        case .six: return 22
+        case .seven: return 26
+        case .eight: return 28
+        case .nine: return 25
+        case .space: return 49
+        case .f1: return 122
+        case .f2: return 120
+        case .f3: return 99
+        case .f4: return 118
+        case .f5: return 96
+        case .f6: return 97
+        case .f7: return 98
+        case .f8: return 100
+        case .f9: return 101
+        case .f10: return 109
+        case .f11: return 103
+        case .f12: return 111
+        }
+    }
 }
 
 // MARK: - Configuration
@@ -326,7 +381,7 @@ struct PTTHotkeyConfiguration: Equatable {
         control: false
     )
 
-    var activationMode: ActivationMode
+    var activationMode: PTTActivationMode
     var keyCombination: KeyCombination
     
     // Legacy properties (kept for backward compatibility)
@@ -336,10 +391,20 @@ struct PTTHotkeyConfiguration: Equatable {
     var option: Bool
     var control: Bool
 
+    /// K-30 (Compass): custom captured chord ("Record shortcut…"). When non-nil it wins over
+    /// `keyCombination`; selecting a preset clears it. Persisted under pttHotkey.custom* — the
+    /// same schema domain, additive keys (no Compass-* keys).
+    var customChord: KeyChord? = nil
+
     private static let userDefaultsKeyKey = "pttHotkey.key"
     private static let userDefaultsModifiersKey = "pttHotkey.modifiers"
     private static let userDefaultsActivationModeKey = "pttHotkey.activationMode"
     private static let userDefaultsKeyCombinationKey = "pttHotkey.keyCombination"
+    private static let userDefaultsCustomKeyCodeKey = "pttHotkey.customKeyCode"
+    private static let userDefaultsCustomModifiersKey = "pttHotkey.customModifiersRaw"
+    private static let userDefaultsCustomSideKey = "pttHotkey.customSide"
+    private static let userDefaultsCustomDisplayVerboseKey = "pttHotkey.customDisplayVerbose"
+    private static let userDefaultsCustomDisplayCompactKey = "pttHotkey.customDisplayCompact"
 
     var hasAnyModifier: Bool {
         command || shift || option || control
@@ -356,11 +421,19 @@ struct PTTHotkeyConfiguration: Equatable {
 
     var resolvedHotkey: (key: PTTHotkeyKey, modifiers: NSEvent.ModifierFlags) {
         let safe = normalized()
+        if let custom = safe.customChord, let key = PTTHotkeyKey.fromKeyCode(custom.keyCode) {
+            return (key, NSEvent.ModifierFlags(rawValue: custom.modifiersRaw))
+        }
         return (safe.key, safe.modifierFlags)
     }
 
     func normalized() -> PTTHotkeyConfiguration {
         var resolved = self
+
+        if resolved.customChord != nil {
+            // Custom chord wins; legacy preset fields stay inert but stable.
+            return resolved
+        }
 
         if resolved.keyCombination != .notSpecified {
             let mapping = resolved.keyCombination.keyMapping
@@ -394,6 +467,9 @@ struct PTTHotkeyConfiguration: Equatable {
     }
 
     var displayString: String {
+        if let custom = normalized().customChord {
+            return custom.displayVerbose
+        }
         if keyCombination != .notSpecified {
             return keyCombination.displayName
         }
@@ -411,7 +487,7 @@ struct PTTHotkeyConfiguration: Equatable {
     static func load(from defaults: UserDefaults = .standard) -> PTTHotkeyConfiguration {
         // Load activation mode
         let activationModeRaw = defaults.string(forKey: userDefaultsActivationModeKey)
-        let activationMode = activationModeRaw.flatMap(ActivationMode.init(rawValue:)) ?? Self.defaults.activationMode
+        let activationMode = activationModeRaw.flatMap(PTTActivationMode.init(rawValue:)) ?? Self.defaults.activationMode
         
         // Load key combination
         let keyComboRaw = defaults.string(forKey: userDefaultsKeyCombinationKey)
@@ -438,6 +514,23 @@ struct PTTHotkeyConfiguration: Equatable {
             control: flags.contains(.control)
         )
 
+        // K-30: custom captured chord (additive keys — absent = preset-only).
+        var customChord: KeyChord?
+        if let storedCode = defaults.object(forKey: Self.userDefaultsCustomKeyCodeKey) as? NSNumber {
+            let keyCode = UInt16(truncating: storedCode)
+            let modifiersRaw = (defaults.object(forKey: Self.userDefaultsCustomModifiersKey) as? NSNumber)?.uintValue ?? 0
+            let side = defaults.string(forKey: Self.userDefaultsCustomSideKey).flatMap(KeySide.init(rawValue:)) ?? .either
+            let verbose = defaults.string(forKey: Self.userDefaultsCustomDisplayVerboseKey) ?? ""
+            let compact = defaults.string(forKey: Self.userDefaultsCustomDisplayCompactKey) ?? ""
+            customChord = KeyChord(
+                keyCode: keyCode,
+                modifiersRaw: modifiersRaw,
+                side: side,
+                displayVerbose: verbose,
+                displayCompact: compact
+            )
+        }
+
         let loaded = PTTHotkeyConfiguration(
             activationMode: activationMode,
             keyCombination: inferredCombo,
@@ -445,7 +538,8 @@ struct PTTHotkeyConfiguration: Equatable {
             command: flags.contains(.command),
             shift: flags.contains(.shift),
             option: flags.contains(.option),
-            control: flags.contains(.control)
+            control: flags.contains(.control),
+            customChord: customChord
         )
         return loaded.normalized()
     }
@@ -456,6 +550,19 @@ struct PTTHotkeyConfiguration: Equatable {
         defaults.set(safe.keyCombination.rawValue, forKey: Self.userDefaultsKeyCombinationKey)
         defaults.set(safe.key.rawValue, forKey: Self.userDefaultsKeyKey)
         defaults.set(safe.modifierFlags.rawValue, forKey: Self.userDefaultsModifiersKey)
+        if let custom = safe.customChord {
+            defaults.set(Int(custom.keyCode), forKey: Self.userDefaultsCustomKeyCodeKey)
+            defaults.set(custom.modifiersRaw, forKey: Self.userDefaultsCustomModifiersKey)
+            defaults.set(custom.side.rawValue, forKey: Self.userDefaultsCustomSideKey)
+            defaults.set(custom.displayVerbose, forKey: Self.userDefaultsCustomDisplayVerboseKey)
+            defaults.set(custom.displayCompact, forKey: Self.userDefaultsCustomDisplayCompactKey)
+        } else {
+            defaults.removeObject(forKey: Self.userDefaultsCustomKeyCodeKey)
+            defaults.removeObject(forKey: Self.userDefaultsCustomModifiersKey)
+            defaults.removeObject(forKey: Self.userDefaultsCustomSideKey)
+            defaults.removeObject(forKey: Self.userDefaultsCustomDisplayVerboseKey)
+            defaults.removeObject(forKey: Self.userDefaultsCustomDisplayCompactKey)
+        }
     }
 }
 

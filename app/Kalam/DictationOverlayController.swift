@@ -11,6 +11,7 @@ final class DictationOverlayController {
         static let recordingHeight: CGFloat = 72
         static let topInset: CGFloat = 20
         static let bottomInset: CGFloat = 16
+        static let sideInset: CGFloat = 20
     }
 
     enum OverlayAction {
@@ -274,12 +275,12 @@ final class DictationOverlayController {
     private func positionWindow(on screen: NSScreen) {
         guard let w = window else { return }
         let screenFrame = screen.visibleFrame
-        let preset = GeneralSettingsConfiguration.load().indicatorPlacementPreset
-        let frame = frameForPreset(preset, visibleFrame: screenFrame)
+        let placement = GeneralSettingsConfiguration.load().indicatorPlacement
+        let frame = frameForPlacement(placement, visibleFrame: screenFrame)
         w.setFrame(frame, display: false)
     }
 
-    private func frameForPreset(_ preset: IndicatorPlacementPreset, visibleFrame: CGRect) -> CGRect {
+    private func frameForPlacement(_ placement: IndicatorPlacement, visibleFrame: CGRect) -> CGRect {
         let ww = currentWindowSize.width
         let wh = currentWindowSize.height
         let maxX = visibleFrame.maxX - ww
@@ -288,12 +289,13 @@ final class DictationOverlayController {
         let clampedCenterX = max(visibleFrame.minX, min(centeredX, maxX))
 
         let origin: CGPoint
-        switch preset {
+        switch placement {
+        case .topLeft:
+            origin = CGPoint(x: visibleFrame.minX + Metrics.sideInset, y: max(visibleFrame.minY, min(maxY - Metrics.topInset, maxY)))
         case .topCenter:
             origin = CGPoint(x: clampedCenterX, y: max(visibleFrame.minY, min(maxY - Metrics.topInset, maxY)))
-        case .bottomCenter:
-            let y = max(visibleFrame.minY, min(visibleFrame.minY + Metrics.bottomInset, maxY))
-            origin = CGPoint(x: clampedCenterX, y: y)
+        case .topRight:
+            origin = CGPoint(x: maxX - Metrics.sideInset, y: max(visibleFrame.minY, min(maxY - Metrics.topInset, maxY)))
         }
         return NSRect(x: origin.x, y: origin.y, width: ww, height: wh)
     }

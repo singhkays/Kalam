@@ -1034,7 +1034,7 @@ struct OnboardingView: View {
                                 controller.recheck()
                             }
                         ),
-                        options: ActivationMode.allCases,
+                        options: PTTActivationMode.allCases,
                         label: { $0.displayName }
                     )
                 }
