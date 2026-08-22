@@ -67,9 +67,17 @@ final class AudioRecorder: @unchecked Sendable {
     // AudioCaptureExchange; the render thread publishes non-blockingly
     // (try-lock), consumers use exclusive access.
     private let exchange = AudioCaptureExchange()
+    /// Generation of the capture session this recorder most recently started.
+    private var currentCaptureGeneration = 0
     
     // Tap buffer size reduced to lower tail latency at key-up
     private let tapBufferSizeFrames: AVAudioFrameCount = 1024
+
+    /// The generation of the capture session this recorder most recently
+    /// started. Callers capture this synchronously at stop-decision time and
+    /// pass it into `stopAndFetchSamples` — the stop must never adopt a newer
+    /// session's id (rapid re-record).
+    var captureGeneration: Int { currentCaptureGeneration }
 
     static func requestMicrophoneAccessIfNeeded() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
@@ -157,7 +165,7 @@ final class AudioRecorder: @unchecked Sendable {
         
         // Prepare engine but don't start it yet - we'll start it when recording begins
         engine.prepare()
-        logger.info("Audio engine prepared tapBufferSize=\\(self.tapBufferSizeFrames, privacy: .public)")
+        logger.info("Audio engine prepared tapBufferSize=\(self.tapBufferSizeFrames, privacy: .public)")
         isPrepared = true
         preparedInputDeviceID = preferredInputDeviceID
     }
@@ -179,6 +187,7 @@ final class AudioRecorder: @unchecked Sendable {
         // order (reset at the end) left stale state when engine.start()
         // failed, and the failure was silently swallowed.
         exchange.resetForNewSession()
+        currentCaptureGeneration = exchange.currentGeneration()
 
         if !engine.isRunning {
             do {
@@ -186,12 +195,12 @@ final class AudioRecorder: @unchecked Sendable {
                 logger.info("Audio engine started for recording")
                 let liveOutputFormat = engine.inputNode.outputFormat(forBus: 0)
                 let liveInputBusFormat = engine.inputNode.inputFormat(forBus: 0)
-                logger.info("Live input output format sampleRate=\\(liveOutputFormat.sampleRate, privacy: .public) channels=\\(liveOutputFormat.channelCount, privacy: .public)")
-                logger.info("Live input bus format sampleRate=\\(liveInputBusFormat.sampleRate, privacy: .public) channels=\\(liveInputBusFormat.channelCount, privacy: .public)")
+                logger.info("Live input output format sampleRate=\(liveOutputFormat.sampleRate, privacy: .public) channels=\(liveOutputFormat.channelCount, privacy: .public)")
+                logger.info("Live input bus format sampleRate=\(liveInputBusFormat.sampleRate, privacy: .public) channels=\(liveInputBusFormat.channelCount, privacy: .public)")
             } catch {
                 // One recovery attempt: invalidate the stale graph binding
                 // (sleep/wake, dock reconnect) and retry from a fresh prepare.
-                logger.warning("Audio engine start failed errorSummary=\\(privacySafeErrorSummary(error), privacy: .public); attempting re-prepare")
+                logger.warning("Audio engine start failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public); attempting re-prepare")
                 invalidatePreparedState()
                 do {
                     try prepare(preferredInputDeviceID: preparedInputDeviceID)
@@ -206,7 +215,7 @@ final class AudioRecorder: @unchecked Sendable {
         if !tapInstalled {
             // For input node taps, AVAudioEngine expects the input bus hardware format.
             let tapFormat = engine.inputNode.inputFormat(forBus: 0)
-            logger.info("Installing tap sampleRate=\\(tapFormat.sampleRate, privacy: .public) channels=\\(tapFormat.channelCount, privacy: .public)")
+            logger.info("Installing tap sampleRate=\(tapFormat.sampleRate, privacy: .public) channels=\(tapFormat.channelCount, privacy: .public)")
             engine.inputNode.installTap(onBus: 0, bufferSize: tapBufferSizeFrames, format: tapFormat) { [weak self] (buffer, _) in
                 self?.process(buffer: buffer)
             }
@@ -217,39 +226,51 @@ final class AudioRecorder: @unchecked Sendable {
     }
     
     // Post-roll capture is applied before stopping and fetching samples.
+    // Convenience async wrapper (test seam): pins the generation at call time,
+    // sleeps the post-roll, then finishes THAT session. Production callers
+    // capture the generation before any suspension and call `finishStop`.
     func stopAndFetchSamples(postRollMs: Int = 200) async -> [Float] {
-        // Keep collecting for a short post-roll to capture trailing phonemes
+        let generation = currentCaptureGeneration
         let delayMs = max(0, min(500, postRollMs))
         if delayMs > 0 {
             try? await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000)
         }
-        
-        var out = exchange.stopCapture()
-        
-        // Stop the engine on the main thread to turn off the microphone indicator
+        return finishStop(expectedGeneration: generation)
+    }
+
+    /// Synchronous stop critical section. Call on the main thread (production
+    /// callers are MainActor-inherited tasks). Contains NO suspension points,
+    /// so a newer session cannot start between the staleness check and the
+    /// engine stop — a stop that was superseded by a rapid re-record returns
+    /// empty WITHOUT touching the newer session's buffers or engine.
+    func finishStop(expectedGeneration: Int) -> [Float] {
+        guard exchange.currentGeneration() == expectedGeneration else {
+            logger.info("Stop superseded by a newer capture session; skipping teardown")
+            return []
+        }
+
+        var out = exchange.stopCapture(expectedGeneration: expectedGeneration)
+
+        // Stop the engine on the main thread to turn off the microphone indicator.
         if engine.isRunning {
             let stopStart = CFAbsoluteTimeGetCurrent()
-            let engine = self.engine
-            // Ensure engine.stop is done on main to avoid CoreAudio surprises
-            await MainActor.run {
-                engine.stop()
-            }
+            engine.stop()
             let stopElapsed = (CFAbsoluteTimeGetCurrent() - stopStart) * 1000
             logger.info("Audio engine stopped stopMs=\(Int(stopElapsed), privacy: .public)")
         }
-        
+
         // Drain any residual frames from the converter (resampler tail) and reset it
-        let drainedTail = drainConverterRemainder()
+        let drainedTail = exchange.drainConverterRemainder(expectedGeneration: expectedGeneration)
         if !drainedTail.isEmpty {
             logger.info("Drained converter tail samples=\(drainedTail.count, privacy: .public) durationMs=\(Int(Double(drainedTail.count) / 16_000.0 * 1000), privacy: .public)")
         }
-        
+
         out.append(contentsOf: drainedTail)
-        
+
         let durationMs = out.isEmpty ? 0 : Int(Double(out.count) / 16_000.0 * 1000)
         let (callbacks, dropped) = exchange.stats()
         logger.info("Stopped collecting samples=\(out.count, privacy: .public) durationMs=\(durationMs, privacy: .public) callbacks=\(callbacks, privacy: .public) dropped=\(dropped, privacy: .public)")
-        
+
         // Debug: Check non-zero and max amplitude
         let nonZeroCount = out.lazy.filter { abs($0) > 0.0001 }.count
         logger.info("Audio sample summary nonZeroSamples=\(nonZeroCount, privacy: .public) totalSamples=\(out.count, privacy: .public)")
@@ -260,7 +281,7 @@ final class AudioRecorder: @unchecked Sendable {
     }
 
     func cancelCapture() async {
-        _ = await stopAndFetchSamples(postRollMs: 0)
+        _ = finishStop(expectedGeneration: currentCaptureGeneration)
     }
 
     /// Test-only: activate capture state without touching the audio engine
@@ -269,6 +290,7 @@ final class AudioRecorder: @unchecked Sendable {
     /// production). Mirrors the state portion of `startCollecting()`.
     func beginCollectingForTesting() {
         exchange.resetForNewSession()
+        currentCaptureGeneration = exchange.currentGeneration()
     }
     
     /// Render-thread entry point (installTap callback). Never blocks — the
@@ -282,12 +304,7 @@ final class AudioRecorder: @unchecked Sendable {
     func recentWaveform(sampleCount: Int = 512) -> [Float] {
         exchange.waveform(sampleCount: sampleCount)
     }
-    
-    // Drain any residual frames from the converter at stream end to avoid losing ~10–30 ms.
-    private func drainConverterRemainder() -> [Float] {
-        exchange.drainConverterRemainder()
-    }
-    
+
     deinit {
         if isPrepared {
             engine.inputNode.removeTap(onBus: 0)

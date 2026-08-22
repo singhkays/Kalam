@@ -49,8 +49,8 @@ final class SystemAudioDucker {
         }
     }
     
-    func stopDucking(cancelOnly: Bool = false) {
-        guard duckingActive else { return }
+    func stopDucking() {
+        guard !duckingActive else { return }
         duckingActive = false
         logger.info("Restoring system volume after recording")
         
