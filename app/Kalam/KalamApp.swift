@@ -71,6 +71,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         static let defaultEnableStageTiming = true
     }
 
+    /// Adaptive post-roll for the audio stop pipeline: estimate segment duration
+    /// from PTT hold time, clamp to the configured 100–150 ms range (50–400/500
+    /// hard bounds), floors at the min for short bursts to avoid over-trimming.
+    static func postRollForSegment(
+        pttDown: CFAbsoluteTime,
+        pttUp: CFAbsoluteTime,
+        defaults: UserDefaults,
+        logger: Logger
+    ) -> Int {
+        let segmentEstimateMs = Int((pttUp - pttDown) * 1000)
+        let configuredPostRollMin = max(50, min(400, defaults.integer(forKey: LatencyTuningOptions.postRollMinMsKey)))
+        let configuredPostRollMax = max(configuredPostRollMin, min(500, defaults.integer(forKey: LatencyTuningOptions.postRollMaxMsKey)))
+        let postRollMs = min(configuredPostRollMax, max(configuredPostRollMin, segmentEstimateMs))
+        logger.info("Post-roll computed segmentEstimateMs=\(segmentEstimateMs, privacy: .public) postRollMs=\(postRollMs, privacy: .public)")
+        return postRollMs
+    }
+
     private var statusItem: NSStatusItem!
     private var setupMenuItem: NSMenuItem!
     private let asr = ASRService()
@@ -95,6 +112,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pttUpTime: CFAbsoluteTime = 0
     private var hotkeyConfiguration: PTTHotkeyConfiguration = .load()
     private var transcriptionTask: Task<Void, Never>?
+    /// Audio teardown for the current stop/cancel (post-roll + drain + engine stop).
+    /// New recordings await its completion before collecting, so sessions never
+    /// overlap in the audio layer even when the transcription task is cancelled.
+    private var recordingStopTask: Task<[Float], Never>?
     private var runtimePrepTask: Task<Void, Never>?
     private var recordingSessions = RecordingSessionTracker()
     private let ptt = PTTStateMachine()
@@ -122,9 +143,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // No-network invariant: set before any FluidAudio loader can run
         // (see ASRService.enforceOfflineMode and the adoption dev-design doc).
         ASRService.enforceOfflineMode()
-        // K-31: bundled OFL web fonts for the Compass settings window (Instrument Serif ·
-        // Plus Jakarta Sans · IBM Plex Mono). Process-scope registration; counts-only log.
-        FontRegistration.registerBundledFonts()
         let generalSettings = GeneralSettingsConfiguration.load()
         NSApp.setActivationPolicy(generalSettings.showInDock ? .regular : .accessory)
         prepareRecordingChime()
@@ -418,6 +436,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             selectedModelAvailability: selectedAvailability,
             installedModelVersions: installedModels,
             hasCompletedRequiredSetup: onboardingConfig.hasCompletedRequiredSetup,
+            hasConfirmedModelLocation: onboardingConfig.hasConfirmedModelLocation,
             isAudioReady: isAudioReady,
             isASRReady: isASRReady
         )
@@ -499,7 +518,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.apply(snapshot: snapshot)
         onboardingController = controller
 
-        let root = OnboardingView(controller: controller) { [weak self] in
+        let root = OnboardingDeckView(controller: controller) { [weak self] in
             self?.onboardingWC?.window?.close()
         }
         let hostingController = NSHostingController(rootView: root)
@@ -522,6 +541,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
+        // Must stay false: with it true, the window background swallows the
+        // mouse-down and the Task 7 drag tile drags the WHOLE WINDOW instead
+        // of originating an .onDrag. Window positioning happens via the
+        // (transparent) titlebar region, which still drags.
         window.isMovableByWindowBackground = false
         window.isOpaque = false
         window.backgroundColor = .clear
@@ -548,7 +571,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func onboardingWindowFrameSize(for screen: NSScreen?, window: NSWindow) -> NSSize {
-        let preferredContentSize = NSSize(width: 600, height: 720)
+        let preferredContentSize = NSSize(width: 700, height: 600)
         let preferredFrameSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: preferredContentSize)).size
         guard let visibleFrame = screen?.visibleFrame else {
             return preferredFrameSize
@@ -759,7 +782,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 updateASRStatus(await asr.status, forceReady: false)
                 logger.warning("ASR init failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             }
-        case .modelLibraryNotConfigured, .missingModelFolder, .invalidModelFolder:
+        case .modelLibraryNotConfigured, .missingModelFolder, .invalidModelFolder, .partial:
             isASRReady = false
             isASRSetupIssue = true
             asrRecordingBlockMessage = "Set model folder in Settings"
@@ -802,10 +825,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dictationTargetElement = nil
             heldTranscript = nil
             let audio = self.audio
-            Task { await audio.cancelCapture() }
+            // Pin the teardown to the session being torn down on wake.
+            let audioGeneration = audio.captureGeneration
+            let stopTask = Task(priority: .userInitiated) { [audio, audioGeneration] in
+                return audio.finishStop(expectedGeneration: audioGeneration)
+            }
+            recordingStopTask = stopTask
             overlay.hide()
         }
-        pttState.resetForConfigurationChange()
+        // K-37: abandon (recordingDidStop + flag clear), NOT
+        // resetForConfigurationChange — the latter keeps isRecording == true,
+        // so the first post-wake keypress acted as a STOP on a junk clip.
+        pttState.abandonActiveSession()
         refreshAudioInputAfterDeviceChange()
     }
 
@@ -900,7 +931,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Play chime (so user hears it at full volume)
         let chimeDuration = playRecordingChime()
-        
+
         // Then duck system volume if enabled (slight delay so the chime is audible)
         if UserDefaults.standard.bool(forKey: "duckEnabled") {
             duckingStartWorkItem?.cancel()
@@ -914,7 +945,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let delay = max(0.12, min(0.6, chimeDuration))
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
         }
-        
+
         // K-23: remember where the user is dictating so the transcript follows the
         // record-time target even if the frontmost app changes during transcription.
         if let frontmost = NSWorkspace.shared.frontmostApplication {
@@ -963,12 +994,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let pttDown = self.pttDownTime
         let pttUp = self.pttUpTime
         let generation = recordingSessions.currentGeneration()
+        // Pin the audio stop to the capture session being stopped NOW, before
+        // any suspension. A rapid re-record bumps this id; the stale stop will
+        // then no-op instead of draining the new session.
+        let audioGeneration = audio.captureGeneration
 
         transcriptionTask?.cancel()
+
+        // Audio teardown lives in its own task: the transcription task is
+        // cancelled by the next session's start (K-01) and must NOT own the
+        // engine-stop/drain step, or a rapid re-record would skip it and leave
+        // the engine running under the next session.
+        let stopTask = Task(priority: .userInitiated) { [weak self, audioGeneration] in
+            guard let self else { return [Float]() }
+            let postRollMs = Self.postRollForSegment(
+                pttDown: pttDown,
+                pttUp: pttUp,
+                defaults: .standard,
+                logger: self.logger
+            )
+            try? await Task.sleep(nanoseconds: UInt64(postRollMs) * 1_000_000)
+            return self.audio.finishStop(expectedGeneration: audioGeneration)
+        }
+        recordingStopTask = stopTask
         
         // Run as an actor-inherited task instead of Task.detached so Swift 6 does not
         // send MainActor app state into an unisolated closure. Add post-roll to preserve trailing phonemes.
-        transcriptionTask = Task(priority: .userInitiated) { [weak self, pttDown, pttUp, generation] in
+        transcriptionTask = Task(priority: .userInitiated) { [weak self, pttDown, pttUp, generation, stopTask] in
             guard let self = self else { return }
             guard !Task.isCancelled else { return }
             let defaults = UserDefaults.standard
@@ -985,24 +1037,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 mark = now
             }
             
-            // Adaptive post-roll: Estimate segment duration from PTT hold time for dense speech optimization.
-            // Clamp to 100-150ms range: reduces latency from fixed 200ms (plan: target <300ms end-to-end for dictation UX).
-            // For short bursts (<100ms est.), floor at 100ms to avoid over-trimming; for long/continuous, cap at 150ms.
-            // Rationale: Dense speech has abrupt PTT-up (minimal pauses), so shorter post-roll suffices; drainConverterRemainder handles ~20ms resampler tail.
-            // Real-app pattern: Apple's Dictation uses ~100-200ms adaptive buffers based on speech density.
-            let segmentEstimateMs = Int((pttUp - pttDown) * 1000)
-            let configuredPostRollMin = max(50, min(400, defaults.integer(forKey: LatencyTuningOptions.postRollMinMsKey)))
-            let configuredPostRollMax = max(configuredPostRollMin, min(500, defaults.integer(forKey: LatencyTuningOptions.postRollMaxMsKey)))
-            let postRollMs = min(configuredPostRollMax, max(configuredPostRollMin, segmentEstimateMs))
-            
-            let audio = self.audio
             let keyUpToStopStart = CFAbsoluteTimeGetCurrent()
-            let samples = await audio.stopAndFetchSamples(postRollMs: postRollMs)
+            let samples = await stopTask.value
             guard !Task.isCancelled else { return }
+            // A stale stop (superseded by a rapid re-record) returns no audio;
+            // the newer session's overlay state owns the indicator from here.
+            guard !samples.isEmpty else {
+                self.logger.info("Stop superseded by a newer recording; skipping transcription")
+                return
+            }
             let afterStop = CFAbsoluteTimeGetCurrent()
             let keyDownToUp = pttUp - pttDown
             let upToSamples = afterStop - keyUpToStopStart
-            self.logger.info("Recording timing holdMs=\(Int(keyDownToUp * 1000), privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public) keyUpToSamplesMs=\(Int(upToSamples * 1000), privacy: .public) postRollMs=\(postRollMs, privacy: .public)")
+            // Segment estimate is derived from the PTT hold time; the paste
+            // delay decision below reuses it without re-measuring.
+            let segmentEstimateMs = Int((pttUp - pttDown) * 1000)
+            let postRollMs = Self.postRollForSegment(
+                pttDown: pttDown,
+                pttUp: pttUp,
+                defaults: defaults,
+                logger: self.logger
+            )
+            self.logger.info("Recording timing holdMs=\(Int(keyDownToUp * 1000), privacy: .public) keyUpToSamplesMs=\(Int(upToSamples * 1000), privacy: .public)")
             stageMark("audio-stop+fetch")
             
             // Trim with hysteresis/hangover/padding + conservative fallback
@@ -1173,9 +1229,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         transcriptionTask?.cancel()
         let audio = self.audio
-        transcriptionTask = Task(priority: .userInitiated) { [weak self, audio] in
+        // Pin the teardown to THIS session before any suspension — a stale
+        // cancel must never kill a newer session that started in between.
+        let audioGeneration = audio.captureGeneration
+        let stopTask = Task(priority: .userInitiated) { [audio, audioGeneration] in
+            return audio.finishStop(expectedGeneration: audioGeneration)
+        }
+        recordingStopTask = stopTask
+        transcriptionTask = Task(priority: .userInitiated) { [weak self, stopTask] in
             guard let self else { return }
-            await audio.cancelCapture()
+            _ = await stopTask.value
             await MainActor.run {
                 self.overlay.showInfoAndAutoHide("Recording canceled")
             }

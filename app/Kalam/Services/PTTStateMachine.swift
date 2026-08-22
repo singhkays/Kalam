@@ -66,6 +66,17 @@ struct PTTStateMachine {
             lastTapReleaseTime = 0
             ignoreNextKeyUp = false
         }
+
+        /// K-37: system wake abandons any session that was live across sleep.
+        /// Unlike `resetForConfigurationChange` (timing flags only, deliberately
+        /// keeps a live session), this ENDS the session: `isRecording` must be
+        /// false afterwards so the first post-wake keypress starts a fresh
+        /// recording instead of acting as a STOP on a junk clip.
+        mutating func abandonActiveSession() {
+            recordingDidStop()
+            lastTapReleaseTime = 0
+            ignoreNextKeyUp = false
+        }
     }
 
     /// Hold shorter than this (holdOrToggle mode) converts to toggle.

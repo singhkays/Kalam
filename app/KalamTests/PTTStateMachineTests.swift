@@ -155,4 +155,41 @@ final class PTTStateMachineTests: XCTestCase {
         state.resetForConfigurationChange()
         XCTAssertEqual(machine.handle(isDown: true, now: 0.2, activationMode: .doubleTap, state: &state), [])
     }
+
+    // MARK: - K-37: system wake abandons live sessions
+
+    func testAbandonActiveSessionEndsLiveRecording() {
+        var state = PTTStateMachine.State()
+        let localMachine = PTTStateMachine()
+
+        // Start a toggle session the way AppDelegate does: event, then outcome report.
+        let events = localMachine.handle(isDown: true, now: 100.0, activationMode: .toggle, state: &state)
+        XCTAssertEqual(events, [.start(.toggle)])
+        state.recordingDidStart(.toggle)
+        XCTAssertTrue(state.isRecording)
+
+        // System wake abandons the session: the machine must come back idle.
+        state.abandonActiveSession()
+        XCTAssertFalse(state.isRecording)
+        XCTAssertNil(state.recordingTriggerMode)
+        XCTAssertEqual(state.lastTapReleaseTime, 0)
+        XCTAssertFalse(state.ignoreNextKeyUp)
+
+        // The first post-wake press starts a FRESH recording (not a stop).
+        XCTAssertEqual(localMachine.handle(isDown: true, now: 200.0, activationMode: .toggle, state: &state),
+                       [.start(.toggle)])
+    }
+
+    func testResetForConfigurationChangeAloneDoesNotEndRecording() {
+        // Pins WHY the wake path must not use resetForConfigurationChange:
+        // it preserves isRecording by design (config flips mid-recording must
+        // not kill the session).
+        var state = PTTStateMachine.State()
+        let localMachine = PTTStateMachine()
+        _ = localMachine.handle(isDown: true, now: 100.0, activationMode: .toggle, state: &state)
+        state.recordingDidStart(.toggle)
+
+        state.resetForConfigurationChange()
+        XCTAssertTrue(state.isRecording, "config-change reset must not end a live session; wake must call abandonActiveSession() instead")
+    }
 }
