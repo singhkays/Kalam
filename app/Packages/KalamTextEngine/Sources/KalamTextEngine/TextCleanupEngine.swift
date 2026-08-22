@@ -610,7 +610,7 @@ public struct TextCleanupEngine: Sendable {
     ]
 
     private static let spaceBeforePunctuationPattern = try! NSRegularExpression(pattern: "\\s+([,.;:!?])", options: [])
-    private static let missingSpaceAfterPunctuationPattern = try! NSRegularExpression(pattern: "([,.;:!?])(?=[\\p{L}\\p{N}])", options: [])
+    private static let missingSpaceAfterPunctuationPattern = try! NSRegularExpression(pattern: "(?<![\\p{N}])([,.;:!?])(?=[\\p{L}\\p{N}])", options: [])
     private static let repeatedPunctuationPattern = try! NSRegularExpression(pattern: "([,.;:!?]){2,}", options: [])
     private static let multiSpacePattern = try! NSRegularExpression(pattern: "[\\t ]{2,}", options: [])
     private static let spaceAroundNewlinePattern = try! NSRegularExpression(pattern: "[\\t ]*\\n[\\t ]*", options: [])

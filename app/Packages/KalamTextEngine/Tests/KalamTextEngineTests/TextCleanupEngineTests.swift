@@ -172,6 +172,29 @@ From Star Trek in 1966 to Siri in 2011 we have come far.
     #expect(result.stats.punctuationEdits > 0)
 }
 
+// MARK: - K-34: decimals, clock times, and versions must survive punctuation normalization
+
+@Test func punctuationDoesNotSplitDecimalsOrMoney() {
+    let result = TextCleanupEngine().clean("it costs $3.50 today", configuration: config())
+    #expect(result.text == "it costs $3.50 today")
+}
+
+@Test func punctuationDoesNotSplitVersionNumbers() {
+    let result = TextCleanupEngine().clean("update to version 2.5 please", configuration: config())
+    #expect(result.text == "update to version 2.5 please")
+}
+
+@Test func punctuationDoesNotSplitClockTimes() {
+    let result = TextCleanupEngine().clean("meeting at 10:30 am", configuration: config())
+    #expect(result.text == "meeting at 10:30 am")
+}
+
+@Test func punctuationStillFixesMissingSpaceBeforeDigitAfterWord() {
+    // A period after a LETTER followed by a digit is still a real spacing error.
+    let result = TextCleanupEngine().clean("step one.done5 items remain", configuration: config())
+    #expect(result.text.contains("one. done"))
+}
+
 @Test func corpusSmokeSet() {
     for transcript in sampleCorpus {
         let result = TextCleanupEngine().clean(transcript, configuration: config())
