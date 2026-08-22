@@ -117,6 +117,10 @@ final class DictationOverlayController {
         view.setWaveformVisible(showsWaveform)
         currentStateSetTime = CFAbsoluteTimeGetCurrent()
         let presentation = presentation(for: state, targetAppName: targetAppName, targetAppIcon: targetAppIcon)
+        // K-36: the overlay is click-through EXCEPT while an actionable state
+        // (held-transcript "Paste", error "Open") is presented — with
+        // ignoresMouseEvents stuck on, those buttons can never be clicked.
+        w.ignoresMouseEvents = (presentation.action == nil)
         view.apply(presentation: presentation)
         w.alphaValue = 0.0
         w.orderFrontRegardless()
