@@ -1,13 +1,364 @@
-# Kalam — Combined Manual Verification Run
+# Kalam — Manual Verification Checklist
 
-**Date of run:** ________
-**Tester:** ________
-**App build used:** ________ (Xcode Run / DMG / CI artifact)
+**Runbook updated:** 2026-08-23 (adds T19/T20; folds K-34 into T12 and K-37 into T11) · **Archived run:** 2026-08-12 (Part 2 below)
 
-This checklist combines every 🧑 *human manual gate* still open in `app/docs/IMPROVEMENT_PLAN.md`
-after the 2026-08-11 implementation wave. All code is implemented and all automated suites are
-green (engine 41/41, full Xcode suite 79 passed / 0 failed / 3 model-dependent skipped) — these
-tests verify the *behavior on real hardware* that unit tests cannot.
+This file is the single place listing every 🧑 *human manual gate* still open in
+`app/docs/IMPROVEMENT_PLAN.md`, with concrete pass/fail steps for each. After you run it, send
+back the Report table — the matching K-IDs get flipped to `✅` with your evidence, and any work
+being held for visual sign-off (K-32's uncommitted Compass changes) can land.
+
+---
+
+# Part 1 — Open gates (runbook added 2026-08-21)
+
+| Test | Item(s) | Gate in one line |
+|---|---|---|
+| T11 | K-26 + K-27 + K-37 | Sleep/wake recovery (docked webcam), phantom-stop after wake (step 2 pins the K-37 abandon fix), noise guard ("yes"/"no" boundary) |
+| T12 | K-28 + K-34 | ITN protection — the user sentences; decimals/times must render intact ($5.50 / 10:30 / 2.5, never "$5. 50") |
+| T13 | K-29 | Bare-"no" backtrack sentence (pre-verifies on a current build; tracker closes when a build ships) |
+| T14 | K-23 + K-36 | Switch apps mid-transcription — record-time target; the held-transcript Paste button must be clickable |
+| T15 | K-10 | Audio render-thread hygiene (`dropped=0`) |
+| T16 | K-19 | VoiceOver ear-check + onboarding keyboard paths (updated for Compass) |
+| T17 | K-30 | Compass window/map-states/per-pane smoke/hotkey capture/indicator/deep-link |
+| T18 | K-31 + K-32 | Compass visual QA side-by-side vs the v1.2 mockups (light-chrome v1.3.x state) |
+| T19 | K-36 | Actionable-overlay buttons (Open / Paste) accept clicks; non-action overlays stay click-through |
+| T20 | K-38 | Long-dictation paste lands with no UI hitch; Escape responsive mid-transcription |
+
+Everything else is closed: K-01, K-02, K-04, K-08, K-09, K-12 (via K-24), K-14, K-20, K-21 passed
+in the archived 2026-08-12 run (Part 2); K-03, K-05…K-07, K-13, K-15–K-18, K-22, K-24, K-25,
+K-33 are ✅ on automated evidence alone. K-11 is still ⬜ todo — not implemented, nothing to test
+by hand. K-34 and K-40 closed 2026-08-22 on automated evidence alone; K-36/K-37/K-38 code
+landed 2026-08-22 and their human checks are folded into this runbook (K-37 → T11 step 2,
+K-34 → T12, K-36 → T14 + T19, K-38 → T20).
+
+Estimated time: **~70–100 min**, in order — T11–T14 share the mic/log/sentinel state; T17/T18
+want the app rebuilt from the current tree (the K-32 corrections live in the working tree,
+uncommitted). T19–T20 add ~10 min and reuse the same session.
+
+## Preparation for Part 1 (once, ~10 min)
+
+1. **Build & launch the current app.**
+   ```bash
+   cd "/Volumes/My Shared Files/GitHub/Kalam/app"
+   xcodebuild build -project Kalam.xcodeproj -scheme Kalam \
+     -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
+   ```
+   Run the fresh product from DerivedData (`Kalam-test`). When prompted, grant **Microphone**
+   AND **Accessibility** — the 2026-08-12 run stalled exactly here: T11 and T15 cannot run
+   without mic permission granted to the app. Confirm a model is ready (Compass → Engine pane)
+   and one quick dictation works before starting the clock.
+2. **Start the log monitor** (leave it running for the whole session):
+   ```bash
+   log stream --predicate 'subsystem == "singhkays.Kalam" || subsystem == "singhkays.Kalam-test"' \
+     --style compact > ~/kalam-test-log.txt 2>&1
+   ```
+3. **Clipboard sentinel** before any clipboard-sensitive test:
+   ```bash
+   printf 'KALAM-SENTINEL-1337' | pbcopy && pbpaste   # → KALAM-SENTINEL-1337
+   ```
+4. Targets: **TextEdit** (primary paste target) and **Terminal** (the switch-to app for T14),
+   cursor visible in TextEdit. A quiet room helps T11's noise-guard step.
+
+---
+
+## T11 — K-26 + K-27: sleep/wake recovery, docked webcam, noise guard
+
+**Setup:** Toggle activation mode (Compass → Trigger). Webcam/docked mic attached. Log monitor
+running. Baseline: one normal dictation works.
+
+**Steps:**
+1. **Post-wake dictation:** sleep the Mac ≥ 10 min (overnight is fine), wake, immediately press
+   the hotkey and dictate a full sentence.
+2. **Phantom-stop check (Toggle):** press the hotkey to START recording, let the Mac sleep
+   *before* pressing it again; wake. The first press after waking must behave as a fresh start —
+   it must NOT "stop" a phantom session left over from before sleep. (Pins K-37: since
+   2026-08-22 the wake handler *abandons* any live PTT session — the machine is idle at wake,
+   so the first post-wake press can only ever start.)
+3. **Docked-webcam recovery:** with the webcam mic as the active input, sleep + wake, then
+   dictate WITHOUT opening Settings. Then unplug/replug the webcam and dictate again.
+4. **Noise guard:** in a quiet moment, press the hotkey and stay silent (or shuffle paper) for
+   ~2 s, then stop.
+5. **Guard boundary:** dictate a short "yes", then a short "no".
+6. Optional log check over `~/kalam-test-log.txt`: expect a
+   `System wake: resetting PTT state and refreshing audio input` line on each wake (counts only,
+   never transcript/audio content).
+
+**Expected (PASS):**
+- Every post-wake dictation records normally — no instant-end, no wrong paste.
+- Nothing is ever pasted after the silent/noise-only attempt (a "No speech detected"-style
+  notice or plain nothing is fine) — **never** a filler word like "yeah".
+- "yes"/"no" still dictate normally (guard does not eat real speech).
+- The webcam/dock mic works straight after wake and after replug — no manual reordering in
+  Settings at any point.
+
+**FAIL if:** the first post-wake dictation ends instantly or pastes junk; any mic needs manual
+reordering after wake/replug; the silent attempt pastes a word.
+
+Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+
+---
+
+## T12 — K-28: ITN protection — the user sentences
+
+**Setup:** ITN enabled (Compass → Cleanup pane). Target app focused. Judge ONLY the number-word
+behavior — sentence-start capitalization and other cleanup are separate features.
+
+Dictate each line and inspect the pasted result:
+
+| # | Say | Expected (PASS) |
+|---|---|---|
+| 1 | "Don't worry, we consider you as one of us" | "one of us" stays words |
+| 2 | "twenty one of us" | normalizes to "21 of us" (compound numbers still convert) |
+| 3 | "five dollars and fifty cents" | "$5.50" (normal ITN still works) — K-34 pin: never "$5. 50" |
+| 4 | "I'm writing a two to three pager" | stays words ("2 - 3 pager" also acceptable) |
+| 5 | "twelve to fourteen people are coming" | stays words |
+| 6 | "first of all, thanks" | "first of all" stays words |
+
+Optional: "call me at five five five one two three four" — must stay words, never "16 9".
+Optional (K-34): "meeting at ten thirty" → "10:30", "version two point five" → "2.5" — never
+with a space after the dot ("10: 30", "2. 5").
+
+**FAIL if:** any line 1/4/5/6 turns into a time/date ("02:58 pager", "13:48 people"), or line 2/3
+fails to normalize, or any decimal/time shows the K-34 space ("$5. 50", "10: 30").
+
+Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+
+---
+
+## T13 — K-29: bare-"no" backtrack regression
+
+**Setup:** none beyond the baseline dictation.
+
+**Steps:** dictate "Yep, there is a roadmap meeting, so no problem" and a variant like
+"There's no way to do this quickly".
+
+**Expected (PASS):** the FULL sentence is pasted — the trailing "no problem" survives and the
+clause after "there's no way" is not deleted. (This pre-verifies the fix on a current build; the
+tracker's K-29 gate formally closes when a build ships to daily use.)
+
+**FAIL if:** text before/at "no problem" gets swallowed.
+
+Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+
+---
+
+## T14 — K-23: switch apps mid-transcription
+
+**Setup:** sentinel clipboard. Repeat in EACH activation mode (Hold, Toggle, Double Tap,
+Hold-or-Toggle).
+
+**Steps:**
+1. Focus TextEdit, start a dictation long enough that you can click away while ASR settles.
+2. While the transcript is being produced, click into Terminal (a different app).
+3. Watch where the transcript lands; then `pbpaste`.
+
+**Expected (PASS):**
+- The transcript lands in **TextEdit** (the app focused at record start) — via direct insert, not
+  the clipboard; `pbpaste` still returns the sentinel.
+- If direct insert fails, the overlay holds the transcript with a
+  "Transcript ready — paste into TextEdit?" notice + **Paste** action, and clicking Paste puts it
+  into the held target. Either outcome passes. (The Paste button being clickable is itself the
+K-36 gate — the capsule accepts clicks only while an action button is on screen; see T19.)
+
+**FAIL if:** the transcript appears in Terminal, or lands twice.
+
+Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes (per mode): ____________________
+
+---
+
+## T15 — K-10: audio render-thread hygiene
+
+Same three probes as archived T5 below (they were deferred only because the agent lacked mic
+permission — you can run them directly):
+
+1. **Rapid re-record ×5:** ~1 s recording, stop, immediately start again — listen for
+   clicks/dropouts.
+2. **Long dictation:** 3+ continuous minutes — no gaps, waveform smooth, normal stop.
+3. **Hygiene grep:**
+   ```bash
+   grep "Stopped collecting" ~/kalam-test-log.txt | tail -10
+   ```
+   Every line must end `dropped=0`.
+
+**FAIL if:** audible glitches, or any `dropped=` count > 0 (note the scenario).
+
+Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+
+---
+
+## T16 — K-19: VoiceOver + Full Keyboard Access (updated for Compass)
+
+**Setup:** enable VoiceOver (⌘F5) and Full Keyboard Access (System Settings → Accessibility →
+Keyboard). The old tabbed-settings checks from the 2026-08-12 run are obsolete — K-30 replaced
+that UI; aim VoiceOver at the Compass window now.
+
+**Steps:**
+1. Open Settings (Compass). VO-navigate the **map**: cards must announce meaningfully
+   (title + status), not "button".
+2. Enter each dive; the section nav should announce "section n of 6"; controls in Being Heard /
+   Trigger / Cleanup / Dictionary / Engine announce label + value.
+3. Onboarding: reset first-run state
+   (`defaults delete singhkays.Kalam-test internal.hasCompletedRequiredSetup` — debug-build
+   domain), relaunch, then: **Esc closes** the onboarding window; Tab/arrows reach every control;
+   nothing is announced as just "button".
+
+**Expected (PASS):** no unlabeled stops anywhere; dropdown-style controls announce their value;
+onboarding is fully keyboard-drivable incl. Esc.
+
+Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+
+---
+
+## T17 — K-30: Compass window + map states + per-pane smoke
+
+**Setup:** fresh build, model configured, permissions granted. (Gate list per the K-30 plan §9.)
+
+**Window:**
+1. Settings opens **fixed 980×660**, not resizable, **no traffic lights**, draggable by its
+   background; **Cmd-W closes**; reopening focuses the SAME single window (no duplicate).
+2. The privacy line is stable across map ⇄ dives and changes when you close/reopen the window.
+
+**Map states** (manipulate, then restore): settled / engine missing (point the model library at
+an empty folder) / engine incomplete (folder missing a required file) / no mic (deny mic
+permission) / key unset (clear the hotkey in Trigger) / empty dictionary / cleanup off / two
+problems at once. Cards must show the right status tone for each.
+
+**Per-pane smoke:**
+- **Being Heard:** toggles apply; input-device menu works; mic priority = numbered list with
+  ▲▼ steps (no drag), first connected device marked IN USE.
+- **Trigger:** presets switch modes; **Record shortcut…** captures a real custom chord and it
+  registers (dictate with it).
+- **Cleanup:** master toggle dims the detail controls; wells behave.
+- **Dictionary:** add/edit/delete/search/covers groups; a disabled rule re-enables on migration
+  (one-time `dictionary.migratedToCompassRules`).
+- **Engine:** choose/copy flow shows the copy-paste `cp` command only.
+- **Updates:** opens the browser.
+- **Menu-bar indicator:** 3-position setting renders in all three positions.
+- **Deep link:** onboarding's Settings affordance opens Compass (at the Engine dive).
+
+**Expected (PASS):** all of the above hold; no crash, no stuck state; settings persist across
+relaunch.
+
+Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+
+---
+
+## T18 — K-31 + K-32: visual QA vs the v1.2 mockups
+
+**Setup:** rebuild from the current tree (the v1.3.x corrections are in the working tree,
+uncommitted). Open `app/docs/plans/kalam-settings-redesign-v1.2/` mockups in a browser for
+side-by-side. Capture windows with ⌘⇧4 + Space (per-window shot) — you analyze the screenshots.
+
+**Checklist (locked state = v1 IS light, per the 2026-08-13 v1.3 correction):**
+- Chrome: paper window, light bar/sidebar/privacy pill, white cards, flat hero — **not dark**.
+- Fonts: Instrument Serif display-only (hero 36 / dive 34 / figure 48, real italic where used),
+  New York for small serif roles, SF Pro body, SF Mono kickers — **zero Plus Jakarta Sans /
+  IBM Plex Mono anywhere**.
+- Type details from the v1.3.1–v1.3.8 rounds: kickers read the same weight as the mockup render
+  (not bolder); card headers 11 pt mono with wide tracking + subtle edge shadow (no hairline);
+  first row of each card shows the tiny gradient wash (~3.5 pt), row separators crisp; card
+  titles ~17.5/regular; secondary grey reads warm taupe, not cold grey.
+- Status vocabulary: READY/SET/ON-type words render ink-grey with the tone carried by the 6 px
+  dot (green ok, amber warn keeps hue); Blocked/Missing read bad-red.
+- Reduce Motion: hover lift + animations suppressed.
+- Bundle check: only Instrument Serif faces + OFL licenses ship (no leftover web-font TTFs).
+
+**Expected (PASS):** side-by-side reads as the same design; nothing bolder/darker than the
+mockup render; no stray chrome.
+
+Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+
+---
+
+## T19 — K-36: overlay buttons clickable; other states stay click-through
+
+**Why:** the capsule used to set `ignoresMouseEvents` unconditionally, so recovery buttons
+rendered but could never be clicked. Since 2026-08-22 the window accepts clicks ONLY while an
+action button is on screen (`DictationOverlayController.setState`).
+
+**Two independent probes:**
+
+1. **Error-route "Open" (no mic needed):** System Settings → Privacy & Security → Microphone →
+   toggle Kalam OFF, then press the hotkey. An error capsule with an **Open** button appears.
+   Click it ONCE — System Settings must come to front. Restore mic permission afterwards
+   (needed by T15/T20).
+2. **Held-transcript "Paste":** run T14 until the "Transcript ready" capsule appears, click
+   **Paste** once, confirm the transcript inserts into TextEdit.
+
+**Pass-through regression:** during a normal recording (no button shown), click on a window
+*behind* the capsule's area — the click must reach that window, not be swallowed; recording
+continues untouched. After the actionable capsule hides, clicks near its old position must
+pass through again.
+
+**Expected (PASS):** both buttons fire on the first click; plain recording/transcribing
+capsules remain click-through (unchanged); the window goes inert again once no button shows.
+
+**FAIL if:** a button click does nothing (the old bug), or a plain recording capsule now eats
+clicks.
+
+Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+
+---
+
+## T20 — K-38: paste lands without a UI hitch
+
+**Why:** cleanup + ITN + dictionary replacement used to run on the main thread at paste time.
+Since 2026-08-22 they run off-main (Sendable snapshot hop in `TranscriptPostProcessor`), and
+the global-Escape monitor no longer loads settings on every keystroke.
+
+**Setup:** at least one dictionary rule exists (Compass → Dictionary). Log monitor running.
+
+**Steps:**
+1. Dictate 45–60 s of prose with deliberate grammar errors and several rule triggers.
+2. Stop, and while ASR settles keep interacting (drag a window, scroll, type elsewhere).
+3. The instant the paste lands, watch for a hitch: cursor freeze, beachball, dropped drag.
+4. During the same long transcription, tap **Escape** a few times — each tap must respond
+   immediately, including right as the transcript finishes.
+
+**Expected (PASS):** paste lands with zero perceptible stall; output is still fully processed
+(ITN, grammar, replacements all applied); Escape never lags.
+
+**FAIL if:** a visible stutter exactly when the transcript lands, a delayed Escape response,
+or processed-output differs from before the fix.
+
+Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+
+---
+
+## Report back (Part 1)
+
+Copy this into your reply and fill it in — I'll flip the matching K-IDs to ✅ with evidence and
+land anything being held on your sign-off:
+
+| # | Item(s) | Result | Notes |
+|---|---|---|---|
+| T11 | K-26 + K-27 + K-37 wake/guard | ☐ | |
+| T12 | K-28 + K-34 ITN + decimals | ☐ | |
+| T13 | K-29 bare-"no" | ☐ | |
+| T14 | K-23 + K-36 switch-app | ☐ | |
+| T15 | K-10 contention | ☐ | |
+| T16 | K-19 VO/keyboard | ☐ | |
+| T17 | K-30 Compass | ☐ | |
+| T18 | K-31+K-32 visual | ☐ | |
+| T19 | K-36 overlay clicks | ☐ | |
+| T20 | K-38 responsiveness | ☐ | |
+
+---
+
+# Part 2 — Archived: 2026-08-11 wave, executed 2026-08-12 (record only)
+
+**Date of run:** 2026-08-12 · **Tester:** agent (CGEvent/AX automation) + user ·
+**App build used:** Xcode Debug (`Kalam-test.app`)
+
+> The T1–T10 run below predates Compass (K-30) and the K-26..K-29 wave: T8/T10 reference the
+> deleted tabbed settings UI and the 900-pt window, both superseded. Results are kept for the
+> record. The original intro line — "every 🧑 gate open after the 2026-08-11 wave; engine 41/41,
+> full suite 79 passed / 0 failed / 3 skipped" — described the tree as of 2026-08-11.
+
+Covered by that run: K-01 (stale-paste cancellation), K-02 (clipboard restore), K-04 (settings
+tabs), K-08 (pasteboard exposure), K-09 (main-thread stall), K-10 (contention — deferred),
+K-12 (relaunch → blocked → filed K-24), K-14 (per-mode hotkey), K-19 (partial), K-21 (window
+width — superseded by K-30), K-30 (added later, gated in Part 1 T17).
 
 | Covered items | What they are |
 |---|---|
