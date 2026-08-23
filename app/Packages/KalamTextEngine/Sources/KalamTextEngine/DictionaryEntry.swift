@@ -1,6 +1,6 @@
 import Foundation
 
-public struct DictionaryEntry: Identifiable, Codable, Equatable {
+public struct DictionaryEntry: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID = UUID()
     public var trigger: String
     public var replacement: String

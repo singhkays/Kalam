@@ -132,3 +132,10 @@ import Foundation
     #expect(entries[0].trigger == "car")
     #expect(entries[0].caseInsensitive)
 }
+
+@Test func dictionaryEntryIsSendable() {
+    // K-38: TranscriptPostProcessor stores [DictionaryEntry] behind a
+    // Sendable struct; pin the conformance so it can't regress silently.
+    func assertSendable<T: Sendable>(_ value: T) {}
+    assertSendable(DictionaryEntry(trigger: "x", replacement: "y"))
+}
