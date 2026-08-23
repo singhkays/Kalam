@@ -46,15 +46,6 @@ struct KalamApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private enum ITNOptions {
-        static let enabledDefaultsKey = "internal.itn.enabled"
-        static let spanDefaultsKey = "internal.itn.maxSpanTokens"
-        static let defaultEnabled = true
-        static let defaultSpanTokens = 16
-        static let minSpanTokens = 4
-        static let maxSpanTokens = 64
-    }
-    
     private enum LatencyTuningOptions {
         static let postRollMinMsKey = "internal.latency.postRollMinMs"
         static let postRollMaxMsKey = "internal.latency.postRollMaxMs"
@@ -666,65 +657,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleEscapeEvent(_ event: NSEvent) {
         guard event.keyCode == 53 else { return } // Escape
+        // K-38: cheap checks FIRST — the global monitor fires on every
+        // Escape keystroke system-wide, so the defaults load must sit
+        // behind the isRecording gate.
+        guard isRecording else { return }
         let settings = GeneralSettingsConfiguration.load()
         guard settings.escapeCancelsRecording else { return }
-        guard isRecording else { return }
         cancelRecording()
     }
 
     private func logITNStatusOnStartup() {
-        let enabled = Self.isITNEnabled()
-        let span = Self.itnSpanTokens()
+        // K-38: enable/span moved into TranscriptPostProcessor (read at
+        // process time); launch logs availability + version only.
         if NemoTextProcessing.isAvailable {
             let version = NemoTextProcessing.version ?? "unknown"
-            logger.info("ITN ready enabled=\(enabled, privacy: .public) span=\(span, privacy: .public) version=\(version, privacy: .public)")
+            logger.info("ITN ready version=\(version, privacy: .public)")
         } else {
-            logger.warning("ITN unavailable enabled=\(enabled, privacy: .public) span=\(span, privacy: .public)")
+            logger.warning("ITN unavailable")
         }
     }
 
-    private nonisolated static func applyITNIfEnabled(to text: String) -> (text: String, changed: Bool, durationMs: Double, available: Bool, enabled: Bool, spanTokens: Int) {
-        let enabled = isITNEnabled()
-        let spanTokens = itnSpanTokens()
-        let nemoAvailable = NemoTextProcessing.isAvailable
-        guard enabled, nemoAvailable, !text.isEmpty else {
-            return (text, false, 0, nemoAvailable, enabled, spanTokens)
-        }
-
-        let span = UInt32(spanTokens)
-        let started = CFAbsoluteTimeGetCurrent()
-        let protector = ITNSpanProtector()
-        let lines = text.components(separatedBy: "\n")
-        let normalizedLines = lines.map { line -> String in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty else { return line }
-            // K-28: mask spoken-number spans ITN mis-normalizes (ranges,
-            // idioms, digit sequences), normalize, then restore.
-            let masked = protector.protect(trimmed)
-            let normalized = NemoTextProcessing.normalizeSentence(masked.text, maxSpanTokens: span)
-            return protector.restore(normalized, spans: masked.spans)
-        }
-
-        let normalized = normalizedLines.joined(separator: "\n")
-        let durationMs = (CFAbsoluteTimeGetCurrent() - started) * 1000
-        return (normalized, normalized != text, durationMs, nemoAvailable, enabled, Int(span))
-    }
-
-    private nonisolated static func isITNEnabled() -> Bool {
-        let defaults = UserDefaults.standard
-        guard defaults.object(forKey: ITNOptions.enabledDefaultsKey) != nil else {
-            return ITNOptions.defaultEnabled
-        }
-        return defaults.bool(forKey: ITNOptions.enabledDefaultsKey)
-    }
-
-    private nonisolated static func itnSpanTokens() -> Int {
-        let defaults = UserDefaults.standard
-        guard defaults.object(forKey: ITNOptions.spanDefaultsKey) != nil else {
-            return ITNOptions.defaultSpanTokens
-        }
-        let value = defaults.integer(forKey: ITNOptions.spanDefaultsKey)
-        return min(ITNOptions.maxSpanTokens, max(ITNOptions.minSpanTokens, value))
+    /// K-38: nonisolated + async => runs on the global executor (SE-0338),
+    /// NOT the MainActor. Captures only Sendable values.
+    private nonisolated static func postProcessTranscript(
+        _ processor: TranscriptPostProcessor,
+        _ text: String
+    ) async -> TranscriptPostProcessor.Output {
+        processor.process(text)
     }
 
     private func requestMicrophoneAccessFromOnboarding() async {
@@ -1107,16 +1066,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
                 
-                // Run cleanup on transcript text before dictionary replacements.
-                let cleanupConfig = ModelsConfiguration.load().textCleanup
-                let cleanupResult = TextCleanupEngine().clean(trimmedText, configuration: cleanupConfig)
-                let itnResult = Self.applyITNIfEnabled(to: cleanupResult.text)
-                stageMark("cleanup+itn")
-
-                // Apply custom dictionary replacements (phrases first, then words)
-                let (postProcessed, replaceCount) = CustomDictionaryManager.shared.apply(to: itnResult.text)
-                stageMark("dictionary")
-                self.logger.info("Transcription completed outputLength=\(postProcessed.count, privacy: .public) asrMs=\(Int((asrEnd - asrStart) * 1000), privacy: .public) cleanupEdits=\(cleanupResult.stats.totalEdits, privacy: .public) cleanupMs=\(Int(cleanupResult.stats.durationMs), privacy: .public) grammarEdits=\(cleanupResult.stats.grammarEdits, privacy: .public) grammarAttempted=\(cleanupResult.stats.grammarAttempted, privacy: .public) grammarTimedOut=\(cleanupResult.stats.grammarTimedOut, privacy: .public) grammarSkippedForLength=\(cleanupResult.stats.grammarSkippedForLength, privacy: .public) itnEnabled=\(itnResult.enabled, privacy: .public) itnAvailable=\(itnResult.available, privacy: .public) itnChanged=\(itnResult.changed, privacy: .public) itnMs=\(Int(itnResult.durationMs), privacy: .public) replacements=\(replaceCount, privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public)")
+                // K-38: snapshot Sendable inputs on-main, run cleanup+ITN+
+                // dictionary OFF the main actor, keep only counts in logs.
+                let processor = TranscriptPostProcessor(
+                    cleanupConfig: ModelsConfiguration.load().textCleanup,
+                    dictionaryEntries: CustomDictionaryManager.shared.entries
+                )
+                let post = await Self.postProcessTranscript(processor, trimmedText)
+                stageMark("cleanup+itn+dictionary")
+                self.logger.info("Transcription completed outputLength=\(post.text.count, privacy: .public) asrMs=\(Int((asrEnd - asrStart) * 1000), privacy: .public) cleanupEdits=\(post.stats.totalEdits, privacy: .public) cleanupMs=\(Int(post.stats.durationMs), privacy: .public) grammarEdits=\(post.stats.grammarEdits, privacy: .public) grammarAttempted=\(post.stats.grammarAttempted, privacy: .public) grammarTimedOut=\(post.stats.grammarTimedOut, privacy: .public) grammarSkippedForLength=\(post.stats.grammarSkippedForLength, privacy: .public) itnEnabled=\(post.itnEnabled, privacy: .public) itnAvailable=\(post.itnAvailable, privacy: .public) itnChanged=\(post.itnChanged, privacy: .public) itnMs=\(post.itnMs, privacy: .public) replacements=\(post.replacements, privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public)")
 
                 // Adaptive paste delay: 50ms for short segments (<5s) or 80ms otherwise, to reduce end-to-end latency.
                 // Fallback on error: Retry after additional delay to approx. total 120ms.
@@ -1142,16 +1100,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier
                     ) {
                     case .frontmost:
-                        try await self.paster.paste(postProcessed)
+                        try await self.paster.paste(post.text)
                     case .capturedElement(let element):
                         // K-23: the user switched apps while transcribing — insert into the
                         // record-time target (bypasses the pasteboard entirely).
                         do {
-                            try await self.paster.paste(into: element, text: postProcessed)
+                            try await self.paster.paste(into: element, text: post.text)
                         } catch {
                             // The captured target is gone (app quit / field closed): hold the
                             // transcript with a notice instead of pasting into the wrong app.
-                            self.heldTranscript = postProcessed
+                            self.heldTranscript = post.text
                             self.dictationTargetElement = nil
                             self.dictationTargetPID = nil
                             let frontmostName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "the frontmost app"
@@ -1183,7 +1141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     stageMark("paste-fallback-wait")
 
                     do {
-                        try await self.paster.paste(postProcessed)
+                        try await self.paster.paste(post.text)
                         self.overlay.showSuccessAndAutoHide()
                         stageMark("paste-fallback-dispatch")
                         if stageTimingEnabled {
