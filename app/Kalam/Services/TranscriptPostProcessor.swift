@@ -15,6 +15,7 @@ struct TranscriptPostProcessor: Sendable {
         let itnEnabled: Bool
         let itnAvailable: Bool
         let itnChanged: Bool
+        let itnSpansMasked: Int
         let itnMs: Int
     }
 
@@ -28,7 +29,13 @@ struct TranscriptPostProcessor: Sendable {
 
     func process(_ input: String) -> Output {
         let cleanupResult = TextCleanupEngine().clean(input, configuration: cleanupConfig)
-        let itnResult = Self.applyITN(to: cleanupResult.text)
+        // K-44: ITN answers to the same master switch as the cleanup rules.
+        // It previously keyed off the orphaned private default
+        // `internal.itn.enabled` (default true, written by nothing since K-30
+        // removed the old settings UI), so Cleanup OFF still normalized
+        // numbers behind the pane's promise. The dictionary stays independent
+        // of the master by design (scoped 2026-08-24).
+        let itnResult = Self.applyITN(to: cleanupResult.text, masterEnabled: cleanupConfig.enabled)
         let compiled = ReplacementCompiler.compile(entries: dictionaryEntries)
         let (postProcessed, replaceCount) = compiled.apply(to: itnResult.text)
         return Output(
@@ -38,52 +45,45 @@ struct TranscriptPostProcessor: Sendable {
             itnEnabled: itnResult.enabled,
             itnAvailable: itnResult.available,
             itnChanged: itnResult.changed,
+            itnSpansMasked: itnResult.spansMasked,
             itnMs: Int(itnResult.durationMs)
         )
     }
 
     // MARK: - ITN (ported verbatim from AppDelegate.applyITNIfEnabled, K-28)
 
-    private static let itnEnabledDefaultsKey = "internal.itn.enabled"
     private static let itnSpanDefaultsKey = "internal.itn.maxSpanTokens"
-    private static let itnDefaultEnabled = true
     private static let itnDefaultSpanTokens = 16
     private static let itnMinSpanTokens = 4
     private static let itnMaxSpanTokens = 64
 
-    private static func applyITN(to text: String) -> (text: String, changed: Bool, durationMs: Double, available: Bool, enabled: Bool, spanTokens: Int) {
-        let enabled = Self.isITNEnabled()
+    private static func applyITN(to text: String, masterEnabled: Bool) -> (text: String, changed: Bool, durationMs: Double, available: Bool, enabled: Bool, spanTokens: Int, spansMasked: Int) {
+        let enabled = masterEnabled
         let spanTokens = Self.itnSpanTokens()
         let nemoAvailable = NemoTextProcessing.isAvailable
         guard enabled, nemoAvailable, !text.isEmpty else {
-            return (text, false, 0, nemoAvailable, enabled, spanTokens)
+            return (text, false, 0, nemoAvailable, enabled, spanTokens, 0)
         }
 
         let span = UInt32(spanTokens)
         let started = CFAbsoluteTimeGetCurrent()
         let protector = ITNSpanProtector()
         let lines = text.components(separatedBy: "\n")
+        var spansMasked = 0
         let normalizedLines = lines.map { line -> String in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { return line }
             // K-28: mask spoken-number spans ITN mis-normalizes (ranges,
             // idioms, digit sequences), normalize, then restore.
             let masked = protector.protect(trimmed)
+            spansMasked += masked.spans.count
             let normalized = NemoTextProcessing.normalizeSentence(masked.text, maxSpanTokens: span)
             return protector.restore(normalized, spans: masked.spans)
         }
 
         let normalized = normalizedLines.joined(separator: "\n")
         let durationMs = (CFAbsoluteTimeGetCurrent() - started) * 1000
-        return (normalized, normalized != text, durationMs, nemoAvailable, enabled, Int(span))
-    }
-
-    private static func isITNEnabled() -> Bool {
-        let defaults = UserDefaults.standard
-        guard defaults.object(forKey: itnEnabledDefaultsKey) != nil else {
-            return itnDefaultEnabled
-        }
-        return defaults.bool(forKey: itnEnabledDefaultsKey)
+        return (normalized, normalized != text, durationMs, nemoAvailable, enabled, Int(span), spansMasked)
     }
 
     private static func itnSpanTokens() -> Int {

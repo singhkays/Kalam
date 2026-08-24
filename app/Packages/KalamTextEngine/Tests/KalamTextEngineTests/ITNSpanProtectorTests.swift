@@ -109,3 +109,54 @@ private func restored(_ text: String) -> String {
 @Test func restoreIsCasePreserving() {
     #expect(restored("One of us") == "One of us")
 }
+
+// MARK: K-42 (probed against the real library, 2026-08-24):
+// separator variants + mixed word/digit runs
+
+@Test func commaSeparatedRunIsMasked() {
+    // Raw ITN: "five, five, five, one, two, three, four" -> "... three, 4"
+    #expect(masked("five, five, five, one, two, three, four").contains("XXKALAMSPAN0XX"))
+}
+
+@Test func periodSeparatedRunIsMasked() {
+    #expect(masked("Five. Five. Five. One. Two. Three. Four.").contains("XXKALAMSPAN0XX"))
+}
+
+@Test func mixedWordDigitRunIsMasked() {
+    // Raw ITN: "five 5 five 1 two three 4" -> "5 5 5 1 02:03 4"
+    #expect(masked("five 5 five 1 two three 4").contains("XXKALAMSPAN0XX"))
+}
+
+@Test func shortDigitPairsStayUnmasked() {
+    // Fewer than 3 tokens never mask; Nemo leaves short digit pairs alone.
+    #expect(masked("see 5 7 tomorrow") == "see 5 7 tomorrow")
+}
+
+// MARK: K-43 (probed 2026-08-24): spoken-time sum composition ("40")
+
+@Test func temporalSpanRendersClockTime() {
+    let p = ITNSpanProtector()
+    let result = p.protect("meeting at ten thirty")
+    #expect(result.spans.count == 1)
+    #expect(result.spans[0].original == "at ten thirty")
+    #expect(result.spans[0].rendered == "at 10:30")
+    #expect(p.restore(result.text, spans: result.spans) == "meeting at 10:30")
+}
+
+@Test func teensTimeRendersWithPrefix() {
+    let result = ITNSpanProtector().protect("leave around twelve fifteen")
+    #expect(result.spans.count == 1)
+    #expect(result.spans[0].rendered == "around 12:15")
+}
+
+@Test func yearShapesAreNotTemporal() {
+    // Hours are restricted to one..twelve, so "by twenty twenty six" stays
+    // unmasked and Nemo renders the year (2026) natively.
+    #expect(masked("done by twenty twenty six") == "done by twenty twenty six")
+}
+
+@Test func threeTokenTimeStaysUnmasked() {
+    // Probe boundary: Nemo renders hour+tens+UNIT correctly ("02:53"), so
+    // only the two-token sum-broken shape ("ten thirty" -> "40") is masked.
+    #expect(masked("I'll meet you at two fifty three") == "I'll meet you at two fifty three")
+}

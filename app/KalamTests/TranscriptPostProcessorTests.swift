@@ -9,9 +9,12 @@ import KalamTextEngine
 /// `AppDelegate.postProcessTranscript` in production.
 final class TranscriptPostProcessorTests: XCTestCase {
 
-    private func makeProcessor(entries: [DictionaryEntry] = []) -> TranscriptPostProcessor {
+    private func makeProcessor(
+        entries: [DictionaryEntry] = [],
+        config: TextCleanupConfiguration = .defaults
+    ) -> TranscriptPostProcessor {
         TranscriptPostProcessor(
-            cleanupConfig: TextCleanupConfiguration.defaults,
+            cleanupConfig: config,
             dictionaryEntries: entries
         )
     }
@@ -39,5 +42,27 @@ final class TranscriptPostProcessorTests: XCTestCase {
     func testEmptyInputPassesThroughWithoutReplacements() {
         let out = makeProcessor().process("")
         XCTAssertEqual(out.replacements, 0)
+    }
+
+    // K-44: the Cleanup master must stop ITN too — "types exactly what it
+    // heard" means no hidden number normalization.
+    func testCleanupMasterOffSkipsITN() {
+        var config = TextCleanupConfiguration.defaults
+        config.enabled = false
+        let out = makeProcessor(config: config).process("twenty one of us")
+        XCTAssertFalse(out.itnEnabled, "ITN ran although the Cleanup master is off")
+        XCTAssertFalse(out.itnChanged)
+        XCTAssertEqual(out.text, "twenty one of us")
+    }
+
+    // Scoped decision (2026-08-24): the dictionary stays independent of the
+    // Cleanup master — curated substitutions are wanted even with rules off.
+    func testDictionaryStillAppliesWhenCleanupOff() {
+        var config = TextCleanupConfiguration.defaults
+        config.enabled = false
+        let entry = DictionaryEntry(trigger: "open ai", replacement: "OpenAI")
+        let out = makeProcessor(entries: [entry], config: config).process("i use open ai daily")
+        XCTAssertEqual(out.text, "i use OpenAI daily")
+        XCTAssertEqual(out.replacements, 1)
     }
 }

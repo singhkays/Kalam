@@ -109,7 +109,7 @@ Dictate each line and inspect the pasted result:
 |---|---|---|
 | 1 | "Don't worry, we consider you as one of us" | "one of us" stays words |
 | 2 | "twenty one of us" | normalizes to "21 of us" (compound numbers still convert) |
-| 3 | "five dollars and fifty cents" | "$5.50" (normal ITN still works) — K-34 pin: never "$5. 50" |
+| 3 | "five dollars and fifty cents" | "$5.50" (normal ITN still works) — K-34 pin: never "$5. 50". Known Nemo quirk (K-45): a sentence-final period can strand "cents" ("$5.50 cents.") — accepted as non-regression until K-45 fixes it |
 | 4 | "I'm writing a two to three pager" | stays words ("2 - 3 pager" also acceptable) |
 | 5 | "twelve to fourteen people are coming" | stays words |
 | 6 | "first of all, thanks" | "first of all" stays words |
@@ -118,10 +118,45 @@ Optional: "call me at five five five one two three four" — must stay words, ne
 Optional (K-34): "meeting at ten thirty" → "10:30", "version two point five" → "2.5" — never
 with a space after the dot ("10: 30", "2. 5").
 
+Control (K-44): flip the Cleanup master OFF (Compass → Cleanup), dictate "five five five one
+two three four" again — raw ASR must come through untouched (words stay words, nothing
+normalized), proving ITN is genuinely off now. Flip the master back ON afterwards.
+
 **FAIL if:** any line 1/4/5/6 turns into a time/date ("02:58 pager", "13:48 people"), or line 2/3
 fails to normalize, or any decimal/time shows the K-34 space ("$5. 50", "10: 30").
 
-Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+Result: 🟢 CLOSED 2026-08-24 (re-dictation passed; full history below — first run 2026-08-23
+was a partial fail, fixed and machine-verified 2026-08-24). Historical PASS evidence (2026-08-23): "twenty one of us" → "21 of us";
+"$5.50"; bonus "version two point five" → "2.5" (the K-34 punctuation fix holds live).
+BENIGN: "two to three pager" → "2 to 3" — no corruption ("02:58" is the failure mode), and a
+digit rendering was pre-declared acceptable; it proves ASR emitted digit-shaped text on that
+attempt. HARD FAIL: "five five five one two three four" → "16 9" (the documented raw-ITN
+signature — word-shaped input reached Nemo unmasked); NEW: "meeting at ten thirty" → "40".
+Same utterance produced "5551234" on another attempt — ASR output shape varies between tries,
+so protection must cover both forms. Filed as K-42 / K-43.
+Fix status (2026-08-24, machine-verified): real-library probe reproduced all three failures at
+the Nemo level; `ITNSpanProtector` now covers comma/period-separated runs, mixed word+digit
+runs, and renders two-token spoken times itself ("meeting at ten thirty" → "meeting at 10:30";
+the three-token form Nemo handles correctly stays unmasked). Engine 73/73; app-side targeted
+suite 16/16 (processor 6, integration 9, shape canary 1). Re-dictate these lines on a fresh
+build to flip K-28/K-42/K-43 — and note the cleanup-off control is now meaningful because ITN
+respects the Cleanup master (K-44 fix).
+
+Result (2026-08-24 re-run, post-fix build): 🟢 PASS 6/6 — "twenty one of us" → "21 of us";
+"$5.50" (no K-34 space); "two to three pager" and "twelve to fourteen people" stayed words;
+"first of all" intact. One new finding: line 3 pasted "$5.50 cents." — reproduced at the
+library level and filed as **K-45** (Nemo strands "cents" when the utterance carries a
+sentence-final period; same words without the period → clean "$5.50"). Not a regression of
+K-42/K-43: all protected shapes held. K-28/K-42/K-43 remain 🧑-gated on one more dictation of
+the phone/time lines (the ones that failed in 2026-08-23) plus the cleanup-off control above;
+line 3's residual is tracked as K-45, not a T12 blocker.
+
+Closed same day (2026-08-24): user dictated the previously-failing lines on the post-fix
+build — "call me at five five five one two three four" pasted verbatim as words (never
+"16 9"), "meeting at ten thirty" → "Meeting at 10:30.", "version two point five" → "Version
+2.5", and with Cleanup OFF raw ASR came through untouched ("Five five five one two three
+four"). K-28, K-42, K-43, K-44 flipped ✅ in IMPROVEMENT_PLAN.md with this evidence.
+T12's remaining open item is none — only K-45 (cosmetic "cents" quirk) carries forward.
 
 ---
 
