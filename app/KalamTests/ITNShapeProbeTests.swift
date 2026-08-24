@@ -49,7 +49,9 @@ final class ITNShapeProbeTests: XCTestCase {
             "Five dollars and 50 cents",
             "Twenty one of us",
             "five dollars and fifty cents cents",
-            "Five dollars and fifty cents."
+            "Five dollars and fifty cents.",
+            "Five dollars and fifty cents!",
+            "Five dollars and fifty cents?"
         ]
         var report = ""
         for shape in shapes {

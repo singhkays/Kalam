@@ -65,4 +65,21 @@ final class TranscriptPostProcessorTests: XCTestCase {
         XCTAssertEqual(out.text, "i use OpenAI daily")
         XCTAssertEqual(out.replacements, 1)
     }
+
+    // K-45: Nemo strands "cents" when the utterance carries sentence-final
+    // punctuation ("Five dollars and fifty cents." -> "$5.50 cents.");
+    // the pipeline must render the conversion plus the terminator.
+    func testTerminalPeriodDoesNotStrandCents() {
+        let out = makeProcessor().process("Five dollars and fifty cents.")
+        XCTAssertEqual(out.text, "$5.50.", "got: \\(out.text)")
+    }
+
+    func testTerminalBangAndQuestionAlsoRestored() {
+        XCTAssertEqual(makeProcessor().process("Five dollars and fifty cents!").text, "$5.50!")
+        XCTAssertEqual(makeProcessor().process("Five dollars and fifty cents?").text, "$5.50?")
+    }
+
+    func testCurrencyWithoutTerminalPunctuationUnchanged() {
+        XCTAssertEqual(makeProcessor().process("five dollars and fifty cents").text, "$5.50")
+    }
 }

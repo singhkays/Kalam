@@ -65,6 +65,10 @@ struct TranscriptPostProcessor: Sendable {
             return (text, false, 0, nemoAvailable, enabled, spanTokens, 0)
         }
 
+        // K-45: Nemo's currency span stops consuming at sentence-final
+        // punctuation and strands the word "cents" ("Five dollars and fifty
+        // cents." -> "$5.50 cents."). Strip each line's single trailing
+        // terminator up front and re-append it after normalization.
         let span = UInt32(spanTokens)
         let started = CFAbsoluteTimeGetCurrent()
         let protector = ITNSpanProtector()
@@ -73,12 +77,22 @@ struct TranscriptPostProcessor: Sendable {
         let normalizedLines = lines.map { line -> String in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { return line }
+            var terminator: String?
+            var workingLine = trimmed
+            if let last = workingLine.last, ".!?".contains(last) {
+                terminator = String(last)
+                workingLine = String(workingLine.dropLast())
+            }
             // K-28: mask spoken-number spans ITN mis-normalizes (ranges,
             // idioms, digit sequences), normalize, then restore.
-            let masked = protector.protect(trimmed)
+            let masked = protector.protect(workingLine)
             spansMasked += masked.spans.count
             let normalized = NemoTextProcessing.normalizeSentence(masked.text, maxSpanTokens: span)
-            return protector.restore(normalized, spans: masked.spans)
+            var restored = protector.restore(normalized, spans: masked.spans)
+            if let terminator {
+                restored += terminator
+            }
+            return restored
         }
 
         let normalized = normalizedLines.joined(separator: "\n")

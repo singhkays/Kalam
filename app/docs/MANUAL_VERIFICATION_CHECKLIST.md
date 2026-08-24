@@ -56,6 +56,14 @@ uncommitted). T19–T20 add ~10 min and reuse the same session.
    ```bash
    printf 'KALAM-SENTINEL-1337' | pbcopy && pbpaste   # → KALAM-SENTINEL-1337
    ```
+   Expected zsh quirk: the output gets a highlighted trailing `%` — the sentinel
+   deliberately has NO trailing newline (`echo` would add one and break the
+   exact-equality restore guard); `%` just marks that missing newline.
+   Re-set the sentinel immediately before EACH clipboard-sensitive test
+   (T14/T19): copy-on-select terminals (iTerm2 default) silently overwrite the
+   clipboard whenever you highlight text. If `pbpaste` ever prints anything
+   else (e.g. the literal word `pbpaste`), the sentinel was clobbered — set it
+   again before trusting a restore result.
 4. Targets: **TextEdit** (primary paste target) and **Terminal** (the switch-to app for T14),
    cursor visible in TextEdit. A quiet room helps T11's noise-guard step.
 
@@ -98,7 +106,7 @@ Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
 
 ---
 
-## T12 — K-28: ITN protection — the user sentences
+## ✅ T12 — K-28: ITN protection — the user sentences
 
 **Setup:** ITN enabled (Compass → Cleanup pane). Target app focused. Judge ONLY the number-word
 behavior — sentence-start capitalization and other cleanup are separate features.
@@ -109,7 +117,7 @@ Dictate each line and inspect the pasted result:
 |---|---|---|
 | 1 | "Don't worry, we consider you as one of us" | "one of us" stays words |
 | 2 | "twenty one of us" | normalizes to "21 of us" (compound numbers still convert) |
-| 3 | "five dollars and fifty cents" | "$5.50" (normal ITN still works) — K-34 pin: never "$5. 50". Known Nemo quirk (K-45): a sentence-final period can strand "cents" ("$5.50 cents.") — accepted as non-regression until K-45 fixes it |
+| 3 | "five dollars and fifty cents" | "$5.50" (normal ITN still works) — K-34 pin: never "$5. 50". K-45 fixed 2026-08-24: trailing punctuation must NOT strand "cents" — "$5.50 cents." is now a FAIL |
 | 4 | "I'm writing a two to three pager" | stays words ("2 - 3 pager" also acceptable) |
 | 5 | "twelve to fourteen people are coming" | stays words |
 | 6 | "first of all, thanks" | "first of all" stays words |
@@ -156,11 +164,14 @@ build — "call me at five five five one two three four" pasted verbatim as word
 "16 9"), "meeting at ten thirty" → "Meeting at 10:30.", "version two point five" → "Version
 2.5", and with Cleanup OFF raw ASR came through untouched ("Five five five one two three
 four"). K-28, K-42, K-43, K-44 flipped ✅ in IMPROVEMENT_PLAN.md with this evidence.
-T12's remaining open item is none — only K-45 (cosmetic "cents" quirk) carries forward.
+T12's remaining open item is none — only K-45 carried forward, and its fix landed 2026-08-24
+(per-line terminal-punctuation strip around the ITN call; pins green). On the next build,
+line 3 must render "$5.50" whether or not the dictation appends a period — "$5.50 cents."
+is a FAIL. 🧑 optional confirm: dictate line 3 naturally on that build.
 
 ---
 
-## T13 — K-29: bare-"no" backtrack regression
+## ✅ T13 — K-29: bare-"no" backtrack regression
 
 **Setup:** none beyond the baseline dictation.
 
@@ -173,7 +184,11 @@ tracker's K-29 gate formally closes when a build ships to daily use.)
 
 **FAIL if:** text before/at "no problem" gets swallowed.
 
-Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+Result: ✅ PASS (2026-08-24) — both sentences pasted in full:
+"Yep, there is a roadmap meeting, so no problem"
+"There is no way to do this quickly."
+Trailing "no problem" survived; nothing after "no way" was deleted. (Tracker note: K-29's
+formal gate still closes only when a build ships to daily use — this pre-verification holds.)
 
 ---
 
