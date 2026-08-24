@@ -5,7 +5,7 @@ interface FAQItem {
   answer: string;
 }
 
-const faqs: FAQItem[] = [
+export const faqs: FAQItem[] = [
   {
     question: "Is any of my data shared? Does it leave my laptop?",
     answer:
