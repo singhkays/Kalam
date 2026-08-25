@@ -890,16 +890,14 @@ private final class OverlayCapsuleView: NSView {
 
     /// K-48 Task 5 + review finding I-1: per-session surface switch. Called from
     /// transition(to:) so a prewarmed window still receives styling at present time.
+    /// Always applies both styling and animation gating: idempotent, and covers
+    /// appearance flips plus machined-session Reduce Motion without early returns.
     func setCompactSurface(active: Bool, darkAppearance: Bool, reduceMotion: Bool) {
         usesDarkAppearanceForSession = darkAppearance
         sessionReduceMotion = reduceMotion
-        if active {
-            // Re-apply on every transition: cheap, idempotent, and covers appearance flips.
-            applySurfaceStyling()
-            updateBreatheAnimation()
-        } else if isCompactSurface {
-            isCompactSurface = false
-        }
+        isCompactSurface = active
+        applySurfaceStyling()
+        updateBreatheAnimation()
     }
 
     private func applySurfaceStyling() {
@@ -918,6 +916,12 @@ private final class OverlayCapsuleView: NSView {
             appIconView.layer?.cornerRadius = 4
             pillLevelStack?.isHidden = false
             refreshPillBarColors()
+            // Review gap 4: light-appearance pill needs dark-on-light label ink.
+            let nameInk = usesDarkAppearanceForSession ? NSColor.white : NSColor.black
+            appNameLabel.textColor = nameInk
+            timerLabel.textColor = usesDarkAppearanceForSession
+                ? NSColor.white.withAlphaComponent(0.55)
+                : NSColor.black.withAlphaComponent(0.65)
         } else {
             // Machined deck defaults.
             layer.cornerRadius = Metrics.cornerRadius
@@ -925,6 +929,9 @@ private final class OverlayCapsuleView: NSView {
             layer.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
             appNameLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
             timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+            appNameLabel.textColor = .white
+            timerLabel.textColor = NSColor.white.withAlphaComponent(0.55)
+            messageLabel.textColor = .white
             pillLevelStack?.isHidden = true
             shimmerStack?.isHidden = true
         }
