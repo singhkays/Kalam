@@ -173,7 +173,7 @@ struct BeingHeardPane: View {
                 } label: {
                     VStack(spacing: 8) {
                         ZStack {
-                            RoundedRectangle(cornerRadius: 10)
+                            RoundedRectangle(cornerRadius: SettingsLayout.radiusControl)
                                 .fill(
                                     LinearGradient(
                                         colors: [
@@ -218,12 +218,12 @@ struct BeingHeardPane: View {
                         }
                         HStack(spacing: 6) {
                             Text(style.rawValue.uppercased())
-                                .font(SettingsFont.mono(8.5))
+                                .font(SettingsType.styleSampleWellLabel)
                                 .compassTracking(SettingsType.trackMonoState)
                                 .foregroundStyle(selected ? Color.kGreen : Color.kInk3)
                             if selected {
                                 Text("SELECTED")
-                                    .font(SettingsFont.mono(8.5))
+                                    .font(SettingsType.styleSampleWellLabel)
                                     .compassTracking(SettingsType.trackMonoState)
                                     .foregroundStyle(Color.kGreen)
                             }
@@ -238,9 +238,13 @@ struct BeingHeardPane: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(style.label)
+                .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
         .padding(.top, 10)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Recording indicator style")
     }
 
     private var microphoneCard: some View {
