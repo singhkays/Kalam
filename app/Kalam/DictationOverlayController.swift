@@ -160,12 +160,22 @@ final class DictationOverlayController {
             positionWindow(on: screen)
         }
         guard let w = window, let view = contentView else { return }
-        // K-48 Task 7: when the caret chip owns feedback, the corner window stays hidden;
-        // the chip appears on the next timer tick (or immediately below via first anchor).
+        // K-48 Task 7: when the caret chip owns feedback, the corner window stays hidden
+        // but BOTH feedback loops still run — they drive the chip's clock, level glyph,
+        // and 500ms re-anchoring. If anchoring fails, the fallback law applies: hide the
+        // chip attempt and let the machined deck take the state (review R1/R3).
         if caretChipOwnsFeedback(for: state) {
-            w.alphaValue = 0.0
             updateCaretChip(state: state, element: caretAnchorElement)
-            return
+            if caretChipWindow?.isVisible == true {
+                // Chip is live: corner window stays hidden; loops drive clock/levels/re-anchor.
+                w.alphaValue = 0.0
+                startWaveformUpdates()
+                startTimerUpdates()
+                currentStateSetTime = CFAbsoluteTimeGetCurrent()
+                return
+            }
+            // Anchor failed: fallback law hands the state to the machined deck below.
+            hideCaretChip()
         } else {
             hideCaretChip()
         }
