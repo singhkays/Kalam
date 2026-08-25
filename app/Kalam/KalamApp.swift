@@ -105,6 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isAudioReady = false
     private var pttDownTime: CFAbsoluteTime = 0
     private var startLatencyProbe: RecordingStartLatencyProbe?
+    private var napActivity: NSObjectProtocol?
     private var cachedOnboardingSnapshot: OnboardingStatusSnapshot?
     private var cachedOnboardingSnapshotAt: Date?
     /// Freshness backstop; event-driven invalidation below is the primary mechanism.
@@ -165,7 +166,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             LatencyTuningOptions.enableStageTimingKey: LatencyTuningOptions.defaultEnableStageTiming,
             LatencyTuningOptions.startStageTimingKey: true
         ])
-        
+
+        // App Nap guard: defeats timer coalescing so hotkey handling stays
+        // immediate. userInitiated ONLY - never block system/display sleep.
+        napActivity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated],
+            reason: "Dictation hotkey responsiveness"
+        )
+
         SystemAudioDucker.shared.initialize()
         overlay.setWaveformProvider { [weak self] in
             self?.audio.recentWaveform(sampleCount: 512) ?? []
@@ -173,7 +181,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.setPasteHeldTranscriptAction { [weak self] in
             self?.pasteHeldTranscript()
         }
-        
+        overlay.prewarm()
+
         // Status bar icon/menu
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {

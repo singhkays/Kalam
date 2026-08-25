@@ -45,6 +45,9 @@ final class DictationOverlayController {
     private var currentStateSetTime: CFAbsoluteTime = 0
     private let minStateDwellSeconds: Double = 0.25
     private let fadeDuration: TimeInterval = 0.18
+    /// Near-instant appearance for recording states; the general fade stays for
+    /// transcribing/success/info/error transitions.
+    private let recordingFadeDuration: TimeInterval = 0.06
     private let compactWindowSize = NSSize(width: Metrics.overlayWidth, height: Metrics.compactHeight)
     private let recordingWindowSize = NSSize(width: Metrics.overlayWidth, height: Metrics.recordingHeight)
     private var currentWindowSize = NSSize(width: Metrics.overlayWidth, height: Metrics.compactHeight)
@@ -59,6 +62,16 @@ final class DictationOverlayController {
     /// record-time paste target capture: wire the held-transcript "Paste" action to the app (which owns the paste pipeline).
     func setPasteHeldTranscriptAction(_ action: @escaping () -> Void) {
         pasteHeldTranscriptAction = action
+    }
+
+    /// Builds the overlay window once at launch so the first recording start
+    /// never pays window construction. The window stays unordered (invisible).
+    func prewarm() {
+        ensureWindow()
+        if let screen = placementScreen ?? fallbackScreen() {
+            positionWindow(on: screen)
+        }
+        window?.alphaValue = 0.0
     }
 
     func showRecording(isHoldMode: Bool) {
@@ -134,8 +147,9 @@ final class DictationOverlayController {
         view.apply(presentation: presentation)
         w.alphaValue = 0.0
         w.orderFrontRegardless()
+        let presentDuration = isRecordingState(state) ? recordingFadeDuration : fadeDuration
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = fadeDuration
+            context.duration = presentDuration
             w.animator().alphaValue = 1.0
         }
         if let autoHideAfter {
