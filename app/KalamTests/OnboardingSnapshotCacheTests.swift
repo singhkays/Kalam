@@ -22,4 +22,11 @@ final class OnboardingSnapshotCacheTests: XCTestCase {
         XCTAssertFalse(OnboardingSnapshotCacheDecision.shouldReuse(
             cachedAt: now, now: now, maxAgeSeconds: 0))
     }
+
+    func testFutureCachedAtReusesUntilMaxAge() {
+        // Clock stepped back: negative age is conservative-reuse; pin it.
+        let now = Date()
+        XCTAssertTrue(OnboardingSnapshotCacheDecision.shouldReuse(
+            cachedAt: now.addingTimeInterval(10), now: now, maxAgeSeconds: 2.0))
+    }
 }

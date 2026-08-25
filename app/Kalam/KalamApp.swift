@@ -217,6 +217,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
+                // hotkeyConfig feeds the onboarding snapshot (hotkeyStatus,
+                // selectedHotkeyDisplay) — keep the cache net symmetric.
+                self.invalidateOnboardingSnapshot()
                 let configuration = PTTHotkeyConfiguration.load()
                 self.hotkeyConfiguration = configuration
                 self.pttState.resetForConfigurationChange()
@@ -422,16 +425,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func currentOnboardingSnapshot() -> OnboardingStatusSnapshot {
+        let now = Date()
         if let cached = cachedOnboardingSnapshot,
            OnboardingSnapshotCacheDecision.shouldReuse(
             cachedAt: cachedOnboardingSnapshotAt,
-            now: Date(),
+            now: now,
             maxAgeSeconds: Self.onboardingSnapshotMaxAgeSeconds) {
             return cached
         }
         let snapshot = buildOnboardingSnapshot()
         cachedOnboardingSnapshot = snapshot
-        cachedOnboardingSnapshotAt = Date()
+        cachedOnboardingSnapshotAt = now
         return snapshot
     }
 
