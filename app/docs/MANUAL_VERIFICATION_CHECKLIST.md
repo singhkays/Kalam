@@ -219,7 +219,9 @@ cents". No 21, no 2 - 3 pager, no $5.50.
 
 **FAIL if:** any number converts ("21 of us", "2 - 3 pager", "$5.50") while the master is off.
 
-Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+**Run 2026-08-25 (cleanup OFF): PASS.** Dictated "One of us, two to three paid eager, five
+dollars and fifty cents." → pasted verbatim: no 21, no 2 - 3 pager, no $5.50. ITN did not
+run with the master off.
 
 ---
 
@@ -242,7 +244,12 @@ master is off. Spoken numbers would also have stayed words (T21 covers that half
 **FAIL if:** the text comes back unchanged ("open ai" not replaced) — that would mean the
 master switch now eats dictionary rules too, contradicting the scoped design.
 
-Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes (remember to delete the test rule): __________
+Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes (remember to delete the test rule):
+**Run 2026-08-25 (cleanup OFF): PASS.** Rule `open ai` → `OpenAI` fired while the Cleanup
+master was still off; spoken numbers in the same session stayed words (T21). Note: dictated
+as "Open AI" and pasted "Open AI" — case-insensitive match, replacement kept the dictated
+capitalization via preserveCase (default true), which is correct rule behavior, not a miss.
+(Test rule deleted afterwards.)
 
 ---
 
