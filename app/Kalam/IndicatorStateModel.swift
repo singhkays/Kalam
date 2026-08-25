@@ -25,6 +25,9 @@ struct IndicatorPresentation: Sendable {
 /// views translate these values into pixels.
 enum IndicatorStateModel {
 
+    /// Canonical full-capsule width. DictationOverlayController.Metrics.overlayWidth consumes this.
+    static let machinedFormWidth: CGFloat = 290
+
     /// Fallback law: held/blocked ALWAYS present in machined form regardless of
     /// style, because actionable states need the full surface. Transient states
     /// render compact for whisper/caret only; machined is never compact.
@@ -91,7 +94,7 @@ enum IndicatorStateModel {
         switch state {
         case .listening, .pausing: 200
         case .transcribing: 150
-        case .held, .blocked: 290
+        case .held, .blocked: machinedFormWidth
         }
     }
 }

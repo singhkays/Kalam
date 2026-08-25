@@ -9,7 +9,7 @@ private let indicatorBrandGreen = NSColor(srgbRed: 82/255.0, green: 183/255.0, b
 @MainActor
 final class DictationOverlayController {
     private enum Metrics {
-        static let overlayWidth: CGFloat = 290
+        static let overlayWidth: CGFloat = IndicatorStateModel.machinedFormWidth
         static let compactHeight: CGFloat = 34
         static let recordingHeight: CGFloat = 72
         static let topInset: CGFloat = 20

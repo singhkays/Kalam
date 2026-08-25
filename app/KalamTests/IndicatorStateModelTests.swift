@@ -99,4 +99,8 @@ final class IndicatorStateModelTests: XCTestCase {
     func testCompactWidthBlockedUsesMachinedFormWidth() {
         XCTAssertEqual(IndicatorStateModel.compactWidth(state: .blocked), 290)
     }
+
+    func testMachinedFormWidthMatchesControllerMetric() {
+        XCTAssertEqual(IndicatorStateModel.machinedFormWidth, 290)
+    }
 }
