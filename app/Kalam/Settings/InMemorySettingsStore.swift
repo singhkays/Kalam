@@ -9,6 +9,7 @@ final class InMemorySettingsStore: SettingsBacking {
     var escapeCancels: Bool = true { didSet { ping() } }
     var muteOtherAudio: Bool = true { didSet { ping() } }
     var indicator: IndicatorPlacement = .topCenter { didSet { ping() } }
+    var indicatorStyle: IndicatorStyle = .machined { didSet { ping() } }
 
     var dictionaryLoadFailureNotice: String? { nil }
 

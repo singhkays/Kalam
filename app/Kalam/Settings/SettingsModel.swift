@@ -61,6 +61,11 @@ final class SettingsModel {
         set { store.indicator = newValue }
     }
 
+    var indicatorStyle: IndicatorStyle {
+        get { _ = revision; return store.indicatorStyle }
+        set { store.indicatorStyle = newValue }
+    }
+
     var microphones: [Microphone] { _ = revision; return store.microphones }
 
     var lastUsedID: String? {

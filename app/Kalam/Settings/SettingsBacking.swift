@@ -13,6 +13,7 @@ protocol SettingsBacking: AnyObject {
     var escapeCancels: Bool { get set }
     var muteOtherAudio: Bool { get set }
     var indicator: IndicatorPlacement { get set }
+    var indicatorStyle: IndicatorStyle { get set }
 
     // Microphones — ordered priority; IN USE is first connected, not blindly index 0
     var microphones: [Microphone] { get }

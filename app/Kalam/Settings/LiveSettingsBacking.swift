@@ -95,6 +95,11 @@ final class LiveSettingsBacking: SettingsBacking {
         set { saveGeneral { $0.indicatorPlacement = newValue } }
     }
 
+    var indicatorStyle: IndicatorStyle {
+        get { GeneralSettingsConfiguration.load(from: defaults).indicatorStyle }
+        set { saveGeneral { $0.indicatorStyle = newValue } }
+    }
+
     private func saveGeneral(_ mutate: (inout GeneralSettingsConfiguration) -> Void) {
         var config = GeneralSettingsConfiguration.load(from: defaults)
         mutate(&config)

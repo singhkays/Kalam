@@ -59,6 +59,15 @@ final class LiveSettingsBackingTests: XCTestCase {
         XCTAssertEqual(makeBacking().indicator, .bottomCenter)
     }
 
+    // MARK: - Indicator style
+
+    func testIndicatorStyleRoundTrip() {
+        let backing = makeBacking()
+        backing.indicatorStyle = .whisper
+        XCTAssertEqual(suite.string(forKey: GeneralSettingsKeys.indicatorStylePreset), "whisper")
+        XCTAssertEqual(makeBacking().indicatorStyle, .whisper)
+    }
+
     // MARK: - Behavior toggles
 
     func testBehaviorTogglesRoundTrip() {

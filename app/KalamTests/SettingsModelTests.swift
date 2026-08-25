@@ -268,6 +268,17 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertEqual(model.microphones.map(\.id), ["cam", "mbp", "usb"])
     }
 
+    // MARK: - Forwarded settings (store path)
+
+    func testIndicatorStyleReadsAndWritesThroughStore() {
+        let store = InMemorySettingsStore()
+        let model = makeModel(store)
+        XCTAssertEqual(model.indicatorStyle, .machined)
+        model.indicatorStyle = .caret
+        XCTAssertEqual(store.indicatorStyle, .caret)
+        XCTAssertEqual(model.indicatorStyle, .caret)
+    }
+
     // MARK: - Revision mechanism (plan §4.1 — the @Observable reactivity fix)
 
     func testRevisionBumpsOnExternalStoreChange() async {
