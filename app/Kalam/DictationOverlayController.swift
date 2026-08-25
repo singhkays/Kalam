@@ -308,6 +308,7 @@ final class DictationOverlayController {
                 await MainActor.run {
                     self.contentView?.updateWaveform(samples: samples, active: true)
                     self.contentView?.updatePillLevel(samples: samples)
+                    self.caretChipContentView?.updateLevel(samples: samples)
                 }
                 try? await Task.sleep(nanoseconds: 33_000_000)
             }
@@ -342,10 +343,10 @@ final class DictationOverlayController {
         timerTask = nil
     }
 
-    /// K-48 Task 7: per-tick caret chip refresh. The controller's current state is the
-    /// last transitioned one; recompute eligibility from it rather than storing more state.
+    /// K-48 Task 7: per-tick caret chip refresh. The 500ms timer only runs while a
+    /// recording state is active (startTimerUpdates is gated on showsWaveform), so the
+    /// chip re-anchors on caret moves for exactly the states it owns.
     fileprivate func updateCaretChipForTick(formattedTime: String) {
-        // Recording states are tracked implicitly: the timer only runs while recording.
         updateCaretChip(state: .recordingToggle, element: caretAnchorElement)
         caretChipContentView?.updateTime(formattedTime)
     }
@@ -514,8 +515,10 @@ final class DictationOverlayController {
             NSRect(x: anchor.x, y: anchor.y, width: Metrics.caretChipWidth, height: Metrics.pillHeight),
             display: true)
         chipView.applySurfaceStylingForSession(dark: sessionUsesDarkAppearance)
-        // The main window keeps the deck surface; only its content is not shown here.
-        chipWindow.alphaValue = window?.alphaValue ?? 1.0
+        // Review gap 1: the chip carries its own full visibility — ordered front here,
+        // ordered out by hideCaretChip(). It must NOT mirror the corner window's alpha,
+        // which is 0 while the chip owns feedback.
+        if chipWindow.alphaValue < 1.0 { chipWindow.alphaValue = 1.0 }
         if !chipWindow.isVisible { chipWindow.orderFrontRegardless() }
     }
 

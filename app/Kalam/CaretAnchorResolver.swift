@@ -29,7 +29,7 @@ enum CaretAnchorResolver {
     static func isValidCaretRect(_ rect: CGRect?) -> Bool {
         guard let rect else { return false }
         guard rect.width > 0, rect.height > 0 else { return false }
-        return !(rect.minX.isNaN || rect.minY.isNaN
+        return !(rect.minX.isFinite == false || rect.minY.isFinite == false
                  || rect.width.isInfinite || rect.height.isInfinite)
     }
 
