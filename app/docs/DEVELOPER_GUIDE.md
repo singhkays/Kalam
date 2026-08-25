@@ -128,6 +128,30 @@ Current ordering in code:
 4. `CustomDictionaryManager.apply(...)`
 5. paste
 
+## Recording Start Latency
+
+The keydown-to-indicator path is latency-sensitive; keep it ordered mic-first:
+
+1. Hotkey event -> stale-transcription cancel -> readiness guards. Readiness comes
+   from a **cached onboarding snapshot** (`OnboardingSnapshotCacheDecision`, 2 s TTL
+   backstop). Anything that can change readiness MUST call
+   `invalidateOnboardingSnapshot()` — the wired paths are the models/general/hotkey/
+   mic-priority config notifications, app activation, wake, device change,
+   `updateASRStatus`, and `refreshOnboardingState`. New readiness inputs need a new hook.
+2. `prepareAudioForRecording()` normally early-returns (`AudioPrepareDecision`) because
+   launch-time preparation walks the SAME priority-ordered microphone candidates.
+3. `startCollecting()` (engine start) -> PTT state sync -> overlay shown with a fast
+   recording-state fade from a prewarmed window (`overlay.prewarm()` at launch;
+   placement screen persists across sessions so warm sessions place with no AX work).
+4. ONLY THEN: chime + duck scheduling, then the record-time paste-target AX capture
+   (every AX reference is messaging-timeout-bounded in `AccessibilityFocusResolver`,
+   including returned elements) and a silent `refinePlacementIfMoved` correction.
+
+Stage timing logs one line per successful start (`Recording start latency …`,
+info level, timings only), gated by `LatencyTuningOptions.startStageTimingKey`.
+The engine-start floor (~85-110 ms measured) is HAL spin-up and stays by design:
+the engine stops after each session so the macOS mic indicator turns off.
+
 ## Dictionary Behavior
 
 - **Storage**: `~/Library/Application Support/Kalam/user_dictionary.json`
