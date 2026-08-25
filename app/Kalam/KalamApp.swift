@@ -105,6 +105,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isAudioReady = false
     private var pttDownTime: CFAbsoluteTime = 0
     private var startLatencyProbe: RecordingStartLatencyProbe?
+    private var cachedOnboardingSnapshot: OnboardingStatusSnapshot?
+    private var cachedOnboardingSnapshotAt: Date?
+    /// Freshness backstop; event-driven invalidation below is the primary mechanism.
+    private static let onboardingSnapshotMaxAgeSeconds: TimeInterval = 2.0
     private var pttUpTime: CFAbsoluteTime = 0
     private var hotkeyConfiguration: PTTHotkeyConfiguration = .load()
     private var transcriptionTask: Task<Void, Never>?
@@ -227,6 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             guard let self = self else { return }
             Task { @MainActor in
+                self.invalidateOnboardingSnapshot()
                 // Refresh first so the UI reflects the new config immediately
                 // (availability is a fast disk check); ASR prep runs in the
                 // background, then a final refresh flips isASRReady.
@@ -242,6 +247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
+                self?.invalidateOnboardingSnapshot()
                 self?.applyGeneralSettings()
             }
         }
@@ -250,10 +256,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             forName: .microphonePriorityDidChange,
             object: nil,
             queue: .main
-        ) { _ in
+        ) { [weak self] _ in
             let priority = MicrophonePriorityConfiguration.load()
             let normalized = MicrophoneDeviceService.normalize(config: priority)
             normalized.save()
+            Task { @MainActor [weak self] in
+                self?.invalidateOnboardingSnapshot()
+            }
         }
 
         openSetupObserver = NotificationCenter.default.addObserver(
@@ -274,6 +283,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
+                self.invalidateOnboardingSnapshot()
                 // Refresh before the slow ASR prep so the onboarding window
                 // (if needed) appears immediately, then again after prep.
                 self.refreshOnboardingState(reopenIfNeeded: true)
@@ -412,6 +422,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func currentOnboardingSnapshot() -> OnboardingStatusSnapshot {
+        if let cached = cachedOnboardingSnapshot,
+           OnboardingSnapshotCacheDecision.shouldReuse(
+            cachedAt: cachedOnboardingSnapshotAt,
+            now: Date(),
+            maxAgeSeconds: Self.onboardingSnapshotMaxAgeSeconds) {
+            return cached
+        }
+        let snapshot = buildOnboardingSnapshot()
+        cachedOnboardingSnapshot = snapshot
+        cachedOnboardingSnapshotAt = Date()
+        return snapshot
+    }
+
+    private func invalidateOnboardingSnapshot() {
+        cachedOnboardingSnapshot = nil
+        cachedOnboardingSnapshotAt = nil
+    }
+
+    private func buildOnboardingSnapshot() -> OnboardingStatusSnapshot {
         let config = ModelsConfiguration.load()
         let onboardingConfig = OnboardingConfiguration.load()
         let hotkeyConfig = PTTHotkeyConfiguration.load()
@@ -440,6 +469,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshOnboardingState(reopenIfNeeded: Bool) {
+        invalidateOnboardingSnapshot()
         let snapshot = currentOnboardingSnapshot()
         if snapshot.canStartDictating {
             var onboardingConfig = OnboardingConfiguration.load()
@@ -755,6 +785,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateASRStatus(_ status: ASRServiceStatus, forceReady: Bool? = nil) {
+        invalidateOnboardingSnapshot()
         isASRReady = forceReady ?? status.isReady
         isASRSetupIssue = status.isSetupIssue
         asrRecordingBlockMessage = status.recordingBlockMessage
@@ -764,6 +795,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// device death, dock reconnect) — rebuild the audio graph against the
     /// fresh topology and re-select the priority-ordered microphone.
     private func refreshAudioInputAfterDeviceChange() {
+        invalidateOnboardingSnapshot()
         audio.invalidatePreparedState()
         do {
             _ = try prepareAudioForRecording()
@@ -782,6 +814,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ///    (no chime, no toast — wake should not beep).
     /// 2. A stale audio-graph binding — same refresh as a device change.
     private func handleSystemWake() {
+        invalidateOnboardingSnapshot()
         logger.info("System wake: resetting PTT state and refreshing audio input")
         if isRecording {
             transcriptionTask?.cancel()
