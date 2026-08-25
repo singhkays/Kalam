@@ -14,6 +14,8 @@ final class DictationOverlayController {
         static let recordingHeight: CGFloat = 72
         /// K-48 Task 5: whisper/caret pill height.
         static let pillHeight: CGFloat = 30
+        /// K-48 Task 7: at-the-caret chip width (dot + glyph + timer).
+        static let caretChipWidth: CGFloat = 84
         static let topInset: CGFloat = 20
         static let bottomInset: CGFloat = 16
     }
@@ -59,6 +61,11 @@ final class DictationOverlayController {
     /// K-48 Task 5: system appearance and Reduce Motion follow the same once-per-session rule.
     private var sessionUsesDarkAppearance = true
     private var sessionReduceMotion = false
+    /// K-48 Task 7: record-time focused element, delivered by KalamApp after the bounded
+    /// AX capture; anchors the at-the-caret chip without a second system-wide walk.
+    private var caretAnchorElement: AXUIElement?
+    private var caretChipWindow: NSWindow?
+    private var caretChipContentView: CaretChipView?
 
     func setWaveformProvider(_ provider: @escaping () -> [Float]) {
         waveformProvider = provider
@@ -115,6 +122,8 @@ final class DictationOverlayController {
         stateTask = nil
         stopWaveformUpdates()
         stopTimerUpdates()
+        caretAnchorElement = nil
+        hideCaretChip()
         // placementScreen is deliberately PERSISTED across sessions: nil-ing it
         // here forced every session start to re-walk AX for placement before the
         // capsule could show. refinePlacementIfMoved corrects it if the user
@@ -151,6 +160,15 @@ final class DictationOverlayController {
             positionWindow(on: screen)
         }
         guard let w = window, let view = contentView else { return }
+        // K-48 Task 7: when the caret chip owns feedback, the corner window stays hidden;
+        // the chip appears on the next timer tick (or immediately below via first anchor).
+        if caretChipOwnsFeedback(for: state) {
+            w.alphaValue = 0.0
+            updateCaretChip(state: state, element: caretAnchorElement)
+            return
+        } else {
+            hideCaretChip()
+        }
         view.setWaveformVisible(showsWaveform && !compact)
         // K-48 Task 5: per-session surface switch — pill styling vs machined deck.
         view.setCompactSurface(active: compact, darkAppearance: sessionUsesDarkAppearance, reduceMotion: sessionReduceMotion)
@@ -212,13 +230,20 @@ final class DictationOverlayController {
         }
     }
 
-    /// K-48 Task 5: whisper (and later caret) render listening/transcribing as the compact pill.
+    /// K-48 Task 5/7: ONLY whisper renders the compact pill. Caret never uses this surface:
+    /// during recording the chip owns feedback (main window stays hidden), and during
+    /// transcribing/held/blocked the fallback law returns the machined deck.
     private func usesCompactSurface(for state: OverlayState) -> Bool {
-        guard sessionStyle != .machined,
+        guard sessionStyle == .whisper,
               let mapped = indicatorState(for: state),
               IndicatorStateModel.usesCompactSurface(style: sessionStyle, state: mapped) else { return false }
-        // Caret reuses pill sizing until Task 7 differentiates its chip window.
         return true
+    }
+
+    /// K-48 Task 7: true when the caret chip owns feedback for this state
+    /// (caret style + an actual recording phase).
+    private func caretChipOwnsFeedback(for state: OverlayState) -> Bool {
+        sessionStyle == .caret && isRecordingState(state)
     }
 
     private func presentation(for state: OverlayState,
@@ -305,6 +330,7 @@ final class DictationOverlayController {
                 let formatted = String(format: "%02d:%02d", mm, ss)
                 await MainActor.run {
                     self.contentView?.updateElapsedTime(formatted)
+                    self.updateCaretChipForTick(formattedTime: formatted)
                 }
                 try? await Task.sleep(nanoseconds: 500_000_000)
             }
@@ -314,6 +340,14 @@ final class DictationOverlayController {
     private func stopTimerUpdates() {
         timerTask?.cancel()
         timerTask = nil
+    }
+
+    /// K-48 Task 7: per-tick caret chip refresh. The controller's current state is the
+    /// last transitioned one; recompute eligibility from it rather than storing more state.
+    fileprivate func updateCaretChipForTick(formattedTime: String) {
+        // Recording states are tracked implicitly: the timer only runs while recording.
+        updateCaretChip(state: .recordingToggle, element: caretAnchorElement)
+        caretChipContentView?.updateTime(formattedTime)
     }
 
     private func ensureWindow() {
@@ -389,6 +423,11 @@ final class DictationOverlayController {
         return NSScreen.screens.first(where: { $0.frame.contains(center) }) ?? fallbackScreen()
     }
 
+    /// K-48 Task 7: delivers the record-time focused element for caret anchoring.
+    func setCaretAnchorElement(_ element: AXUIElement?) {
+        caretAnchorElement = element
+    }
+
     /// Called once the bounded record-time focus capture lands. Repositions
     /// silently ONLY if the freshly learned screen differs from the one the
     /// capsule was placed on. No second system-wide AX walk.
@@ -413,7 +452,7 @@ final class DictationOverlayController {
         var sizeRef: CFTypeRef?
         var position = CGPoint.zero
         var size = CGSize.zero
-        
+
         if AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &positionRef) == .success,
            let p = positionRef,
            CFGetTypeID(p) == AXValueGetTypeID(),
@@ -427,6 +466,84 @@ final class DictationOverlayController {
         return nil
     }
 
+    // MARK: K-48 Task 7 — at-the-caret chip
+
+    /// Resolves the on-screen rect of the text selection start via the selected-text range.
+    /// Returns nil for any failure (no range attribute, BoundsForRange refusal, degenerate rect).
+    private func caretRect(for element: AXUIElement) -> CGRect? {
+        var rangeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+              let rangeValue = rangeRef,
+              CFGetTypeID(rangeValue) == AXValueGetTypeID() else { return nil }
+        var range = CFRange()
+        guard AXValueGetValue(rangeValue as! AXValue, .cfRange, &range) else { return nil }
+        var boundsRef: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(
+            element,
+            kAXBoundsForRangeParameterizedAttribute as CFString,
+            rangeValue as CFTypeRef,
+            &boundsRef) == .success,
+            let bounds = boundsRef,
+            CFGetTypeID(bounds) == AXValueGetTypeID() else { return nil }
+        var rect = CGRect.zero
+        guard AXValueGetValue(bounds as! AXValue, .cgRect, &rect) else { return nil }
+        return flipAXRect(rect)
+    }
+
+    /// Shows or hides the at-the-caret chip window. The chip is a separate borderless
+    /// window anchored to the caret rect; any resolution failure hides it and leaves
+    /// the corner capsule in charge (fallback law). Called from the timer tick so a
+    /// moved caret re-anchors within half a second without its own polling loop.
+    private func updateCaretChip(state: OverlayState, element: AXUIElement?) {
+        let eligible = sessionStyle == .caret && isRecordingState(state)
+        guard eligible, let element, let rawRect = caretRect(for: element) else {
+            hideCaretChip()
+            return
+        }
+        guard let screen = placementScreen ?? fallbackScreen(),
+              let anchor = CaretAnchorResolver.chipOrigin(
+                caretRect: rawRect,
+                screenFrame: screen.frame,
+                chipSize: CGSize(width: Metrics.caretChipWidth, height: Metrics.pillHeight)) else {
+            hideCaretChip()
+            return
+        }
+        ensureCaretChipWindow()
+        guard let chipWindow = caretChipWindow, let chipView = caretChipContentView else { return }
+        chipWindow.setFrame(
+            NSRect(x: anchor.x, y: anchor.y, width: Metrics.caretChipWidth, height: Metrics.pillHeight),
+            display: true)
+        chipView.applySurfaceStylingForSession(dark: sessionUsesDarkAppearance)
+        // The main window keeps the deck surface; only its content is not shown here.
+        chipWindow.alphaValue = window?.alphaValue ?? 1.0
+        if !chipWindow.isVisible { chipWindow.orderFrontRegardless() }
+    }
+
+    private func ensureCaretChipWindow() {
+        guard caretChipWindow == nil else { return }
+        let view = CaretChipView(frame: NSRect(origin: .zero,
+                                               size: CGSize(width: Metrics.caretChipWidth, height: Metrics.pillHeight)))
+        let w = NSWindow(
+            contentRect: NSRect(origin: .zero,
+                                size: CGSize(width: Metrics.caretChipWidth, height: Metrics.pillHeight)),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false)
+        w.isOpaque = false
+        w.backgroundColor = .clear
+        w.level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 2)
+        w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        w.ignoresMouseEvents = true
+        w.hasShadow = false
+        w.contentView = view
+        caretChipContentView = view
+        caretChipWindow = w
+    }
+
+    private func hideCaretChip() {
+        guard let w = caretChipWindow else { return }
+        w.orderOut(nil)
+    }
 }
 
 private final class OverlayCapsuleView: NSView {
@@ -1046,4 +1163,142 @@ private final class WaveformView: NSView {
         }
     }
 
+}
+
+/// K-48 Task 7: the at-the-caret chip — 21pt-tall dark capsule with a green status dot,
+/// three-bar level glyph, and mono timer. Trails the caret (CaretAnchorResolver places it);
+/// never shows an app name (inline context is self-evident — pinned study ruling).
+private final class CaretChipView: NSView {
+    private enum ChipMetrics {
+        static let hPadding: CGFloat = 9
+        static let dotSize: CGFloat = 6
+        static let glyphHeight: CGFloat = 10
+        static let barWidth: CGFloat = 2
+        static let timerMinWidth: CGFloat = 34
+    }
+
+    private let blurView = NSVisualEffectView()
+    private let tintView = NSView()
+    private let dotView = NSView()
+    private let bar0 = NSView()
+    private let bar1 = NSView()
+    private let bar2 = NSView()
+    private var bars: [NSView] { [bar0, bar1, bar2] }
+    private var barHeightConstraints: [NSLayoutConstraint] = []
+    private let timerLabel = NSTextField(labelWithString: "00:00")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func setup() {
+        wantsLayer = true
+
+        blurView.material = .hudWindow
+        blurView.blendingMode = .behindWindow
+        blurView.state = .active
+        blurView.wantsLayer = true
+        blurView.layer?.cornerRadius = 15
+        blurView.layer?.masksToBounds = true
+        blurView.layer?.borderWidth = 0.5
+        blurView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(blurView)
+
+        tintView.wantsLayer = true
+        tintView.translatesAutoresizingMaskIntoConstraints = false
+        blurView.addSubview(tintView, positioned: .below, relativeTo: nil)
+
+        dotView.wantsLayer = true
+        dotView.layer?.backgroundColor = indicatorBrandGreen.cgColor
+        dotView.layer?.cornerRadius = ChipMetrics.dotSize / 2
+        dotView.translatesAutoresizingMaskIntoConstraints = false
+        blurView.addSubview(dotView)
+
+        for bar in bars {
+            bar.wantsLayer = true
+            bar.layer?.cornerRadius = ChipMetrics.barWidth / 2
+            bar.translatesAutoresizingMaskIntoConstraints = false
+            blurView.addSubview(bar)
+        }
+        barHeightConstraints = bars.map { $0.heightAnchor.constraint(equalToConstant: ChipMetrics.glyphHeight) }
+        NSLayoutConstraint.activate(barHeightConstraints + [
+            bar0.widthAnchor.constraint(equalToConstant: ChipMetrics.barWidth),
+            bar1.widthAnchor.constraint(equalToConstant: ChipMetrics.barWidth),
+            bar2.widthAnchor.constraint(equalToConstant: ChipMetrics.barWidth)
+        ])
+
+        timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
+        timerLabel.textColor = NSColor.white.withAlphaComponent(0.75)
+        timerLabel.alignment = .right
+        timerLabel.translatesAutoresizingMaskIntoConstraints = false
+        blurView.addSubview(timerLabel)
+
+        NSLayoutConstraint.activate([
+            blurView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            blurView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            blurView.topAnchor.constraint(equalTo: topAnchor),
+            blurView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            tintView.leadingAnchor.constraint(equalTo: blurView.leadingAnchor),
+            tintView.trailingAnchor.constraint(equalTo: blurView.trailingAnchor),
+            tintView.topAnchor.constraint(equalTo: blurView.topAnchor),
+            tintView.bottomAnchor.constraint(equalTo: blurView.bottomAnchor),
+
+            dotView.leadingAnchor.constraint(equalTo: blurView.leadingAnchor, constant: ChipMetrics.hPadding),
+            dotView.centerYAnchor.constraint(equalTo: blurView.centerYAnchor),
+            dotView.widthAnchor.constraint(equalToConstant: ChipMetrics.dotSize),
+            dotView.heightAnchor.constraint(equalToConstant: ChipMetrics.dotSize),
+
+            bar0.leadingAnchor.constraint(equalTo: dotView.trailingAnchor, constant: 5),
+            bar1.leadingAnchor.constraint(equalTo: bar0.trailingAnchor, constant: 2),
+            bar2.leadingAnchor.constraint(equalTo: bar1.trailingAnchor, constant: 2),
+            bar0.centerYAnchor.constraint(equalTo: blurView.centerYAnchor),
+            bar1.centerYAnchor.constraint(equalTo: blurView.centerYAnchor),
+            bar2.centerYAnchor.constraint(equalTo: blurView.centerYAnchor),
+
+            timerLabel.leadingAnchor.constraint(greaterThanOrEqualTo: bar2.trailingAnchor, constant: 5),
+            timerLabel.trailingAnchor.constraint(equalTo: blurView.trailingAnchor, constant: -ChipMetrics.hPadding),
+            timerLabel.centerYAnchor.constraint(equalTo: blurView.centerYAnchor),
+            timerLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: ChipMetrics.timerMinWidth)
+        ])
+        applySurfaceStylingForSession(dark: true)
+    }
+
+    /// Per-session surface (mirrors the whisper pill tokens).
+    func applySurfaceStylingForSession(dark: Bool) {
+        guard let layer = blurView.layer else { return }
+        if dark {
+            tintView.layer?.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 0.62).cgColor
+            layer.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
+            timerLabel.textColor = NSColor.white.withAlphaComponent(0.75)
+        } else {
+            tintView.layer?.backgroundColor = NSColor(calibratedWhite: 0.97, alpha: 0.74).cgColor
+            layer.borderColor = NSColor.black.withAlphaComponent(0.13).cgColor
+            timerLabel.textColor = NSColor.black.withAlphaComponent(0.65)
+        }
+        let ink = dark ? indicatorBrandGreen : NSColor.black
+        bars.forEach { $0.layer?.backgroundColor = ink.cgColor }
+        dotView.layer?.backgroundColor = ink.cgColor
+    }
+
+    func updateTime(_ formatted: String) {
+        timerLabel.stringValue = formatted
+    }
+
+    func updateLevel(samples: [Float]) {
+        let values = samples.suffix(3)
+        let heights: [CGFloat] = (0..<3).map { index in
+            guard !values.isEmpty else { return 3 }
+            let v = values[min(index, values.count - 1)]
+            return 3 + CGFloat(max(0, min(1, v))) * (ChipMetrics.glyphHeight - 3)
+        }
+        NSLayoutConstraint.deactivate(barHeightConstraints)
+        barHeightConstraints = zip(bars, heights).map { $0.heightAnchor.constraint(equalToConstant: $1) }
+        NSLayoutConstraint.activate(barHeightConstraints)
+    }
 }
