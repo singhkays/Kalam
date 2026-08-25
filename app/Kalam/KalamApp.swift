@@ -907,18 +907,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // K-23: remember where the user is dictating so the transcript follows the
         // record-time target even if the frontmost app changes during transcription.
+        // T14 diagnosis (2026-08-24 FAIL): capture failures were silent, degrading
+        // invisibly to frontmost-at-paste-time. Log the outcome (app/strategy/reason
+        // only — never transcript content).
         if let frontmost = NSWorkspace.shared.frontmostApplication {
             switch AccessibilityFocusResolver.resolveFocusedElement(frontmostApp: frontmost) {
             case .success(let resolution):
                 dictationTargetPID = frontmost.processIdentifier
                 dictationTargetElement = resolution.element
-            case .failure:
+                logger.info("Dictation target captured appName=\(resolution.appName, privacy: .public) strategy=\(resolution.strategy, privacy: .public) pid=\(frontmost.processIdentifier, privacy: .public)")
+            case .failure(let error):
                 dictationTargetPID = nil
                 dictationTargetElement = nil
+                logger.warning("Dictation target capture FAILED reason=\(error.reason, privacy: .public)")
             }
         } else {
             dictationTargetPID = nil
             dictationTargetElement = nil
+            logger.warning("Dictation target capture SKIPPED: no frontmost application")
         }
 
         do {
@@ -1094,16 +1100,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 stageMark("paste-wait")
 
                 do {
-                    switch PasteService.PasteRouting.target(
+                    // T14 diagnosis: record which branch fired and why. PIDs only,
+                    // never transcript text. Decision and log share one frontmost
+                    // read so they cannot disagree.
+                    let frontmostPIDAtDecision = NSWorkspace.shared.frontmostApplication?.processIdentifier
+                    let route = PasteService.PasteRouting.target(
                         capturedPID: self.dictationTargetPID,
                         capturedElement: self.dictationTargetElement,
-                        frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier
-                    ) {
+                        frontmostPID: frontmostPIDAtDecision
+                    )
+                    switch route {
                     case .frontmost:
+                        self.logger.info("Paste route=frontmost capturedPID=\(self.dictationTargetPID.map { String($0) } ?? "nil", privacy: .public) frontmostPIDAtDecision=\(frontmostPIDAtDecision.map { String($0) } ?? "nil", privacy: .public)")
                         try await self.paster.paste(post.text)
                     case .capturedElement(let element):
                         // K-23: the user switched apps while transcribing — insert into the
                         // record-time target (bypasses the pasteboard entirely).
+                        self.logger.info("Paste route=capturedElement capturedPID=\(self.dictationTargetPID.map { String($0) } ?? "nil", privacy: .public) frontmostPIDAtDecision=\(frontmostPIDAtDecision.map { String($0) } ?? "nil", privacy: .public)")
                         do {
                             try await self.paster.paste(into: element, text: post.text)
                         } catch {

@@ -52,6 +52,13 @@ uncommitted). T19–T20 add ~10 min and reuse the same session.
    log stream --predicate 'subsystem == "singhkays.Kalam" || subsystem == "singhkays.Kalam-test"' \
      --style compact > ~/kalam-test-log.txt 2>&1
    ```
+   Run this in YOUR terminal on the machine the app runs on (the host — the Hermes
+   agent's VM cannot see these logs). `log stream` captures only events AFTER it
+   starts; if a session's file comes back header-only, recover retroactively instead:
+   ```bash
+   log show --last 120m --predicate 'subsystem == "singhkays.Kalam"' --style compact \
+     | grep -E "Stopped collecting|Dictation target|Paste route"
+   ```
 3. **Clipboard sentinel** before any clipboard-sensitive test:
    ```bash
    printf 'KALAM-SENTINEL-1337' | pbcopy && pbpaste   # → KALAM-SENTINEL-1337
@@ -69,7 +76,7 @@ uncommitted). T19–T20 add ~10 min and reuse the same session.
 
 ---
 
-## T11 — K-26 + K-27: sleep/wake recovery, docked webcam, noise guard
+## ✅ T11 — K-26 + K-27: sleep/wake recovery, docked webcam, noise guard
 
 **Setup:** Toggle activation mode (Compass → Trigger). Webcam/docked mic attached. Log monitor
 running. Baseline: one normal dictation works.
@@ -102,7 +109,8 @@ running. Baseline: one normal dictation works.
 **FAIL if:** the first post-wake dictation ends instantly or pastes junk; any mic needs manual
 reordering after wake/replug; the silent attempt pastes a word.
 
-Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+Result: ✅ PASS (2026-08-24) — user: all steps passed (post-wake dictation, K-37
+phantom-stop check, docked-webcam wake/replug recovery, noise guard, yes/no boundary).
 
 ---
 
@@ -211,6 +219,32 @@ Hold-or-Toggle).
 K-36 gate — the capsule accepts clicks only while an action button is on screen; see T19.)
 
 **FAIL if:** the transcript appears in Terminal, or lands twice.
+
+Result: 🔴 FAIL (2026-08-24, one attempt, Sublime Text → Terminal) — transcript pasted INTO
+Terminal after the user clicked away post-stop; sentinel survived (`pbpaste` returned
+KALAM-SENTINEL-1337, consistent with the CGEvent-unicode path). Under investigation: the
+K-23 capture/route machinery exists (`KalamApp.swift:908` capture at record start;
+`PasteService.PasteRouting.target` prefers the captured element when pids differ), so the
+open question is whether record-time capture silently failed for Sublime Text (failure
+branch at `KalamApp.swift:915` sets both target fields nil with NO log, degrading to the
+old frontmost-at-paste-time behavior) or the routing read raced the user's click. Next step:
+re-run with the Part 1 log monitor active and inspect the paste-route log lines.
+
+Instrumented for diagnosis (2026-08-24, uncommitted, build-verified): record-start now logs
+"Dictation target captured appName=… strategy=… pid=…" or
+"Dictation target capture FAILED reason=…" / "capture SKIPPED"; paste-time logs
+"Paste route=frontmost|capturedElement capturedPID=… frontmostPIDAtDecision=…" from a single
+shared frontmost read. Rebuild, reproduce once, then:
+
+    grep -E "Dictation target|Paste route" ~/kalam-test-log.txt | tail -4
+
+Reading the outcome:
+- "capture FAILED/SKIPPED" present → **Gap 1** (record-time capture never happened; likely
+  Sublime's partial AX tree) — fix = broaden capture fallback.
+- "captured appName=Sublime Text" AND "route=frontmost capturedPID=X frontmostPIDAtDecision=X"
+  yet text visibly landed in Terminal → **Gap 2** (decision-to-synthesis race; both PIDs equal
+  proves the decision was correct at its instant) — fix = re-check frontmost immediately before
+  event synthesis inside PasteService.
 
 Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes (per mode): ____________________
 
@@ -371,7 +405,11 @@ the global-Escape monitor no longer loads settings on every keystroke.
 **FAIL if:** a visible stutter exactly when the transcript lands, a delayed Escape response,
 or processed-output differs from before the fix.
 
-Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+Result: 🟢 PASS on the hitch gate (2026-08-24) — dictated over 1 minute (spec: 45–60 s);
+user: "There was no visible stutter anywhere, it took about 2 seconds to paste into the app."
+(The ~2 s is post-stop ASR-settle latency, not a UI stall — the gate watches for hitches at
+land-time.) Open sub-check: step 4's Escape-taps-during-transcription was not reported;
+K-38 flips only after that is confirmed responsive.
 
 ---
 
