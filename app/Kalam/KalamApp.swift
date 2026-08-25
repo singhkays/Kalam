@@ -53,7 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         static let pasteDelayLongMsKey = "internal.latency.pasteDelayLongMs"
         static let pasteFallbackTotalMsKey = "internal.latency.pasteFallbackTotalMs"
         static let enableStageTimingKey = "internal.latency.enableStageTiming"
-        
+        static let startStageTimingKey = "internal.latency.startStageTiming"
+
         static let defaultPostRollMinMs = 100
         static let defaultPostRollMaxMs = 150
         static let defaultPasteDelayShortMs = 50
@@ -158,7 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             LatencyTuningOptions.pasteDelayLongMsKey: LatencyTuningOptions.defaultPasteDelayLongMs,
             LatencyTuningOptions.pasteFallbackTotalMsKey: LatencyTuningOptions.defaultPasteFallbackTotalMs,
             LatencyTuningOptions.enableStageTimingKey: LatencyTuningOptions.defaultEnableStageTiming,
-            "internal.latency.startStageTiming": true
+            LatencyTuningOptions.startStageTimingKey: true
         ])
         
         SystemAudioDucker.shared.initialize()
@@ -817,7 +818,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .start(let triggerMode):
                 pttDownTime = now
                 var probe = RecordingStartLatencyProbe()
-                probe.mark(.hotkeyReceived)
+                probe.markWithTime(.hotkeyReceived, now)
                 startLatencyProbe = probe
                 _ = startRecording(triggerMode: triggerMode)
             case .stop:
@@ -954,7 +955,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pttState.recordingDidStart(triggerMode)
         overlay.showRecording(isHoldMode: triggerMode == .hold)
         startLatencyProbe?.mark(.indicatorShown)
-        if let line = startLatencyProbe?.summaryLine() {
+        if UserDefaults.standard.bool(forKey: LatencyTuningOptions.startStageTimingKey),
+           let line = startLatencyProbe?.summaryLine() {
             logger.info("Recording start latency \(line, privacy: .public)")
         }
         startLatencyProbe = nil
