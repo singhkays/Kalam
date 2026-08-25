@@ -52,6 +52,8 @@ final class DictationOverlayController {
     /// Hook (sessionStyle): captured but NOT branched on yet — whisper/caret rendering arrives in Tasks 5/7.
     private var sessionStyle: IndicatorStyle = .machined
 
+    private var pendingFocusHint: AXUIElement?
+
     func setWaveformProvider(_ provider: @escaping () -> [Float]) {
         waveformProvider = provider
     }
@@ -61,16 +63,17 @@ final class DictationOverlayController {
         pasteHeldTranscriptAction = action
     }
 
-    func showRecording(isHoldMode: Bool) {
+    func showRecording(isHoldMode: Bool, focusHint: AXUIElement? = nil) {
         // K-48 mid-flight rule: read the setting exactly once per session; style changes apply at the next session.
         sessionStyle = GeneralSettingsConfiguration.load().indicatorStyle
+        pendingFocusHint = focusHint
         // Capture the frontmost app that will receive the pasted text.
         let frontApp = NSWorkspace.shared.frontmostApplication
         let targetName = frontApp?.localizedName ?? ""
         let targetIcon = frontApp?.icon
         recordingStartTime = CFAbsoluteTimeGetCurrent()
         let state: OverlayState = isHoldMode ? .recordingHold : .recordingToggle
-        transition(to: state, lockAnchor: true, autoHideAfter: nil, targetAppName: targetName, targetAppIcon: targetIcon)
+        transition(to: state, lockAnchor: false, autoHideAfter: nil, targetAppName: targetName, targetAppIcon: targetIcon)
     }
 
     func showTranscribing() {
@@ -115,7 +118,7 @@ final class DictationOverlayController {
         let showsWaveform = isRecordingState(state)
         currentWindowSize = showsWaveform ? recordingWindowSize : compactWindowSize
         if lockAnchor || placementScreen == nil {
-            placementScreen = resolvePlacementScreen() ?? placementScreen ?? fallbackScreen()
+            placementScreen = resolvePlacementScreen(from: pendingFocusHint) ?? placementScreen ?? fallbackScreen()
         }
         if let screen = placementScreen ?? fallbackScreen() {
             positionWindow(on: screen)
@@ -325,15 +328,29 @@ final class DictationOverlayController {
         NSScreen.main ?? NSScreen.screens.first
     }
 
-    private func resolvePlacementScreen() -> NSScreen? {
+    private func resolvePlacementScreen(from hint: AXUIElement?) -> NSScreen? {
         guard AXIsProcessTrusted(),
-              let element = focusedAXElement(),
+              let element = hint ?? focusedAXElement(),
               let frame = frameOfAXElement(element) else {
             return fallbackScreen()
         }
         let appKitRect = flipAXRect(frame)
         let center = CGPoint(x: appKitRect.midX, y: appKitRect.midY)
         return NSScreen.screens.first(where: { $0.frame.contains(center) }) ?? fallbackScreen()
+    }
+
+    /// Called once the bounded record-time focus capture lands. Repositions
+    /// silently ONLY if the freshly learned screen differs from the one the
+    /// capsule was placed on. No second system-wide AX walk.
+    func refinePlacementIfMoved(focusHint: AXUIElement?) {
+        guard let element = focusHint ?? pendingFocusHint,
+              AXIsProcessTrusted(),
+              let frame = frameOfAXElement(element) else { return }
+        let center = CGPoint(x: flipAXRect(frame).midX, y: flipAXRect(frame).midY)
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(center) }),
+              screen != placementScreen else { return }
+        placementScreen = screen
+        positionWindow(on: screen)
     }
 
     private func focusedAXElement() -> AXUIElement? {

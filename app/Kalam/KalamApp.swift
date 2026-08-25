@@ -900,6 +900,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the previous session — abort it so stale text is never pasted.
         transcriptionTask?.cancel()
         guard !isRecording else { return false }
+        // failed-start hardening: never leave a previous session's paste target alive
+        dictationTargetPID = nil
+        dictationTargetElement = nil
         let onboardingSnapshot = currentOnboardingSnapshot()
         guard !onboardingSnapshot.hasIncompleteRequirements else {
             showOnboardingWindow(mode: .repair)
@@ -938,6 +941,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // a failed start must leave the PTT machine idle (PTT state machine test coverage invariant).
         _ = recordingSessions.beginNewRecording()
 
+        do {
+            try audio.startCollecting()
+        } catch {
+            logger.warning("Audio collection start failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
+            overlay.showError("Microphone unavailable", action: .openMicrophoneSettings, autoHideAfter: 4.0)
+            return false
+        }
+        startLatencyProbe?.mark(.engineStarted)
+        pttState.recordingDidStart(triggerMode)
+        overlay.showRecording(isHoldMode: triggerMode == .hold)
+        startLatencyProbe?.mark(.indicatorShown)
+        if UserDefaults.standard.bool(forKey: LatencyTuningOptions.startStageTimingKey),
+           let line = startLatencyProbe?.summaryLine() {
+            logger.info("Recording start latency \(line, privacy: .public)")
+        }
+        startLatencyProbe = nil
+
         // Play chime (so user hears it at full volume)
         let chimeDuration = playRecordingChime()
 
@@ -955,17 +975,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
         }
 
-        // record-time paste target capture: remember where the user is dictating so the transcript follows the
-        // record-time target even if the frontmost app changes during transcription.
-        // T14 diagnosis (2026-08-24 FAIL): capture failures were silent, degrading
-        // invisibly to frontmost-at-paste-time. Log the outcome (app/strategy/reason
-        // only — never transcript content).
+        // record-time paste target capture - deliberately AFTER the mic is live and
+        // the indicator is up (bounded by the 0.75 s messaging timeout).
         if let frontmost = NSWorkspace.shared.frontmostApplication {
             switch AccessibilityFocusResolver.resolveFocusedElement(frontmostApp: frontmost) {
             case .success(let resolution):
                 dictationTargetPID = frontmost.processIdentifier
                 dictationTargetElement = resolution.element
                 logger.info("Dictation target captured appName=\(resolution.appName, privacy: .public) strategy=\(resolution.strategy, privacy: .public) pid=\(frontmost.processIdentifier, privacy: .public)")
+                overlay.refinePlacementIfMoved(focusHint: resolution.element)
             case .failure(let error):
                 // partial-AX target capture no-op: partial-AX apps (e.g. Sublime Text) answer none of the AX
                 // queries, but the pid alone still identifies the record-time target —
@@ -980,25 +998,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dictationTargetElement = nil
             logger.warning("Dictation target capture SKIPPED: no frontmost application")
         }
-
-        do {
-            try audio.startCollecting()
-        } catch {
-            logger.warning("Audio collection start failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
-            dictationTargetPID = nil
-            dictationTargetElement = nil
-            overlay.showError("Microphone unavailable", action: .openMicrophoneSettings, autoHideAfter: 4.0)
-            return false
-        }
-        startLatencyProbe?.mark(.engineStarted)
-        pttState.recordingDidStart(triggerMode)
-        overlay.showRecording(isHoldMode: triggerMode == .hold)
-        startLatencyProbe?.mark(.indicatorShown)
-        if UserDefaults.standard.bool(forKey: LatencyTuningOptions.startStageTimingKey),
-           let line = startLatencyProbe?.summaryLine() {
-            logger.info("Recording start latency \(line, privacy: .public)")
-        }
-        startLatencyProbe = nil
         return true
     }
     
