@@ -12,6 +12,8 @@ final class DictationOverlayController {
         static let overlayWidth: CGFloat = IndicatorStateModel.machinedFormWidth
         static let compactHeight: CGFloat = 34
         static let recordingHeight: CGFloat = 72
+        /// K-48 Task 5: whisper/caret pill height.
+        static let pillHeight: CGFloat = 30
         static let topInset: CGFloat = 20
         static let bottomInset: CGFloat = 16
     }
@@ -52,8 +54,11 @@ final class DictationOverlayController {
     private let recordingWindowSize = NSSize(width: Metrics.overlayWidth, height: Metrics.recordingHeight)
     private var currentWindowSize = NSSize(width: Metrics.overlayWidth, height: Metrics.compactHeight)
     /// K-48: indicator style captured ONCE per dictation session at the show/present entry point.
-    /// Hook (sessionStyle): captured but NOT branched on yet — whisper/caret rendering arrives in Tasks 5/7.
+    /// Hook (sessionStyle): consumed by the compact-surface eligibility check in transition(to:).
     private var sessionStyle: IndicatorStyle = .machined
+    /// K-48 Task 5: system appearance and Reduce Motion follow the same once-per-session rule.
+    private var sessionUsesDarkAppearance = true
+    private var sessionReduceMotion = false
 
     func setWaveformProvider(_ provider: @escaping () -> [Float]) {
         waveformProvider = provider
@@ -75,8 +80,10 @@ final class DictationOverlayController {
     }
 
     func showRecording(isHoldMode: Bool) {
-        // K-48 mid-flight rule: read the setting exactly once per session; style changes apply at the next session.
+        // K-48 mid-flight rule: read settings exactly once per session; changes apply at the next session.
         sessionStyle = GeneralSettingsConfiguration.load().indicatorStyle
+        sessionUsesDarkAppearance = NSAppearance.currentDrawing().bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        sessionReduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         // Capture the frontmost app that will receive the pasted text.
         let frontApp = NSWorkspace.shared.frontmostApplication
         let targetName = frontApp?.localizedName ?? ""
@@ -129,7 +136,14 @@ final class DictationOverlayController {
         stateTask = nil
         ensureWindow()
         let showsWaveform = isRecordingState(state)
-        currentWindowSize = showsWaveform ? recordingWindowSize : compactWindowSize
+        // K-48 Task 5: whisper/caret shrink listening+transcribing to the pill; everything else keeps the deck.
+        let compact = usesCompactSurface(for: state)
+        if compact {
+            let mapped = indicatorState(for: state) ?? .listening
+            currentWindowSize = NSSize(width: IndicatorStateModel.compactWidth(state: mapped), height: Metrics.pillHeight)
+        } else {
+            currentWindowSize = showsWaveform ? recordingWindowSize : compactWindowSize
+        }
         if placementScreen == nil {
             placementScreen = resolvePlacementScreen(from: nil) ?? fallbackScreen()
         }
@@ -137,7 +151,9 @@ final class DictationOverlayController {
             positionWindow(on: screen)
         }
         guard let w = window, let view = contentView else { return }
-        view.setWaveformVisible(showsWaveform)
+        view.setWaveformVisible(showsWaveform && !compact)
+        // K-48 Task 5: per-session surface switch — pill styling vs machined deck.
+        view.setCompactSurface(active: compact, darkAppearance: sessionUsesDarkAppearance, reduceMotion: sessionReduceMotion)
         currentStateSetTime = CFAbsoluteTimeGetCurrent()
         let presentation = presentation(for: state, targetAppName: targetAppName, targetAppIcon: targetAppIcon)
         // overlay action buttons unclickable: the overlay is click-through EXCEPT while an actionable state
@@ -184,6 +200,25 @@ final class DictationOverlayController {
         default:
             return false
         }
+    }
+
+    /// K-48: design-state vocabulary. Transient auto-hide states are never compact-eligible:
+    /// a pill that flashes for a fraction of a second is unreadable, so they stay machined-form.
+    private func indicatorState(for state: OverlayState) -> IndicatorState? {
+        switch state {
+        case .recordingHold, .recordingToggle: return .listening
+        case .transcribing: return .transcribing
+        case .success, .info, .error: return nil
+        }
+    }
+
+    /// K-48 Task 5: whisper (and later caret) render listening/transcribing as the compact pill.
+    private func usesCompactSurface(for state: OverlayState) -> Bool {
+        guard sessionStyle != .machined,
+              let mapped = indicatorState(for: state),
+              IndicatorStateModel.usesCompactSurface(style: sessionStyle, state: mapped) else { return false }
+        // Caret reuses pill sizing until Task 7 differentiates its chip window.
+        return true
     }
 
     private func presentation(for state: OverlayState,
@@ -247,6 +282,7 @@ final class DictationOverlayController {
                 let samples = self.waveformProvider?() ?? []
                 await MainActor.run {
                     self.contentView?.updateWaveform(samples: samples, active: true)
+                    self.contentView?.updatePillLevel(samples: samples)
                 }
                 try? await Task.sleep(nanoseconds: 33_000_000)
             }
@@ -399,6 +435,11 @@ private final class OverlayCapsuleView: NSView {
         static let topRowHeight: CGFloat = 20
         static let topRowTopPadding: CGFloat = 7
         static let waveformTopSpacing: CGFloat = 4
+        /// K-48 Task 5: whisper pill metrics.
+        static let pillCornerRadius: CGFloat = 15
+        static let pillGlyphHeight: CGFloat = 12
+        static let pillBarWidth: CGFloat = 2.5
+        static let shimmerDotSize: CGFloat = 4
         static let cornerRadius: CGFloat = 14
         static let hPadding: CGFloat = 12
     }
@@ -429,12 +470,31 @@ private final class OverlayCapsuleView: NSView {
     // Waveform
     private let waveformView = WaveformView(frame: .zero)
 
+    // K-48 Task 5: whisper pill — three-bar level glyph + transcribing shimmer dots.
+    private let pillLevelBar0 = NSView()
+    private let pillLevelBar1 = NSView()
+    private let pillLevelBar2 = NSView()
+    private let shimmerDot0 = NSView()
+    private let shimmerDot1 = NSView()
+    private let shimmerDot2 = NSView()
+
     private var actionHandler: (() -> Void)?
     private var waveformTopConstraint: NSLayoutConstraint?
     private var waveformHeightConstraint: NSLayoutConstraint?
     private var recordingRowTopConstraint: NSLayoutConstraint?
     private var recordingRowHeightConstraint: NSLayoutConstraint?
     private var messageLabelTopConstraint: NSLayoutConstraint?
+
+    // K-48 Task 5: whisper pill — per-session surface + compact glyph.
+    private var isCompactSurface = false {
+        didSet { applySurfaceStyling() }
+    }
+    private var usesDarkAppearanceForSession = true
+    private var sessionReduceMotion = false
+    private var pillBarHeightConstraints: [NSLayoutConstraint] = []
+    private var pillLevelStack: NSStackView?
+    private var shimmerStack: NSStackView?
+    private var dots: [NSView] { [shimmerDot0, shimmerDot1, shimmerDot2] }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -454,6 +514,7 @@ private final class OverlayCapsuleView: NSView {
             timerLabel.isHidden = false
             messageLabel.isHidden = true
             actionButton.isHidden = true
+            shimmerStack?.isHidden = true
 
             // App info
             if let icon = presentation.targetAppIcon {
@@ -463,20 +524,31 @@ private final class OverlayCapsuleView: NSView {
             }
             appNameLabel.stringValue = presentation.targetAppName.isEmpty ? "App" : presentation.targetAppName
             timerLabel.stringValue = "00:00"
+            pillLevelStack?.isHidden = !isCompactSurface
         } else {
             // Standard compact row
             appIconView.isHidden = true
             appNameLabel.isHidden = true
             recordingDotView.isHidden = true
             timerLabel.isHidden = true
-            messageLabel.isHidden = false
-            messageLabel.stringValue = presentation.message
+            pillLevelStack?.isHidden = true
             actionHandler = presentation.action
-            if let title = presentation.actionTitle {
-                actionButton.title = title
-                actionButton.isHidden = false
-            } else {
+            let isTranscribingPill = isCompactSurface && presentation.message.hasPrefix("Transcribing")
+            if isTranscribingPill {
+                messageLabel.stringValue = "Transcribing"
+                messageLabel.isHidden = false
                 actionButton.isHidden = true
+                shimmerStack?.isHidden = false
+            } else {
+                shimmerStack?.isHidden = true
+                messageLabel.stringValue = presentation.message
+                messageLabel.isHidden = false
+                if let title = presentation.actionTitle {
+                    actionButton.title = title
+                    actionButton.isHidden = false
+                } else {
+                    actionButton.isHidden = true
+                }
             }
         }
     }
@@ -565,17 +637,9 @@ private final class OverlayCapsuleView: NSView {
         recordingDotView.layer?.shadowOffset = .zero
         recordingDotView.isHidden = true
         blurView.addSubview(recordingDotView)
-
-        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            let breathe = CABasicAnimation(keyPath: "opacity")
-            breathe.fromValue = 0.55
-            breathe.toValue = 1.0
-            breathe.duration = 1.2
-            breathe.autoreverses = true
-            breathe.repeatCount = .infinity
-            breathe.timingFunction = CAMediaTimingFunction(controlPoints: 0.32, 0.72, 0.0, 1.0)
-            recordingDotView.layer?.add(breathe, forKey: "breathe")
-        }
+        // K-48 review finding I-1: Reduce Motion is evaluated PER SESSION (showRecording),
+        // not here — updateBreatheAnimation() applies the session value whenever the surface flips.
+        updateBreatheAnimation()
 
         // Timer — monospaced digits, right-aligned
         timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
@@ -643,6 +707,164 @@ private final class OverlayCapsuleView: NSView {
         waveformTopConstraint?.isActive = true
         waveformHeightConstraint?.isActive = true
         waveformView.isHidden = true
+
+        setupPillChrome()
+    }
+
+    /// K-48 Task 5: builds the pill-only chrome (level glyph bars, shimmer dots) and
+    /// pill-specific layout adjustments. Hidden by default; the machined deck stays
+    /// the default surface until setCompactSurface(active:) flips the session style.
+    private func setupPillChrome() {
+        let barViews = [pillLevelBar0, pillLevelBar1, pillLevelBar2]
+        for bar in barViews {
+            bar.wantsLayer = true
+            bar.layer?.cornerRadius = Metrics.pillBarWidth / 2
+            bar.layer?.masksToBounds = false
+            bar.isHidden = true
+            blurView.addSubview(bar)
+        }
+        NSLayoutConstraint.activate([
+            pillLevelBar0.widthAnchor.constraint(equalToConstant: Metrics.pillBarWidth),
+            pillLevelBar1.widthAnchor.constraint(equalToConstant: Metrics.pillBarWidth),
+            pillLevelBar2.widthAnchor.constraint(equalToConstant: Metrics.pillBarWidth)
+        ])
+        // Heights start pinned and are later replaced by updatePillLevel(sample:) —
+        // the active set is tracked in pillBarHeightConstraints so they swap cleanly.
+        pillBarHeightConstraints = [pillLevelBar0, pillLevelBar1, pillLevelBar2].map {
+            $0.heightAnchor.constraint(equalToConstant: Metrics.pillGlyphHeight)
+        }
+        NSLayoutConstraint.activate(pillBarHeightConstraints)
+        pillLevelStack = NSStackView(views: barViews)
+        if let stack = pillLevelStack {
+            stack.orientation = .horizontal
+            stack.alignment = .centerY
+            stack.spacing = 2.5
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            stack.isHidden = true
+            blurView.addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.centerYAnchor.constraint(equalTo: blurView.centerYAnchor),
+                stack.trailingAnchor.constraint(equalTo: timerLabel.leadingAnchor, constant: -8)
+            ])
+        }
+
+        let dots = [shimmerDot0, shimmerDot1, shimmerDot2]
+        for (index, dot) in dots.enumerated() {
+            dot.wantsLayer = true
+            dot.layer?.backgroundColor = indicatorBrandGreen.cgColor
+            dot.layer?.cornerRadius = Metrics.shimmerDotSize / 2
+            dot.alphaValue = 0.35
+            dot.isHidden = true
+            blurView.addSubview(dot)
+        }
+        let shimmerStack = NSStackView(views: dots)
+        shimmerStack.orientation = .horizontal
+        shimmerStack.alignment = .centerY
+        shimmerStack.spacing = 3
+        shimmerStack.translatesAutoresizingMaskIntoConstraints = false
+        shimmerStack.isHidden = true
+        blurView.addSubview(shimmerStack)
+        self.shimmerStack = shimmerStack
+        NSLayoutConstraint.activate([
+            shimmerStack.centerYAnchor.constraint(equalTo: blurView.centerYAnchor),
+            shimmerStack.trailingAnchor.constraint(equalTo: blurView.trailingAnchor, constant: -Metrics.hPadding)
+        ])
+    }
+
+    /// K-48 Task 5 + review finding I-1: per-session surface switch. Called from
+    /// transition(to:) so a prewarmed window still receives styling at present time.
+    func setCompactSurface(active: Bool, darkAppearance: Bool, reduceMotion: Bool) {
+        usesDarkAppearanceForSession = darkAppearance
+        sessionReduceMotion = reduceMotion
+        if active {
+            // Re-apply on every transition: cheap, idempotent, and covers appearance flips.
+            applySurfaceStyling()
+            updateBreatheAnimation()
+        } else if isCompactSurface {
+            isCompactSurface = false
+        }
+    }
+
+    private func applySurfaceStyling() {
+        guard let layer = blurView.layer else { return }
+        if isCompactSurface {
+            layer.cornerRadius = Metrics.pillCornerRadius
+            if usesDarkAppearanceForSession {
+                tintView.layer?.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 0.62).cgColor
+                layer.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
+            } else {
+                tintView.layer?.backgroundColor = NSColor(calibratedWhite: 0.97, alpha: 0.74).cgColor
+                layer.borderColor = NSColor.black.withAlphaComponent(0.13).cgColor
+            }
+            appNameLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+            timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
+            appIconView.layer?.cornerRadius = 4
+            pillLevelStack?.isHidden = false
+            refreshPillBarColors()
+        } else {
+            // Machined deck defaults.
+            layer.cornerRadius = Metrics.cornerRadius
+            tintView.layer?.backgroundColor = NSColor(srgbRed: 20/255.0, green: 20/255.0, blue: 18/255.0, alpha: 0.55).cgColor
+            layer.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+            appNameLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+            timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+            pillLevelStack?.isHidden = true
+            shimmerStack?.isHidden = true
+        }
+        // Recording dot color follows the surface ink in light appearance.
+        recordingDotView.layer?.backgroundColor =
+            isCompactSurface && !usesDarkAppearanceForSession ? NSColor.black.cgColor : indicatorBrandGreen.cgColor
+    }
+
+    private func refreshPillBarColors() {
+        let ink = usesDarkAppearanceForSession ? indicatorBrandGreen : NSColor.black
+        [pillLevelBar0, pillLevelBar1, pillLevelBar2].forEach { $0.layer?.backgroundColor = ink.cgColor }
+    }
+
+    /// K-48 review finding I-1: the dot's breathing animation follows the PER-SESSION
+    /// Reduce Motion value (captured in showRecording), not a one-time app-lifetime check.
+    func updateBreatheAnimation() {
+        if isCompactSurface || sessionReduceMotion {
+            recordingDotView.layer?.removeAnimation(forKey: "breathe")
+            dots.forEach { $0.layer?.removeAnimation(forKey: "shimmer") }
+            return
+        }
+        guard recordingDotView.layer?.animation(forKey: "breathe") == nil else { return }
+        let breathe = CABasicAnimation(keyPath: "opacity")
+        breathe.fromValue = 0.55
+        breathe.toValue = 1.0
+        breathe.duration = 1.2
+        breathe.autoreverses = true
+        breathe.repeatCount = .infinity
+        breathe.timingFunction = CAMediaTimingFunction(controlPoints: 0.32, 0.72, 0.0, 1.0)
+        recordingDotView.layer?.add(breathe, forKey: "breathe")
+        for (index, dot) in dots.enumerated() {
+            let bounce = CABasicAnimation(keyPath: "opacity")
+            bounce.fromValue = 0.3
+            bounce.toValue = 1.0
+            bounce.duration = 1.2
+            bounce.autoreverses = true
+            bounce.repeatCount = .infinity
+            bounce.timeOffset = CFTimeInterval(index) * 0.15
+            bounce.timingFunction = CAMediaTimingFunction(controlPoints: 0.32, 0.72, 0.0, 1.0)
+            dot.layer?.add(bounce, forKey: "shimmer")
+        }
+    }
+
+    /// K-48 Task 5: compact glyph bars track the last three waveform samples.
+    func updatePillLevel(samples: [Float]) {
+        guard isCompactSurface else { return }
+        let values = samples.suffix(3)
+        let heights: [CGFloat] = (0..<3).map { index in
+            guard !values.isEmpty else { return 4 }
+            let v = values[min(index, values.count - 1)]
+            return 4 + CGFloat(max(0, min(1, v))) * (Metrics.pillGlyphHeight - 4)
+        }
+        NSLayoutConstraint.deactivate(pillBarHeightConstraints)
+        pillBarHeightConstraints = zip([pillLevelBar0, pillLevelBar1, pillLevelBar2], heights).map { bar, height in
+            bar.heightAnchor.constraint(equalToConstant: height)
+        }
+        NSLayoutConstraint.activate(pillBarHeightConstraints)
     }
 
     @objc private func didTapAction() {
