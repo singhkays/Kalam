@@ -93,6 +93,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dictationTargetPID: pid_t?
     private var dictationTargetElement: AXUIElement?
     private var heldTranscript: String?
+    /// K-46: the app the hold capsule promised (pid), so the Paste button
+    /// delivers THERE instead of whatever is frontmost when clicked.
+    private var heldTranscriptTargetPID: pid_t?
 
     private var isRecording: Bool { pttState.isRecording }
     private var isASRReady = false
@@ -917,9 +920,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 dictationTargetElement = resolution.element
                 logger.info("Dictation target captured appName=\(resolution.appName, privacy: .public) strategy=\(resolution.strategy, privacy: .public) pid=\(frontmost.processIdentifier, privacy: .public)")
             case .failure(let error):
-                dictationTargetPID = nil
+                // K-46: partial-AX apps (e.g. Sublime Text) answer none of the AX
+                // queries, but the pid alone still identifies the record-time target —
+                // keep it so paste-time routing can reactivate this app instead of
+                // degrading to frontmost-at-paste-time.
+                dictationTargetPID = frontmost.processIdentifier
                 dictationTargetElement = nil
-                logger.warning("Dictation target capture FAILED reason=\(error.reason, privacy: .public)")
+                logger.warning("Dictation target element capture FAILED reason=\(error.reason, privacy: .public) pidKept=\(frontmost.processIdentifier, privacy: .public)")
             }
         } else {
             dictationTargetPID = nil
@@ -1123,12 +1130,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             // The captured target is gone (app quit / field closed): hold the
                             // transcript with a notice instead of pasting into the wrong app.
                             self.heldTranscript = post.text
+                            self.heldTranscriptTargetPID = self.dictationTargetPID
                             self.dictationTargetElement = nil
                             self.dictationTargetPID = nil
-                            let frontmostName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "the frontmost app"
+                            let promisedName = NSRunningApplication(processIdentifier: self.heldTranscriptTargetPID ?? 0)?.localizedName ?? NSWorkspace.shared.frontmostApplication?.localizedName ?? "the frontmost app"
                             await MainActor.run {
                                 self.overlay.showError(
-                                    "Transcript ready — paste into \(frontmostName)?",
+                                    "Transcript ready — paste into \(promisedName)?",
                                     action: .pasteHeldTranscript,
                                     autoHideAfter: nil
                                 )
@@ -1136,8 +1144,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             self.logger.info("Captured-target paste failed; transcript held errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
                             return
                         }
+                    case .capturedApp(let capturedPid):
+                        // K-46 Option A: the record-time app has partial AX support (no
+                        // element), so bring it back to front and paste via the normal
+                        // path. If it cannot be reactivated or won't settle as frontmost,
+                        // hold the transcript for the promised app (the Paste button will
+                        // retry activation there).
+                        self.logger.info("Paste route=capturedApp capturedPID=\(capturedPid, privacy: .public) frontmostPIDAtDecision=\(frontmostPIDAtDecision.map { String($0) } ?? "nil", privacy: .public)")
+                        guard await self.activateCapturedApp(capturedPid) != nil,
+                              await self.waitForFrontmost(pid: capturedPid) else {
+                            self.heldTranscript = post.text
+                            self.heldTranscriptTargetPID = capturedPid
+                            let appName = NSRunningApplication(processIdentifier: capturedPid)?.localizedName ?? "the original app"
+                            await MainActor.run {
+                                self.overlay.showError(
+                                    "Transcript ready — paste into \(appName)?",
+                                    action: .pasteHeldTranscript,
+                                    autoHideAfter: nil
+                                )
+                            }
+                            self.logger.warning("Captured-app activation failed; transcript held pid=\(capturedPid, privacy: .public)")
+                            return
+                        }
+                        try await self.paster.paste(post.text)
                     }
                     self.heldTranscript = nil
+                    self.heldTranscriptTargetPID = nil
                     self.dictationTargetElement = nil
                     self.dictationTargetPID = nil
                     self.overlay.showSuccessAndAutoHide()
@@ -1189,6 +1221,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dictationTargetPID = nil
         dictationTargetElement = nil
         heldTranscript = nil
+        heldTranscriptTargetPID = nil
 
         if UserDefaults.standard.bool(forKey: "duckEnabled") {
             duckingStartWorkItem?.cancel()
@@ -1216,13 +1249,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// K-23: explicit "Paste" action for a held transcript — pastes into the CURRENT
-    /// frontmost app (the user consciously chose it by clicking the overlay button).
+    /// K-46: activate another app from a background/menu-bar context. Plain
+    /// `NSRunningApplication.activate()` is routinely refused by TCC for
+    /// non-frontmost apps (observed live 2026-08-24: "activation refused");
+    /// the LaunchServices route carries the user-intent semantics needed here.
+    @MainActor
+    private func activateCapturedApp(_ pid: pid_t) async -> NSRunningApplication? {
+        guard let app = NSRunningApplication(processIdentifier: pid) else { return nil }
+        if app.activate() { return app }
+        logger.info("Plain activate refused; trying LaunchServices openApplication pid=\(pid, privacy: .public)")
+        do {
+            let configuration = NSWorkspace.OpenConfiguration()
+            try await NSWorkspace.shared.openApplication(at: app.bundleURL ?? URL(fileURLWithPath: "/"), configuration: configuration)
+            return app
+        } catch {
+            logger.warning("LaunchServices activation failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
+            return nil
+        }
+    }
+
+    /// Polls until `pid` is actually frontmost (≤1 s); false if it never settles.
+    @MainActor
+    private func waitForFrontmost(pid: pid_t) async -> Bool {
+        for _ in 0..<20 {
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == pid { return true }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return false
+    }
+
+    /// K-23/K-46: explicit "Paste" action for a held transcript. The capsule named an
+    /// app, so deliver THERE: reactivate the promised app if it drifted to background,
+    /// wait until it is genuinely frontmost, then paste via the normal path. Only if
+    /// the promised app quit entirely does the paste go to the current frontmost —
+    /// the user's click is then the conscious choice of destination.
     private func pasteHeldTranscript() {
         guard let text = heldTranscript else { return }
+        let promisedPID = heldTranscriptTargetPID
         heldTranscript = nil
+        heldTranscriptTargetPID = nil
         Task { @MainActor [weak self] in
             guard let self else { return }
+            if let promisedPID, NSRunningApplication(processIdentifier: promisedPID) != nil {
+                guard await self.activateCapturedApp(promisedPID) != nil,
+                      await self.waitForFrontmost(pid: promisedPID) else {
+                    let appName = NSRunningApplication(processIdentifier: promisedPID)?.localizedName ?? "the app"
+                    self.logger.warning("Held-transcript reactivation failed pid=\(promisedPID, privacy: .public)")
+                    self.overlay.showError("Could not bring \(appName) to front", action: nil, autoHideAfter: 4.0)
+                    return
+                }
+            }
             do {
                 try await self.paster.paste(text)
                 self.overlay.showSuccessAndAutoHide()

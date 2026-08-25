@@ -149,16 +149,24 @@ final class PasteService {
         case frontmost
         /// The user switched apps during transcription — insert into the captured element.
         case capturedElement(AXUIElement)
+        /// K-46: the record-time app has partial AX support (no element resolvable),
+        /// but its pid was captured — reactivate it and paste via the frontmost path.
+        case capturedApp(pid_t)
     }
 
     /// Pure decision for the paste target (headless-testable).
     enum PasteRouting {
         static func target(capturedPID: pid_t?, capturedElement: AXUIElement?, frontmostPID: pid_t?) -> PasteTarget {
-            guard let capturedPID, let capturedElement, let frontmostPID,
+            guard let capturedPID, let frontmostPID,
                   capturedPID != frontmostPID else {
                 return .frontmost
             }
-            return .capturedElement(capturedElement)
+            if let capturedElement {
+                return .capturedElement(capturedElement)
+            }
+            // K-46: element unavailable (partial-AX app) — the pid alone still
+            // identifies the record-time target.
+            return .capturedApp(capturedPID)
         }
     }
 

@@ -49,16 +49,24 @@ uncommitted). T19–T20 add ~10 min and reuse the same session.
    and one quick dictation works before starting the clock.
 2. **Start the log monitor** (leave it running for the whole session):
    ```bash
-   log stream --predicate 'subsystem == "singhkays.Kalam" || subsystem == "singhkays.Kalam-test"' \
+   log stream --predicate 'subsystem == "singhkays.Kalam"' --info \
      --style compact > ~/kalam-test-log.txt 2>&1
    ```
+   ⚠️ `--info` is REQUIRED: the pipeline logs (`Stopped collecting … dropped=`,
+   `Paste route=…`, successful captures) are info-level, and both `log stream`
+   and `log show` silently drop those by default — only warnings/errors show
+   without it (proven live 2026-08-24: streams came back header-only while
+   error lines survived).
    Run this in YOUR terminal on the machine the app runs on (the host — the Hermes
    agent's VM cannot see these logs). `log stream` captures only events AFTER it
    starts; if a session's file comes back header-only, recover retroactively instead:
    ```bash
-   log show --last 120m --predicate 'subsystem == "singhkays.Kalam"' --style compact \
+   log show --last 120m --predicate 'subsystem == "singhkays.Kalam"' --info --style compact \
      | grep -E "Stopped collecting|Dictation target|Paste route"
    ```
+   ⚠️ Predicate gotcha: the SUBSYSTEM is `singhkays.Kalam` (never `-test`) for every
+   build flavor — `-test` appears only in the bundle ID/process name, so filtering
+   `subsystem == "singhkays.Kalam-test"` silently matches nothing.
 3. **Clipboard sentinel** before any clipboard-sensitive test:
    ```bash
    printf 'KALAM-SENTINEL-1337' | pbcopy && pbpaste   # → KALAM-SENTINEL-1337
@@ -239,18 +247,60 @@ shared frontmost read. Rebuild, reproduce once, then:
     grep -E "Dictation target|Paste route" ~/kalam-test-log.txt | tail -4
 
 Reading the outcome:
-- "capture FAILED/SKIPPED" present → **Gap 1** (record-time capture never happened; likely
+- "capture FAILED/SKIPPED present → **Gap 1** (record-time capture never happened; likely
   Sublime's partial AX tree) — fix = broaden capture fallback.
 - "captured appName=Sublime Text" AND "route=frontmost capturedPID=X frontmostPIDAtDecision=X"
   yet text visibly landed in Terminal → **Gap 2** (decision-to-synthesis race; both PIDs equal
   proves the decision was correct at its instant) — fix = re-check frontmost immediately before
   event synthesis inside PasteService.
 
+Verdict (2026-08-24, live reproduction on instrumented build): **GAP 1 CONFIRMED** —
+`Dictation target capture FAILED reason=Could not resolve focused element for Sublime Text.
+System-wide focused element failed with cannotComplete (-25204); Frontmost app focused element
+failed with cannotComplete (-25204); Frontmost app focused window failed with cannotComplete
+(-25204)`. Sublime answered none of the three AX queries (partial macOS accessibility
+support); nil targets ⇒ router correctly returned `.frontmost`; transcript followed the
+post-stop click into Terminal. Gap 2 not implicated this round.
+
+Fix implemented (2026-08-24, Option A): capture now keeps the record-time **pid** even when
+element resolution fails; a new `.capturedApp` paste route reactivates the captured app,
+waits ≤1 s for it to settle frontmost, then pastes normally — if activation is refused or
+the app never comes forward, the transcript is HELD behind the "Transcript ready" button
+instead of pasting into the wrong app. Router pin `testPasteRoutingPidOnlySwitchedAppTargetsCapturedApp`
+green; full suite pending-record. Rebuild, repeat the Sublime→Terminal switch, expect:
+text lands in **Sublime Text**, OR the hold capsule appears — never silent Terminal paste.
+New log signature on this path: "Paste route=capturedApp …".
+
+Round 2 (18:42 repro on the first Option-A build): routing worked exactly as designed
+(`element capture FAILED … pidKept=1446`, then `Paste route=capturedApp`) but plain
+`activate()` was REFUSED (TCC: background apps can't foreground other apps) ⇒ transcript
+held; then clicking Paste delivered into click-time frontmost because the handler never
+remembered the promised app — two follow-up defects, both fixed same day:
+LaunchServices `openApplication` fallback for activation, and `pasteHeldTranscript`
+now reactivates the promised pid before pasting. Rebuild and repeat the switch;
+expect text in **Sublime Text** automatically, or (if activation still fails) a capsule
+whose **Paste** button now truly delivers to Sublime Text.
+
+Result: 🟢 PASS (2026-08-24, round 3) — after the K-46 Option-A + activation-fallback fixes,
+the rebuilt app **pasted into Sublime Text automatically** when the user switched focus
+mid-transcription (their words: "the app pasted in sublime automatically after changing
+focus"). The 🔴 FAIL below documents the pre-fix behavior that drove K-46; the hold-capsule
+path (activation refused ⇒ Paste button delivers to the promised app) remains as the safety
+net. Residual: the per-mode sweep (Hold/Double-Tap/Hold-or-Toggle) is still owed before
+K-23 itself flips — this pass was on one mode.
+
+Per-mode sweep completed same day (2026-08-24): **Toggle** ✅ (rounds 1–3 ran in Toggle);
+**Double Tap** ✅ (live: transcript followed into Sublime Text after switching);
+**Hold** — not applicable by design: switching apps requires releasing the hotkey, which
+cancels the recording before any paste decision exists (user confirmed the observed cancel;
+no wrong-app paste surface); **Hold-or-Toggle** inherits the branch already active, covered
+by the above. K-23 closed.
+
 Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes (per mode): ____________________
 
 ---
 
-## T15 — K-10: audio render-thread hygiene
+## ✅ T15 — K-10: audio render-thread hygiene
 
 Same three probes as archived T5 below (they were deferred only because the agent lacked mic
 permission — you can run them directly):
@@ -266,7 +316,9 @@ permission — you can run them directly):
 
 **FAIL if:** audible glitches, or any `dropped=` count > 0 (note the scenario).
 
-Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+Result: ✅ PASS (2026-08-24) — audible gate: 5× rapid re-record + 4-minute dictation, no
+glitches/dropouts heard. Machine gate: `Stopped collecting samples=438400 durationMs=27400
+callbacks=263 dropped=0` (host log, `--info` query). K-10 closed.
 
 ---
 
@@ -317,7 +369,7 @@ problems at once. Cards must show the right status tone for each.
   (one-time `dictionary.migratedToCompassRules`).
 - **Engine:** choose/copy flow shows the copy-paste `cp` command only.
 - **Updates:** opens the browser.
-- **Menu-bar indicator:** 3-position setting renders in all three positions.
+- **Menu-bar indicator:** 2-position setting renders in both positions (top center, bottom center).
 - **Deep link:** onboarding's Settings affordance opens Compass (at the Engine dive).
 
 **Expected (PASS):** all of the above hold; no crash, no stuck state; settings persist across

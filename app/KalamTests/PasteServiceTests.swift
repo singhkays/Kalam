@@ -326,7 +326,7 @@ final class PasteServiceTests: XCTestCase {
     func testPasteIntoCapturedElementSucceedsWithoutTouchingPasteboard() async throws {
         let pasteboard = makeIsolatedPasteboard()
         pasteboard.clearContents()
-        pasteboard.setString("user-copy-\\(UUID().uuidString)", forType: .string)
+        pasteboard.setString("user-copy-\(UUID().uuidString)", forType: .string)
 
         let element = AXUIElementCreateSystemWide()
         let insertedElement = TestBox<AXUIElement>()
@@ -339,7 +339,7 @@ final class PasteServiceTests: XCTestCase {
         strategies.pasteboard = pasteboard
         let service = PasteService(strategies: strategies)
 
-        try await service.paste(into: element, text: "transcript-\\(UUID().uuidString)")
+        try await service.paste(into: element, text: "transcript-\(UUID().uuidString)")
 
         XCTAssertNotNil(insertedElement.value, "the captured element must receive the insert")
         XCTAssertTrue(insertedElement.value === element, "insert must target the captured element")
@@ -394,7 +394,7 @@ final class PasteServiceTests: XCTestCase {
             .frontmost
         )
         XCTAssertEqual(
-            PasteService.PasteRouting.target(capturedPID: 7, capturedElement: nil, frontmostPID: 42),
+            PasteService.PasteRouting.target(capturedPID: nil, capturedElement: nil, frontmostPID: 42),
             .frontmost
         )
     }
@@ -405,6 +405,10 @@ final class PasteServiceTests: XCTestCase {
             PasteService.PasteRouting.target(capturedPID: 7, capturedElement: element, frontmostPID: 7),
             .frontmost
         )
+        XCTAssertEqual(
+            PasteService.PasteRouting.target(capturedPID: 7, capturedElement: nil, frontmostPID: 7),
+            .frontmost
+        )
     }
 
     func testPasteRoutingSwitchedAppTargetsCapturedElement() {
@@ -412,6 +416,15 @@ final class PasteServiceTests: XCTestCase {
         XCTAssertEqual(
             PasteService.PasteRouting.target(capturedPID: 7, capturedElement: element, frontmostPID: 42),
             .capturedElement(element)
+        )
+    }
+
+    // K-46 Option A: partial-AX apps yield no element but DO yield a pid —
+    // switching away must reactivate-and-paste, not degrade to frontmost-at-paste-time.
+    func testPasteRoutingPidOnlySwitchedAppTargetsCapturedApp() {
+        XCTAssertEqual(
+            PasteService.PasteRouting.target(capturedPID: 7, capturedElement: nil, frontmostPID: 42),
+            .capturedApp(7)
         )
     }
 }
