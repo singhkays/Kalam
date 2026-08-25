@@ -925,6 +925,10 @@ private final class OverlayCapsuleView: NSView {
             timerLabel.textColor = usesDarkAppearanceForSession
                 ? NSColor.white.withAlphaComponent(0.55)
                 : NSColor.black.withAlphaComponent(0.65)
+            // Re-review residual: the transcribing pill's message label needs the same treatment.
+            messageLabel.textColor = usesDarkAppearanceForSession
+                ? NSColor.white
+                : NSColor.black.withAlphaComponent(0.85)
         } else {
             // Machined deck defaults.
             layer.cornerRadius = Metrics.cornerRadius
