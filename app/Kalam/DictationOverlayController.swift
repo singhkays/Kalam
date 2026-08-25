@@ -52,8 +52,6 @@ final class DictationOverlayController {
     /// Hook (sessionStyle): captured but NOT branched on yet — whisper/caret rendering arrives in Tasks 5/7.
     private var sessionStyle: IndicatorStyle = .machined
 
-    private var pendingFocusHint: AXUIElement?
-
     func setWaveformProvider(_ provider: @escaping () -> [Float]) {
         waveformProvider = provider
     }
@@ -63,33 +61,32 @@ final class DictationOverlayController {
         pasteHeldTranscriptAction = action
     }
 
-    func showRecording(isHoldMode: Bool, focusHint: AXUIElement? = nil) {
+    func showRecording(isHoldMode: Bool) {
         // K-48 mid-flight rule: read the setting exactly once per session; style changes apply at the next session.
         sessionStyle = GeneralSettingsConfiguration.load().indicatorStyle
-        pendingFocusHint = focusHint
         // Capture the frontmost app that will receive the pasted text.
         let frontApp = NSWorkspace.shared.frontmostApplication
         let targetName = frontApp?.localizedName ?? ""
         let targetIcon = frontApp?.icon
         recordingStartTime = CFAbsoluteTimeGetCurrent()
         let state: OverlayState = isHoldMode ? .recordingHold : .recordingToggle
-        transition(to: state, lockAnchor: false, autoHideAfter: nil, targetAppName: targetName, targetAppIcon: targetIcon)
+        transition(to: state, autoHideAfter: nil, targetAppName: targetName, targetAppIcon: targetIcon)
     }
 
     func showTranscribing() {
-        transition(to: .transcribing, lockAnchor: false, autoHideAfter: nil)
+        transition(to: .transcribing, autoHideAfter: nil)
     }
 
     func showSuccessAndAutoHide() {
-        transition(to: .success, lockAnchor: false, autoHideAfter: 0.35)
+        transition(to: .success, autoHideAfter: 0.35)
     }
 
     func showInfoAndAutoHide(_ message: String) {
-        transition(to: .info(message: message), lockAnchor: false, autoHideAfter: 0.7)
+        transition(to: .info(message: message), autoHideAfter: 0.7)
     }
 
     func showError(_ message: String, action: OverlayAction?, autoHideAfter: TimeInterval? = nil) {
-        transition(to: .error(message: message, action: action), lockAnchor: false, autoHideAfter: autoHideAfter)
+        transition(to: .error(message: message, action: action), autoHideAfter: autoHideAfter)
     }
 
 
@@ -98,7 +95,10 @@ final class DictationOverlayController {
         stateTask = nil
         stopWaveformUpdates()
         stopTimerUpdates()
-        placementScreen = nil
+        // placementScreen is deliberately PERSISTED across sessions: nil-ing it
+        // here forced every session start to re-walk AX for placement before the
+        // capsule could show. refinePlacementIfMoved corrects it if the user
+        // moved to another screen mid-session.
         guard let w = window else { return }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = fadeDuration
@@ -110,15 +110,15 @@ final class DictationOverlayController {
         }
     }
 
-    private func transition(to state: OverlayState, lockAnchor: Bool, autoHideAfter: TimeInterval?,
+    private func transition(to state: OverlayState, autoHideAfter: TimeInterval?,
                             targetAppName: String = "", targetAppIcon: NSImage? = nil) {
         stateTask?.cancel()
         stateTask = nil
         ensureWindow()
         let showsWaveform = isRecordingState(state)
         currentWindowSize = showsWaveform ? recordingWindowSize : compactWindowSize
-        if lockAnchor || placementScreen == nil {
-            placementScreen = resolvePlacementScreen(from: pendingFocusHint) ?? placementScreen ?? fallbackScreen()
+        if placementScreen == nil {
+            placementScreen = resolvePlacementScreen(from: nil) ?? fallbackScreen()
         }
         if let screen = placementScreen ?? fallbackScreen() {
             positionWindow(on: screen)
@@ -343,10 +343,11 @@ final class DictationOverlayController {
     /// silently ONLY if the freshly learned screen differs from the one the
     /// capsule was placed on. No second system-wide AX walk.
     func refinePlacementIfMoved(focusHint: AXUIElement?) {
-        guard let element = focusHint ?? pendingFocusHint,
+        guard let element = focusHint,
               AXIsProcessTrusted(),
               let frame = frameOfAXElement(element) else { return }
-        let center = CGPoint(x: flipAXRect(frame).midX, y: flipAXRect(frame).midY)
+        let appKitRect = flipAXRect(frame)
+        let center = CGPoint(x: appKitRect.midX, y: appKitRect.midY)
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(center) }),
               screen != placementScreen else { return }
         placementScreen = screen

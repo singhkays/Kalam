@@ -49,7 +49,7 @@ enum AccessibilityFocusResolver {
             } else {
                 return .success(
                     AccessibilityFocusedElementResolution(
-                        element: focusedElement,
+                        element: Self.boundMessagingTimeout(focusedElement),
                         appName: appName,
                         strategy: "system-wide focused element"
                     )
@@ -75,7 +75,7 @@ enum AccessibilityFocusResolver {
         ) {
             return .success(
                 AccessibilityFocusedElementResolution(
-                    element: focusedElement,
+                    element: Self.boundMessagingTimeout(focusedElement),
                     appName: appName,
                     strategy: "frontmost app focused element"
                 )
@@ -98,7 +98,7 @@ enum AccessibilityFocusResolver {
             ) {
                 return .success(
                     AccessibilityFocusedElementResolution(
-                        element: focusedElement,
+                        element: Self.boundMessagingTimeout(focusedElement),
                         appName: appName,
                         strategy: "focused window focused element"
                     )
@@ -112,7 +112,7 @@ enum AccessibilityFocusResolver {
             ) {
                 return .success(
                     AccessibilityFocusedElementResolution(
-                        element: focusedDescendant,
+                        element: Self.boundMessagingTimeout(focusedDescendant),
                         appName: appName,
                         strategy: "focused window descendant search"
                     )
@@ -156,6 +156,15 @@ enum AccessibilityFocusResolver {
         }
 
         return unsafeBitCast(value, to: AXUIElement.self)
+    }
+
+    /// AX messaging timeouts are PER-REFERENCE and do not propagate to returned
+    /// elements. Every element this resolver hands out gets the bounded timeout
+    /// so downstream attribute reads (overlay placement, paste-time focus use)
+    /// can never inherit the framework default (6 s/message) from a wedged app.
+    private static func boundMessagingTimeout(_ element: AXUIElement) -> AXUIElement {
+        _ = AXUIElementSetMessagingTimeout(element, messagingTimeoutSeconds)
+        return element
     }
 
     private static func findFocusedDescendant(

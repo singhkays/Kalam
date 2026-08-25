@@ -976,7 +976,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // record-time paste target capture - deliberately AFTER the mic is live and
-        // the indicator is up (bounded by the 0.75 s messaging timeout).
+        // the indicator is up. Every AX reference involved is timeout-bounded
+        // (AccessibilityFocusResolver bounds the system-wide query AND every
+        // element it returns, so attribute reads cannot inherit the 6 s default).
         if let frontmost = NSWorkspace.shared.frontmostApplication {
             switch AccessibilityFocusResolver.resolveFocusedElement(frontmostApp: frontmost) {
             case .success(let resolution):
