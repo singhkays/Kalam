@@ -9,6 +9,7 @@ enum GeneralSettingsKeys {
     static let showInDock = "general.showInDock"
     static let escapeCancelsRecording = "general.escapeCancelsRecording"
     static let indicatorPlacementPreset = "general.indicatorPlacementPreset"
+    static let indicatorStylePreset = "general.indicatorStylePreset"
     static let selectedInputUID = "audio.selectedInputDeviceUID"
     static let muteWhileRecording = "general.muteWhileRecording"
 }
@@ -19,6 +20,7 @@ struct GeneralSettingsConfiguration: Equatable {
         showInDock: true,
         escapeCancelsRecording: false,
         indicatorPlacement: .topCenter,
+        indicatorStyle: .machined,
         muteWhileRecording: true
     )
 
@@ -26,17 +28,22 @@ struct GeneralSettingsConfiguration: Equatable {
     var showInDock: Bool
     var escapeCancelsRecording: Bool
     var indicatorPlacement: IndicatorPlacement
+    var indicatorStyle: IndicatorStyle
     var muteWhileRecording: Bool
 
     static func load(from defaults: UserDefaults = .standard) -> GeneralSettingsConfiguration {
         let presetRaw = defaults.string(forKey: GeneralSettingsKeys.indicatorPlacementPreset)
         let preset = IndicatorPlacement.migrating(fromStored: presetRaw)
 
+        let styleRaw = defaults.string(forKey: GeneralSettingsKeys.indicatorStylePreset)
+        let style = IndicatorStyle.migrating(fromStored: styleRaw)
+
         return GeneralSettingsConfiguration(
             launchAtLogin: bool(forKey: GeneralSettingsKeys.launchAtLogin, defaults: defaults, fallback: Self.defaults.launchAtLogin),
             showInDock: bool(forKey: GeneralSettingsKeys.showInDock, defaults: defaults, fallback: Self.defaults.showInDock),
             escapeCancelsRecording: bool(forKey: GeneralSettingsKeys.escapeCancelsRecording, defaults: defaults, fallback: Self.defaults.escapeCancelsRecording),
             indicatorPlacement: preset,
+            indicatorStyle: style,
             muteWhileRecording: bool(forKey: GeneralSettingsKeys.muteWhileRecording, defaults: defaults, fallback: Self.defaults.muteWhileRecording)
         )
     }
@@ -46,6 +53,7 @@ struct GeneralSettingsConfiguration: Equatable {
         defaults.set(showInDock, forKey: GeneralSettingsKeys.showInDock)
         defaults.set(escapeCancelsRecording, forKey: GeneralSettingsKeys.escapeCancelsRecording)
         defaults.set(indicatorPlacement.rawValue, forKey: GeneralSettingsKeys.indicatorPlacementPreset)
+        defaults.set(indicatorStyle.rawValue, forKey: GeneralSettingsKeys.indicatorStylePreset)
         defaults.set(muteWhileRecording, forKey: GeneralSettingsKeys.muteWhileRecording)
     }
 
