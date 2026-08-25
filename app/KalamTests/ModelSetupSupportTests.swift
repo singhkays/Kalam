@@ -1,5 +1,6 @@
 import XCTest
 @testable import Kalam_test
+import FluidAudio
 
 @MainActor
 final class ModelSetupSupportTests: XCTestCase {
@@ -35,8 +36,39 @@ final class ModelSetupSupportTests: XCTestCase {
         let command = ModelSetupSupport.downloadCommand(for: .v2, config: config)
 
         XCTAssertTrue(command.contains("hf download FluidInference/parakeet-tdt-0.6b-v2-coreml"))
-        XCTAssertTrue(command.contains("--local-dir \(folderURL.path)/parakeet-tdt-0.6b-v2"))
+        XCTAssertTrue(command.contains("--local-dir '\(folderURL.path)/parakeet-tdt-0.6b-v2'"))
         XCTAssertTrue(command.contains("--include \"JointDecision.mlmodelc/*\""))
+    }
+
+    func testDownloadCommandShellQuotesSelectedFolderPath() throws {
+        let folderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Kalam model 'drop' \(UUID().uuidString) ; $HOME", isDirectory: true)
+        try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folderURL) }
+
+        var config = ModelsConfiguration.defaults
+        try config.setModelLibraryURL(folderURL)
+
+        let command = ModelSetupSupport.downloadCommand(for: .v2, config: config)
+        let expectedDestination = "'\(folderURL.path.replacingOccurrences(of: "'", with: "'\\''"))/parakeet-tdt-0.6b-v2'"
+
+        XCTAssertTrue(command.contains("--local-dir \(expectedDestination)"))
+        XCTAssertFalse(command.contains("--local-dir \(folderURL.path)/parakeet-tdt-0.6b-v2"))
+    }
+
+    func testDownloadCommandShellQuotesUnicodeAndLeadingHyphenPaths() throws {
+        let folderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("-模型 😀\nfolder", isDirectory: true)
+        try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folderURL) }
+
+        var config = ModelsConfiguration.defaults
+        try config.setModelLibraryURL(folderURL)
+
+        let command = ModelSetupSupport.downloadCommand(for: .v3, config: config)
+        let expectedDestination = "'\(folderURL.path)/parakeet-tdt-0.6b-v3'"
+
+        XCTAssertTrue(command.contains("--local-dir \(expectedDestination)"))
     }
 
     func testDownloadCommandUsesV3JointModelName() throws {
@@ -185,5 +217,112 @@ final class ModelSetupSupportTests: XCTestCase {
                 "x-apple.systempreferences:",
             ]
         )
+    }
+
+    // MARK: - Per-file manifest (v3 adoption Task 6)
+
+    func testRequiredModelFilesMatchFluidAudioValidatorSource() {
+        // The manifest must be derived from the same ModelNames.ASR source the
+        // FluidAudio validator uses — assert against the source itself, not
+        // literals, so a FluidAudio upgrade that changes the required set fails
+        // loudly here instead of silently lying in the UI.
+        for version in ASRModelVersion.allCases {
+            let files = ModelSetupSupport.requiredModelFiles(for: version)
+            let faVersion = version.fluidAudioVersion
+
+            var expected: Set<String>
+            if faVersion == .v3 {
+                expected = ModelNames.ASR.requiredModelsV3(precision: .int8)
+            } else if faVersion.hasFusedEncoder {
+                expected = ModelNames.ASR.requiredModelsFused
+            } else {
+                expected = ModelNames.ASR.requiredModels
+            }
+            expected.insert(ModelNames.ASR.vocabularyFile)
+
+            XCTAssertEqual(Set(files), expected, "\(version) manifest drifted from FluidAudio's required set")
+            XCTAssertTrue(files.contains(ModelNames.ASR.vocabularyFile), "\(version) manifest must include the vocab file")
+            XCTAssertFalse(files.isEmpty)
+        }
+    }
+
+    func testManifestMapsPresencePerFile() {
+        let library = URL(fileURLWithPath: "/tmp/KalamLib", isDirectory: true)
+        let repoPath = library.deletingLastPathComponent()
+            .appendingPathComponent("parakeet-tdt-0.6b-v2")
+        let files = ModelSetupSupport.requiredModelFiles(for: .v2)
+        precondition(files.count >= 2)
+
+        // First file present, everything else missing.
+        let present = Set([repoPath.appendingPathComponent(files[0]).path])
+        let manifest = ModelSetupSupport.modelFileManifest(
+            for: .v2,
+            libraryURL: library,
+            fileExists: { present.contains($0) }
+        )
+
+        XCTAssertEqual(manifest.count, files.count)
+        XCTAssertTrue(manifest[0].isPresent)
+        XCTAssertTrue(manifest.dropFirst().allSatisfy { !$0.isPresent })
+        XCTAssertEqual(manifest[0].name, files[0])
+    }
+
+    func testManifestEmptyWhenLibraryNotConfigured() {
+        let manifest = ModelSetupSupport.modelFileManifest(
+            for: .v2,
+            libraryURL: nil,
+            fileExists: { _ in true }
+        )
+        XCTAssertTrue(manifest.isEmpty)
+    }
+
+    func testRefinedAvailabilityPromotesPartialWhenSomeFilesArrived() {
+        let manifest = [
+            ASRModelFileEntry(name: "a.mlmodelc", isPresent: true),
+            ASRModelFileEntry(name: "b.mlmodelc", isPresent: true),
+            ASRModelFileEntry(name: "c.mlmodelc", isPresent: false),
+        ]
+        let refined = ModelSetupSupport.refinedAvailability(
+            base: .invalidModelFolder(expectedPath: "/tmp/lib/parakeet-tdt-0.6b-v2"),
+            manifest: manifest
+        )
+        XCTAssertEqual(
+            refined,
+            .partial(expectedPath: "/tmp/lib/parakeet-tdt-0.6b-v2", missing: ["c.mlmodelc"], total: 3)
+        )
+    }
+
+    func testRefinedAvailabilityKeepsInvalidWhenNothingArrived() {
+        let manifest = [
+            ASRModelFileEntry(name: "a.mlmodelc", isPresent: false),
+            ASRModelFileEntry(name: "b.mlmodelc", isPresent: false),
+        ]
+        let refined = ModelSetupSupport.refinedAvailability(
+            base: .invalidModelFolder(expectedPath: "/tmp/lib/parakeet-tdt-0.6b-v2"),
+            manifest: manifest
+        )
+        XCTAssertEqual(refined, .invalidModelFolder(expectedPath: "/tmp/lib/parakeet-tdt-0.6b-v2"))
+    }
+
+    func testRefinedAvailabilityLeavesOtherCasesUntouched() {
+        let manifest = [ASRModelFileEntry(name: "a.mlmodelc", isPresent: true)]
+        XCTAssertEqual(
+            ModelSetupSupport.refinedAvailability(base: .installed(path: "/x"), manifest: manifest),
+            .installed(path: "/x")
+        )
+        XCTAssertEqual(
+            ModelSetupSupport.refinedAvailability(base: .modelLibraryNotConfigured, manifest: []),
+            .modelLibraryNotConfigured
+        )
+    }
+
+    func testPartialStatusLabelShowsArrivalCount() {
+        let availability = ASRModelAvailability.partial(
+            expectedPath: "/tmp/lib/parakeet-tdt-0.6b-v2",
+            missing: ["JointDecision.mlmodelc"],
+            total: 5
+        )
+        XCTAssertEqual(availability.statusLabel, "4/5")
+        XCTAssertFalse(availability.isInstalled)
     }
 }

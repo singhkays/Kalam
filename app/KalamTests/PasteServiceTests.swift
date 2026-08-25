@@ -2,10 +2,10 @@ import AppKit
 import XCTest
 @testable import Kalam_test
 
-/// K-02 regression tests. The failure-path test fails on the pre-fix code
+/// clipboard restore on failed paste regression tests. The failure-path test fails on the pre-fix code
 /// (throw path never restores the clipboard); the rest pin the restore
-/// machinery and the change-count guard. K-08 tests pin per-outcome restore
-/// timing; K-09 tests pin cooperative (non-blocking) commit polling.
+/// machinery and the change-count guard. pasteboard exposure minimization tests pin per-outcome restore
+/// timing; cooperative pasteboard polling tests pin cooperative (non-blocking) commit polling.
 /// All tests use an isolated named pasteboard so the user's real clipboard
 /// is never touched.
 @MainActor
@@ -37,11 +37,11 @@ final class PasteServiceTests: XCTestCase {
             // expected — all three strategies failed
         }
 
-        // K-02 + K-08: the failure path restores immediately (no grace delay),
+        // clipboard restore on failed paste + pasteboard exposure minimization: the failure path restores immediately (no grace delay),
         // so no runloop pumping is needed — assert directly.
         XCTAssertEqual(
             pasteboard.string(forType: .string), original,
-            "K-02: the throw path must restore the original clipboard content"
+            "clipboard restore on failed paste: the throw path must restore the original clipboard content"
         )
     }
 
@@ -110,7 +110,7 @@ final class PasteServiceTests: XCTestCase {
         )
     }
 
-    /// K-08 pin: the Cmd+V path keeps a grace delay so the target app can read
+    /// pasteboard exposure minimization pin: the Cmd+V path keeps a grace delay so the target app can read
     /// the pasteboard. Guards against a future over-correction that restores
     /// immediately on every path.
     func testCmdVPathHonorsGraceDelay() async throws {
@@ -146,7 +146,7 @@ final class PasteServiceTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), original)
     }
 
-    /// K-08: the AX path never hands the pasteboard to the target app, so the
+    /// pasteboard exposure minimization: the AX path never hands the pasteboard to the target app, so the
     /// snapshot restore must be immediate — no grace delay. RED on the pre-fix
     /// code, where every path waits `restoreDelay` (injected 0.3 s here).
     func testAccessibilityPathRestoresImmediately() async throws {
@@ -169,11 +169,11 @@ final class PasteServiceTests: XCTestCase {
         // No runloop pumping: the restore must already be complete.
         XCTAssertEqual(
             pasteboard.string(forType: .string), original,
-            "K-08: AX success must restore the clipboard immediately (no grace delay)"
+            "pasteboard exposure minimization: AX success must restore the clipboard immediately (no grace delay)"
         )
     }
 
-    /// K-09: the commit wait must yield the MainActor between polls. A
+    /// cooperative pasteboard polling: the commit wait must yield the MainActor between polls. A
     /// main-queue sentinel queued before the wait must run *during* it —
     /// impossible while the old usleep loop holds the main thread.
     func testWaitForPasteboardCommitYieldsMainThread() async {
@@ -202,10 +202,10 @@ final class PasteServiceTests: XCTestCase {
         XCTAssertFalse(committed, "unreachable target → timeout")
         XCTAssertGreaterThanOrEqual(elapsed, 0.09, "still bounded by the timeout")
         XCTAssertTrue(sentinelRan,
-            "K-09: main-queue work must run during the wait (no usleep on the MainActor)")
+            "cooperative pasteboard polling: main-queue work must run during the wait (no usleep on the MainActor)")
     }
 
-    /// K-09 pin: the wait still detects the pasteboard advancing mid-wait.
+    /// cooperative pasteboard polling pin: the wait still detects the pasteboard advancing mid-wait.
     /// Sync + runloop pumping: the wait task's MainActor jobs run while the
     /// test pumps. The mid-wait write mirrors writeAndTrackPasteboardState's
     /// shape (clearContents + setString) — on this host clearContents bumps
@@ -236,10 +236,10 @@ final class PasteServiceTests: XCTestCase {
             RunLoop.main.run(until: Date().addingTimeInterval(0.01))
         }
         XCTAssertEqual(resultBox.value, true,
-            "K-09: the wait must observe a pasteboard advance that lands mid-wait")
+            "cooperative pasteboard polling: the wait must observe a pasteboard advance that lands mid-wait")
     }
 
-    /// K-09: canceling the task mid-wait aborts the polling promptly — the
+    /// cooperative pasteboard polling: canceling the task mid-wait aborts the polling promptly — the
     /// wait must not run its full timeout after cancellation.
     func testWaitForPasteboardCommitRespondsToCancellation() async throws {
         let pasteboard = makeIsolatedPasteboard()
@@ -259,10 +259,10 @@ final class PasteServiceTests: XCTestCase {
         let result = await task.value
         XCTAssertFalse(result, "canceled wait must return false")
         XCTAssertLessThan(Date().timeIntervalSince(started), 1.0,
-            "K-09: cancellation must abort the wait promptly, not run the full timeout")
+            "cooperative pasteboard polling: cancellation must abort the wait promptly, not run the full timeout")
     }
 
-    /// K-01 × K-02 × K-08 × K-09 interplay: canceling the surrounding task
+    /// stale-recording paste guard × clipboard restore on failed paste × pasteboard exposure minimization × cooperative pasteboard polling interplay: canceling the surrounding task
     /// aborts the paste before it dispatches (no Cmd+V, no AX) AND the defer
     /// restore still returns the clipboard to its original content. (A
     /// mid-wait cancel can't be staged headlessly through paste() on this
@@ -318,10 +318,10 @@ final class PasteServiceTests: XCTestCase {
             RunLoop.main.run(until: Date().addingTimeInterval(0.01))
         }
         XCTAssertEqual(pasteboard.string(forType: .string), original,
-            "K-02: the defer restore must still fire after cancellation")
+            "clipboard restore on failed paste: the defer restore must still fire after cancellation")
     }
 
-    // MARK: - K-23 (captured-element paste + routing)
+    // MARK: - record-time paste target capture (captured-element paste + routing)
 
     func testPasteIntoCapturedElementSucceedsWithoutTouchingPasteboard() async throws {
         let pasteboard = makeIsolatedPasteboard()
@@ -346,7 +346,7 @@ final class PasteServiceTests: XCTestCase {
         // The captured path bypasses the pasteboard entirely.
         XCTAssertEqual(
             pasteboard.string(forType: .string)?.hasPrefix("user-copy-"), true,
-            "K-23: the user's clipboard must be untouched by a captured-element paste"
+            "record-time paste target capture: the user's clipboard must be untouched by a captured-element paste"
         )
     }
 
@@ -419,7 +419,7 @@ final class PasteServiceTests: XCTestCase {
         )
     }
 
-    // K-46 Option A: partial-AX apps yield no element but DO yield a pid —
+    // partial-AX target capture no-op Option A: partial-AX apps yield no element but DO yield a pid —
     // switching away must reactivate-and-paste, not degrade to frontmost-at-paste-time.
     func testPasteRoutingPidOnlySwitchedAppTargetsCapturedApp() {
         XCTAssertEqual(

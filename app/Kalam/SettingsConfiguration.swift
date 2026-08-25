@@ -173,7 +173,7 @@ extension Notification.Name {
     static let generalSettingsConfigurationDidChange = Notification.Name("generalSettingsConfigurationDidChange")
     static let microphonePriorityDidChange = Notification.Name("microphonePriorityDidChange")
     static let openSetupFlow = Notification.Name("openSetupFlow")
-    /// Compass deep link: open settings at the Engine dive (K-30; formerly the Models tab).
+    /// settings deep link: open settings at the Engine dive (settings redesign; formerly the Models tab).
     static let selectModelsSettingsTab = Notification.Name("selectModelsSettingsTab")
 }
 

@@ -1,5 +1,9 @@
 # Kalam
 
+> Navigation aid: `app/docs/CODEBASE_MAP.md` is a file-by-file map of this
+> codebase for agents (lifecycle diagram, per-file responsibility tables,
+> test/doc layout). This guide remains the architecture/runtime source of truth.
+
 Kalam is a macOS menu bar dictation app that records audio with push-to-talk, runs on-device ASR via `FluidAudio`, post-processes transcript text for dictation quality, applies custom dictionary replacements, and pastes text into the active app.
 
 ## Highlights
@@ -48,7 +52,7 @@ Kalam is a macOS menu bar dictation app that records audio with push-to-talk, ru
 Core files:
 
 - `KalamApp.swift`
-  - App entry point and `AppDelegate` (pure orchestration since K-03)
+  - App entry point and `AppDelegate` (pure orchestration since god-file extraction)
   - Hotkey event handling/state machine (delegates to `Services/HotkeyListener.swift`)
   - Recording orchestration (delegates to `Services/AudioRecorder.swift` + `Services/SilenceTrimmer.swift`)
   - ASR service integration
@@ -61,29 +65,43 @@ Core files:
   - AVAudioEngine capture, 16 kHz mono resample, secureZero'd audio buffers, `AudioRecorderError`
 - `Services/SilenceTrimmer.swift`
   - Energy-based endpointer (hysteresis, hangover, duration-aware fallback) + `normalizePeak`
+- `Services/AudioCaptureExchange.swift`
+  - render-thread audio lock fix render-thread/consumer exchange: `publish()` try-locks, drops + counts on contention so the render thread never blocks; session-generation guards against stale teardown
+- `Services/SpeechQualityGuard.swift`
+  - Rejects noise/near-silence clips before ASR (Parakeet hallucinates fillers on boosted room tone)
+- `Services/TranscriptPostProcessor.swift`
+  - off-main post-processing: pure post-ASR stages (cleanup → ITN → dictionary), Sendable snapshots, off-main; ITN answers to the cleanup master switch (cleanup master toggle gating ITN)
+- `Services/AudioDeviceMonitor.swift`
+  - microphone recovery after sleep or device change: debounced CoreAudio device-change + wake listeners; re-prepares the engine graph after sleep/dock events
+- `RecordingSessionTracker.swift`
+  - stale-recording paste guard: monotonic recording generations; a stale transcription task never pastes
 - `Services/SystemAudioDucker.swift`
   - CoreAudio virtual-main-volume ducking while recording
 - `Services/HotkeyListener.swift`
   - Global hotkey registration (HotKey package + modifier-only side-key monitoring), PTT callbacks
 - `OnboardingFlow.swift` / `OnboardingActionStyles.swift`
-  - 4-step guided setup implementation
-  - Permission handling (Microphone, Accessibility)
-  - Model download and selection logic
+  - Live onboarding state source: `OnboardingConfiguration`, `OnboardingStatusSnapshot`, and `OnboardingFlowController`
+  - Permission handling (Microphone, Accessibility), hotkey progress, microphone selection, and model setup actions
+  - Completion remains gated by live runtime readiness and is persisted by `KalamApp.AppDelegate`
+- `OnboardingDeckModel.swift`, `OnboardingDeckView.swift`, `OnboardingDeckCards.swift`, and `OnboardingDeckComponents.swift`
+  - Presentation-only card deck over the live onboarding controller
+  - Conditional first-run/resume/repair routing for the four requirements
+  - Paper-card visual language, textual progress rail, keyboard/Escape close, VoiceOver labels, and reduced-motion handling
+  - No duplicate `UserDefaults` schema, service singleton, coordinator, or completion notification
 - `PTTHotkeyConfiguration.swift`
-  - Activation mode and key-combination modeling (incl. K-30 custom captured chords under `pttHotkey.custom*`)
+  - Activation mode and key-combination modeling (incl. settings redesign custom captured chords under `pttHotkey.custom*`)
   - UserDefaults load/save and normalization
-- `Settings/Compass/` (K-30, 2026-08-13 — replaces the old tabbed settings UI)
-  - `CompassWindow.swift` — `CompassRoot` (map/dive `NavigationStack`, path 0 or 1) + `CompassWindow` (borderless 980×660 NSWindow subclass, injected `onClose`, Cmd-W local monitor)
-  - `LiveCompassBacking.swift` — the ONLY live-store access: Compass protocol over `GeneralSettingsConfiguration` / `MicrophonePriorityConfiguration` / `PTTHotkeyConfiguration` / `ModelsConfiguration.textCleanup` / `CustomDictionaryManager`; `onChange` stream drives `SettingsModel`'s revision counter
+- `Settings/` (settings redesign, 2026-08-13 — replaces the old tabbed settings UI)
+  - `SettingsWindow.swift` — `SettingsRoot` (map/dive `NavigationStack`, path 0 or 1) + `SettingsWindow` (borderless 980×660 NSWindow subclass, injected `onClose`, Cmd-W local monitor)
+  - `LiveSettingsBacking.swift` — the ONLY live-store access: settings store protocol over `GeneralSettingsConfiguration` / `MicrophonePriorityConfiguration` / `PTTHotkeyConfiguration` / `ModelsConfiguration.textCleanup` / `CustomDictionaryManager`; `onChange` stream drives `SettingsModel`'s revision counter
   - `SettingsModel.swift` — `@Observable` façade; attention priority (engine > mic > key > empty dictionary), spanning, hero, map strings
-  - `MapView` / `DiveView` / `ContentsNav` + `Controls/` + `Panes/` — Compass UI (spec: `app/docs/plans/kalam-settings-redesign/`)
-  - Typography (K-31, 2026-08-13): bundled OFL web fonts — Instrument Serif (display), Plus Jakarta Sans variable (body; exact CSS-like weights via the `wght` axis), IBM Plex Mono (kickers/states) — vendored under `Resources/Fonts/` and registered process-scope at launch by `FontRegistration` (counts-only log). `CompassFont` resolves faces with a system-font fallback; SF Symbols stay on the system font (icons are not typography)
-  - Window presentation: AppDelegate `openSettingsWindow` hosts `CompassRoot` (menu-bar "Settings…"); `.selectModelsSettingsTab` deep-links to the Engine dive
+  - `MapView` / `DiveView` / `ContentsNav` + `Controls/` + `Panes/` — settings UI views (typography and visual spec: Instrument Serif display-only, dark shell chrome; see `SettingsTokens.swift` for the authoritative values)
+  - Typography (settings v1.2 visual alignment, 2026-08-13; supersedes the earlier web-font stack): the v1.2 locked design — **Instrument Serif display-only** (map hero 36 / dive display 34 / updates figure 48, bundled under `Resources/Fonts/`, lazy-registered once per process by `SettingsFont.ensureBrandFontRegistered()`), **New York** (`SettingsFont.book`) for small serif roles (map card titles, map foot, model name), body = SF Pro, kickers/states = SF Mono. CSS→AppKit weight mapping is anchor-piecewise (`nsWeight` in `SettingsTokens.swift`; probe-verified — the linear formula renders 500→476, 640→682). SF Symbols stay on the system font (icons are not typography)
+  - Window presentation: AppDelegate `openSettingsWindow` hosts `SettingsRoot` (menu-bar "Settings…"); `.selectModelsSettingsTab` deep-links to the Engine dive
 - `Packages/KalamTextEngine/Sources/KalamTextEngine/TextCleanupEngine.swift` / `TextCleanupConfiguration.swift`
   - Deterministic low-latency transcript cleanup pipeline
   - Optional grammar pass (`off` / `light` / `full`) with timeout budget (AppKit-gated)
-- `app/Kalam/MicrophonePriorityConfiguration.swift` / `app/Kalam/MicrophoneDeviceService.swift`
-  - Microphone selection and priority ordering
+- `app/Kalam/SettingsConfiguration.swift` — `GeneralSettingsConfiguration`, `MicrophonePriorityConfiguration`, and `MicrophoneDeviceService` all live here (no separate mic files; the old `SettingsUI.swift` tabbed shell was deleted in the settings redesign)
 
 ## Runtime Flow
 
@@ -106,7 +124,7 @@ Current ordering in code:
 
 1. `ASR -> String`
 2. `TextCleanupEngine.clean(...)`
-3. `NemoTextProcessing.normalizeSentence(...)` (if ITN enabled + available), wrapped by `ITNSpanProtector` so ranges ("two to three"), idioms ("one of us"), and digit-by-digit sequences survive normalization (K-28)
+3. `NemoTextProcessing.normalizeSentence(...)` (if ITN enabled + available), wrapped by `ITNSpanProtector` so ranges ("two to three"), idioms ("one of us"), and digit-by-digit sequences survive normalization (ITN span protection)
 4. `CustomDictionaryManager.apply(...)`
 5. paste
 
@@ -350,6 +368,10 @@ Kalam requires Parakeet TDT models for on-device transcription. Models are loade
 
 4. **Select the model** (Settings → Models → Step 3)
 
+Onboarding copies the command for the user to run in Terminal; Kalam does not execute shell commands or download model files itself. The generated `--local-dir` destination is POSIX shell-quoted, so spaces, apostrophes, Unicode, and shell metacharacters in a selected folder remain data rather than command syntax.
+
+Kalam itself has no outgoing-network entitlement and processes dictation locally. That does not make a user-run `hf` or Homebrew command offline: those commands may contact their external services.
+
 ### Required Files
 
 Each model folder must contain:
@@ -418,6 +440,14 @@ When enabled, pipeline will be:
 3. ITN (`NemoTextProcessing.normalizeSentence`)
 4. Dictionary replacements
 5. Paste
+
+## Onboarding State And Reset
+
+The onboarding deck is a presentation layer over `OnboardingFlowController`; it does not own a second workflow or persistence schema. The four live requirements are Microphone, Accessibility, Hotkey, and AI model. Informational and model-acquisition cards are skipped when the current snapshot is already ready, while repair mode opens at the first broken requirement.
+
+`OnboardingStatusSnapshot.evaluate(...)` is the status seam. A card action never marks a requirement complete by itself; the controller invokes the real permission/configuration action and the app refreshes the snapshot through `refresh → prepareRuntimeIfPossible → refresh`. The final Start Dictating action remains disabled until all requirements and runtime preparation are ready.
+
+The DEBUG Option/Alt reset clears only onboarding progress flags: `hasCompletedRequiredSetup`, `hasAttemptedAccessibilitySetup`, `hasPickedHotkey`, and `hasConfirmedHFCLIInstall`. It never clears the selected microphone, hotkey chord, model version, or security-scoped model-library bookmark.
 
 ## Sandbox, Network, And Permissions
 

@@ -1,7 +1,7 @@
 import XCTest
 @testable import Kalam_test
 
-// K-27: noise-only clips must never reach ASR — Parakeet TDT hallucinates
+// noise-clip ASR rejection: noise-only clips must never reach ASR — Parakeet TDT hallucinates
 // filler words ("yeah") on boosted room tone.
 final class SpeechQualityGuardTests: XCTestCase {
     private func sine(amplitude: Float, frequency: Float = 220, durationMs: Int, sampleRate: Int = 16_000) -> [Float] {

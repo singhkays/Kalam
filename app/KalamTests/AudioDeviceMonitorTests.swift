@@ -1,9 +1,9 @@
 import XCTest
 @testable import Kalam_test
 
-// K-26: device-change bursts (dock reconnect churn) must coalesce into one
+// microphone recovery after sleep or device change: device-change bursts (dock reconnect churn) must coalesce into one
 // refresh; wake must fire immediately, NOT debounced. @MainActor: the
-// monitor is MainActor-isolated (K-20 pattern).
+// monitor is MainActor-isolated (dictionary data-loss edge cases pattern).
 @MainActor
 final class AudioDeviceMonitorTests: XCTestCase {
     func testDebounceCoalescesBurstOfDeviceEvents() async throws {

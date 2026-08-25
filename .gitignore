@@ -55,3 +55,9 @@ design_brief.md
 kalam_gtm.md
 prompt_editorial_art_book.md
 app/agents.md
+
+# Internal planning docs (kept local, not published in the open repo)
+app/docs/IMPROVEMENT_PLAN.md
+app/docs/MANUAL_VERIFICATION_CHECKLIST.md
+app/docs/dev-design/
+app/docs/plans/

@@ -2,7 +2,7 @@ import XCTest
 @testable import Kalam_test
 import KalamTextEngine
 
-/// K-38: the post-ASR text stages (cleanup -> ITN -> dictionary) extracted
+/// off-main post-processing: the post-ASR text stages (cleanup -> ITN -> dictionary) extracted
 /// from the MainActor-inherited transcription task into a Sendable
 /// `TranscriptPostProcessor`. These pins cover behavior parity with the old
 /// inline pipeline; the off-main hop itself is exercised by
@@ -33,7 +33,7 @@ final class TranscriptPostProcessorTests: XCTestCase {
     }
 
     func testDecimalSurvivesEndToEnd() {
-        // K-34 companion: the post-processing path must behave identically to
+        // decimal and time punctuation corruption companion: the post-processing path must behave identically to
         // the engine — no decimal splitting may leak through.
         let out = makeProcessor().process("it costs $3.50 today")
         XCTAssertFalse(out.text.contains(". "), "decimal split leaked through: \(out.text)")
@@ -44,7 +44,7 @@ final class TranscriptPostProcessorTests: XCTestCase {
         XCTAssertEqual(out.replacements, 0)
     }
 
-    // K-44: the Cleanup master must stop ITN too — "types exactly what it
+    // cleanup master toggle gating ITN: the Cleanup master must stop ITN too — "types exactly what it
     // heard" means no hidden number normalization.
     func testCleanupMasterOffSkipsITN() {
         var config = TextCleanupConfiguration.defaults
@@ -66,7 +66,7 @@ final class TranscriptPostProcessorTests: XCTestCase {
         XCTAssertEqual(out.replacements, 1)
     }
 
-    // K-45: Nemo strands "cents" when the utterance carries sentence-final
+    // currency cents stranding fix: Nemo strands "cents" when the utterance carries sentence-final
     // punctuation ("Five dollars and fifty cents." -> "$5.50 cents.");
     // the pipeline must render the conversion plus the terminator.
     func testTerminalPeriodDoesNotStrandCents() {

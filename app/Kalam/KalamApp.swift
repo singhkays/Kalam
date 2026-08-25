@@ -27,7 +27,7 @@ private let pasteKeyCode: CGKeyCode = 9 // 'V' key (ANSI V) for Command+V
 struct KalamApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     var body: some Scene {
-        // K-30 (Compass): the settings window is the AppDelegate-hosted Compass window
+        // Settings redesign: the settings window is the AppDelegate-hosted custom NSWindow
         // (menu-bar "Settings…" → openSettings). The scene shell is inert: an empty
         // Settings scene never auto-opens a window, and replacing the appSettings
         // command group removes the system "Settings…" menu item that would otherwise
@@ -88,12 +88,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let paster = PasteService()
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "DictationRuntime")
 
-    // K-23: record-time paste target (app PID + focused element), and a held transcript
+    // record-time paste target capture: record-time paste target (app PID + focused element), and a held transcript
     // awaiting an explicit "Paste" action when the captured target is gone.
     private var dictationTargetPID: pid_t?
     private var dictationTargetElement: AXUIElement?
     private var heldTranscript: String?
-    /// K-46: the app the hold capsule promised (pid), so the Paste button
+    /// partial-AX target capture no-op: the app the hold capsule promised (pid), so the Paste button
     /// delivers THERE instead of whatever is frontmost when clicked.
     private var heldTranscriptTargetPID: pid_t?
 
@@ -279,7 +279,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // K-26: react to audio-topology changes (dock reconnects, device
+        // microphone recovery after sleep or device change: react to audio-topology changes (dock reconnects, device
         // death) and system wake — the audio graph must be re-prepared
         // against the fresh device list instead of staying bound to a
         // stale CoreAudio device.
@@ -373,17 +373,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
-        // K-30 (Compass): the settings window is the fixed 980×660 borderless Compass window
+        // Settings redesign: the settings window is a fixed 980×660 borderless custom NSWindow
         // hosted in an AppDelegate NSWindow (no WindowGroup scene — user decision 2026-08-13).
-        let root = CompassRoot(store: LiveCompassBacking()) { [weak self] in
+        let root = SettingsRoot(store: LiveSettingsBacking()) { [weak self] in
             self?.settingsWC?.window?.close()
         }
         let vc = NSHostingController(rootView: root)
-        let w = CompassWindow(contentViewController: vc)
+        let w = SettingsWindow(contentViewController: vc)
         w.identifier = NSUserInterfaceItemIdentifier("KalamSettingsWindow")
         w.styleMask = [.borderless]
         w.isMovableByWindowBackground = true
-        // K-30 follow-up (2026-08-13): rounded 12 pt card corners per mockup `.frame` rule
+        // settings redesign follow-up (2026-08-13): rounded 12 pt card corners per mockup `.frame` rule
         // (was isOpaque=true + kPaper background → square rect).
         w.applyRoundedCorners()
         w.isReleasedWhenClosed = false
@@ -400,8 +400,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Compass deep link (`.selectModelsSettingsTab` → Engine dive). Posted on the next
-    /// runloop turn so the freshly created CompassRoot has registered its observer.
+    /// settings deep link (`.selectModelsSettingsTab` → Engine dive). Posted on the next
+    /// runloop turn so the freshly created SettingsRoot has registered its observer.
     private func postSelectModelsTab() {
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .selectModelsSettingsTab, object: nil)
@@ -448,7 +448,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupMenuItem?.title = snapshot.hasIncompleteRequirements ? "Complete Setup…" : "Run Setup Again…"
         onboardingController?.apply(snapshot: snapshot)
-        // K-24: after the user attempted Accessibility setup, every refresh transitions the
+        // accessibility relaunch escape hatch: after the user attempted Accessibility setup, every refresh transitions the
         // setup state to .enabledPendingRelaunch while the process isn't trusted — this makes
         // the "Quit & Reopen Kalam" relaunch path reachable (it was dead code before).
         onboardingController?.confirmAccessibilityEnabledIfAttempted()
@@ -660,7 +660,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleEscapeEvent(_ event: NSEvent) {
         guard event.keyCode == 53 else { return } // Escape
-        // K-38: cheap checks FIRST — the global monitor fires on every
+        // off-main post-processing: cheap checks FIRST — the global monitor fires on every
         // Escape keystroke system-wide, so the defaults load must sit
         // behind the isRecording gate.
         guard isRecording else { return }
@@ -670,7 +670,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func logITNStatusOnStartup() {
-        // K-38: enable/span moved into TranscriptPostProcessor (read at
+        // off-main post-processing: enable/span moved into TranscriptPostProcessor (read at
         // process time); launch logs availability + version only.
         if NemoTextProcessing.isAvailable {
             let version = NemoTextProcessing.version ?? "unknown"
@@ -680,7 +680,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// K-38: nonisolated + async => runs on the global executor (SE-0338),
+    /// off-main post-processing: nonisolated + async => runs on the global executor (SE-0338),
     /// NOT the MainActor. Captures only Sendable values.
     private nonisolated static func postProcessTranscript(
         _ processor: TranscriptPostProcessor,
@@ -757,7 +757,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         asrRecordingBlockMessage = status.recordingBlockMessage
     }
 
-    /// K-26: CoreAudio device changed (plug/unplug, default-input switch,
+    /// microphone recovery after sleep or device change: CoreAudio device changed (plug/unplug, default-input switch,
     /// device death, dock reconnect) — rebuild the audio graph against the
     /// fresh topology and re-select the priority-ordered microphone.
     private func refreshAudioInputAfterDeviceChange() {
@@ -772,7 +772,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshOnboardingState(reopenIfNeeded: false)
     }
 
-    /// K-26: system woke. Two failure modes to clear:
+    /// microphone recovery after sleep or device change: system woke. Two failure modes to clear:
     /// 1. A phantom PTT session (toggle started before sleep, key-up lost) —
     ///    the first post-wake keypress would otherwise act as a STOP and
     ///    instantly "transcribe" a junk clip. Reset the machine silently
@@ -795,7 +795,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             recordingStopTask = stopTask
             overlay.hide()
         }
-        // K-37: abandon (recordingDidStop + flag clear), NOT
+        // wake handler PTT field reset: abandon (recordingDidStop + flag clear), NOT
         // resetForConfigurationChange — the latter keeps isRecording == true,
         // so the first post-wake keypress acted as a STOP on a junk clip.
         pttState.abandonActiveSession()
@@ -851,7 +851,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @discardableResult
     private func startRecording(triggerMode: PTTStateMachine.TriggerMode) -> Bool {
-        // K-01: a new recording supersedes any in-flight transcription/paste from
+        // stale-recording paste guard: a new recording supersedes any in-flight transcription/paste from
         // the previous session — abort it so stale text is never pasted.
         transcriptionTask?.cancel()
         guard !isRecording else { return false }
@@ -887,8 +887,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
 
-        // K-26: the state sync happens only after startCollecting succeeds —
-        // a failed start must leave the PTT machine idle (K-14 invariant).
+        // microphone recovery after sleep or device change: the state sync happens only after startCollecting succeeds —
+        // a failed start must leave the PTT machine idle (PTT state machine test coverage invariant).
         _ = recordingSessions.beginNewRecording()
 
         // Play chime (so user hears it at full volume)
@@ -908,7 +908,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
         }
 
-        // K-23: remember where the user is dictating so the transcript follows the
+        // record-time paste target capture: remember where the user is dictating so the transcript follows the
         // record-time target even if the frontmost app changes during transcription.
         // T14 diagnosis (2026-08-24 FAIL): capture failures were silent, degrading
         // invisibly to frontmost-at-paste-time. Log the outcome (app/strategy/reason
@@ -920,7 +920,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 dictationTargetElement = resolution.element
                 logger.info("Dictation target captured appName=\(resolution.appName, privacy: .public) strategy=\(resolution.strategy, privacy: .public) pid=\(frontmost.processIdentifier, privacy: .public)")
             case .failure(let error):
-                // K-46: partial-AX apps (e.g. Sublime Text) answer none of the AX
+                // partial-AX target capture no-op: partial-AX apps (e.g. Sublime Text) answer none of the AX
                 // queries, but the pid alone still identifies the record-time target —
                 // keep it so paste-time routing can reactivate this app instead of
                 // degrading to frontmost-at-paste-time.
@@ -974,7 +974,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         transcriptionTask?.cancel()
 
         // Audio teardown lives in its own task: the transcription task is
-        // cancelled by the next session's start (K-01) and must NOT own the
+        // cancelled by the next session's start (stale-recording paste guard) and must NOT own the
         // engine-stop/drain step, or a rapid re-record would skip it and leave
         // the engine running under the next session.
         let stopTask = Task(priority: .userInitiated) { [weak self, audioGeneration] in
@@ -1044,7 +1044,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
-            // K-27: never feed noise-only clips to ASR — Parakeet TDT
+            // noise-clip ASR rejection: never feed noise-only clips to ASR — Parakeet TDT
             // hallucinates filler words ("yeah") on boosted room tone.
             guard SpeechQualityGuard.isSpeechLike(samples: trimmed, sampleRate: 16_000) else {
                 self.logger.info("Clip rejected by speech-quality guard")
@@ -1079,7 +1079,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
                 
-                // K-38: snapshot Sendable inputs on-main, run cleanup+ITN+
+                // off-main post-processing: snapshot Sendable inputs on-main, run cleanup+ITN+
                 // dictionary OFF the main actor, keep only counts in logs.
                 let processor = TranscriptPostProcessor(
                     cleanupConfig: ModelsConfiguration.load().textCleanup,
@@ -1121,7 +1121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         self.logger.info("Paste route=frontmost capturedPID=\(self.dictationTargetPID.map { String($0) } ?? "nil", privacy: .public) frontmostPIDAtDecision=\(frontmostPIDAtDecision.map { String($0) } ?? "nil", privacy: .public)")
                         try await self.paster.paste(post.text)
                     case .capturedElement(let element):
-                        // K-23: the user switched apps while transcribing — insert into the
+                        // record-time paste target capture: the user switched apps while transcribing — insert into the
                         // record-time target (bypasses the pasteboard entirely).
                         self.logger.info("Paste route=capturedElement capturedPID=\(self.dictationTargetPID.map { String($0) } ?? "nil", privacy: .public) frontmostPIDAtDecision=\(frontmostPIDAtDecision.map { String($0) } ?? "nil", privacy: .public)")
                         do {
@@ -1145,7 +1145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             return
                         }
                     case .capturedApp(let capturedPid):
-                        // K-46 Option A: the record-time app has partial AX support (no
+                        // partial-AX target capture no-op Option A: the record-time app has partial AX support (no
                         // element), so bring it back to front and paste via the normal
                         // path. If it cannot be reactivated or won't settle as frontmost,
                         // hold the transcript for the promised app (the Paste button will
@@ -1217,7 +1217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard isRecording else { return }
         pttState.recordingDidStop()
 
-        // K-23: a canceled session must not retain its paste target or held transcript.
+        // record-time paste target capture: a canceled session must not retain its paste target or held transcript.
         dictationTargetPID = nil
         dictationTargetElement = nil
         heldTranscript = nil
@@ -1249,7 +1249,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// K-46: activate another app from a background/menu-bar context. Plain
+    /// partial-AX target capture no-op: activate another app from a background/menu-bar context. Plain
     /// `NSRunningApplication.activate()` is routinely refused by TCC for
     /// non-frontmost apps (observed live 2026-08-24: "activation refused");
     /// the LaunchServices route carries the user-intent semantics needed here.
@@ -1278,7 +1278,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
-    /// K-23/K-46: explicit "Paste" action for a held transcript. The capsule named an
+    /// record-time paste target capture/partial-AX target capture no-op: explicit "Paste" action for a held transcript. The capsule named an
     /// app, so deliver THERE: reactivate the promised app if it drifted to background,
     /// wait until it is genuinely frontmost, then paste via the normal path. Only if
     /// the promised app quit entirely does the paste go to the current frontmost —

@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import KalamTextEngine
 
-// K-28: ITN span protection. Every test documents a real library behavior
+// ITN span protection: ITN span protection. Every test documents a real library behavior
 // verified against NemoTextProcessing (raw ITN outputs in the plan header).
 
 private func masked(_ text: String) -> String {
@@ -110,7 +110,7 @@ private func restored(_ text: String) -> String {
     #expect(restored("One of us") == "One of us")
 }
 
-// MARK: K-42 (probed against the real library, 2026-08-24):
+// MARK: digit-shaped ITN protection (probed against the real library, 2026-08-24):
 // separator variants + mixed word/digit runs
 
 @Test func commaSeparatedRunIsMasked() {
@@ -132,7 +132,7 @@ private func restored(_ text: String) -> String {
     #expect(masked("see 5 7 tomorrow") == "see 5 7 tomorrow")
 }
 
-// MARK: K-43 (probed 2026-08-24): spoken-time sum composition ("40")
+// MARK: spoken-time ITN composition misfire (probed 2026-08-24): spoken-time sum composition ("40")
 
 @Test func temporalSpanRendersClockTime() {
     let p = ITNSpanProtector()

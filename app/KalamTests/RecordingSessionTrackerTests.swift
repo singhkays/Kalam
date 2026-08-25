@@ -12,7 +12,7 @@ final class RecordingSessionTrackerTests: XCTestCase {
         XCTAssertEqual(second, 2)
         XCTAssertFalse(
             tracker.isCurrent(first),
-            "K-01: a superseded recording's generation must no longer be current"
+            "stale-recording paste guard: a superseded recording's generation must no longer be current"
         )
         XCTAssertTrue(tracker.isCurrent(second))
     }

@@ -12,7 +12,7 @@ final class HotkeyListener {
     private var globalFlagsMonitor: Any?
     private var activeModifierFlags: NSEvent.ModifierFlags = []
     private var activePreset: KeyCombination?
-    /// K-30: custom bare-modifier hotkey — active while THIS keyCode is down.
+    /// settings redesign: custom bare-modifier hotkey — active while THIS keyCode is down.
     private var activeCustomModifierKeyCode: UInt16?
     private var modifierHotkeyIsDown = false
     private var lastRelevantFlags: NSEvent.ModifierFlags = []
@@ -60,7 +60,7 @@ final class HotkeyListener {
         logger.info("Hotkey registered \(safeConfiguration.displayString, privacy: .public)")
     }
 
-    // MARK: - K-30 custom chord registration ("Record shortcut…")
+    // MARK: - settings redesign custom chord registration ("Record shortcut…")
 
     private func registerCustom(_ chord: KeyChord) {
         if Self.isModifierKeyCode(chord.keyCode) {
@@ -242,7 +242,7 @@ final class HotkeyListener {
     }
 
     private func isPresetCurrentlyActive(relevantFlags: NSEvent.ModifierFlags) -> Bool {
-        // K-30 custom bare modifier: active only while the exact keyCode is down.
+        // settings redesign custom bare modifier: active only while the exact keyCode is down.
         if let customKeyCode = activeCustomModifierKeyCode {
             return isSideKeyDown(customKeyCode) && relevantFlags == activeModifierFlags
         }

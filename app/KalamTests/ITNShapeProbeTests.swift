@@ -2,11 +2,11 @@ import XCTest
 import KalamTextEngine
 @testable import Kalam_test
 
-// Observational canary for K-42/K-43 (2026-08-24): prints raw vs protected
+// Observational canary for digit-shaped ITN protection/spoken-time ITN composition misfire (2026-08-24): prints raw vs protected
 // Nemo output for the digit/mixed/time shapes from the T12 live failures,
 // and writes /tmp/k42-probe.txt. Always passes — read the report after runs;
 // if a Nemo upgrade changes library behavior, this surfaces it.
-// 2026-08-24 (K-45): added currency shapes and a full-pipeline row driven by
+// 2026-08-24 (currency cents stranding fix): added currency shapes and a full-pipeline row driven by
 // TranscriptPostProcessor.process (the production clean -> ITN -> dictionary
 // order) so live-run oddities like "$5.50 cents." reproduce at library level.
 final class ITNShapeProbeTests: XCTestCase {

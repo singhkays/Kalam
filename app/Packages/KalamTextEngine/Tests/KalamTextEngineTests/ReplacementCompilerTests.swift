@@ -122,7 +122,7 @@ import Foundation
 }
 
 @Test func legacyDictionaryJSONWithDeadFlagsStillDecodes() throws {
-    // Pre-K-05 user_dictionary.json files contain wholeWord/morphological keys.
+    // Pre-dead dictionary flags removal user_dictionary.json files contain wholeWord/morphological keys.
     // Synthesized Codable ignores unknown keys; old files must keep decoding.
     let legacy = """
     [{"id": "11111111-1111-1111-1111-111111111111", "trigger": "car", "replacement": "truck", "isEnabled": true, "wholeWord": false, "morphological": false, "caseInsensitive": true, "preserveCase": true, "userAdded": true}]
@@ -134,7 +134,7 @@ import Foundation
 }
 
 @Test func dictionaryEntryIsSendable() {
-    // K-38: TranscriptPostProcessor stores [DictionaryEntry] behind a
+    // off-main post-processing: TranscriptPostProcessor stores [DictionaryEntry] behind a
     // Sendable struct; pin the conformance so it can't regress silently.
     func assertSendable<T: Sendable>(_ value: T) {}
     assertSendable(DictionaryEntry(trigger: "x", replacement: "y"))

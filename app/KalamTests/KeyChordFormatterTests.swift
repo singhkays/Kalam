@@ -1,7 +1,7 @@
 import XCTest
 @testable import Kalam_test
 
-/// K-30 (Compass): capture allowlist + display formatting for "Record shortcut…".
+/// settings redesign (settings UI): capture allowlist + display formatting for "Record shortcut…".
 final class KeyChordFormatterTests: XCTestCase {
 
     private func keyDown(

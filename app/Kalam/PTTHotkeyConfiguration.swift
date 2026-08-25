@@ -312,7 +312,7 @@ enum PTTHotkeyKey: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Reverse of `fromKeyCode` — the ANSI virtual key code for this key (K-30 custom capture).
+    /// Reverse of `fromKeyCode` — the ANSI virtual key code for this key (settings redesign custom capture).
     var keyCode: UInt16 {
         switch self {
         case .a: return 0
@@ -391,9 +391,9 @@ struct PTTHotkeyConfiguration: Equatable {
     var option: Bool
     var control: Bool
 
-    /// K-30 (Compass): custom captured chord ("Record shortcut…"). When non-nil it wins over
+    /// Settings redesign: custom captured chord ("Record shortcut…"). When non-nil it wins over
     /// `keyCombination`; selecting a preset clears it. Persisted under pttHotkey.custom* — the
-    /// same schema domain, additive keys (no Compass-* keys).
+    /// same schema domain, additive keys (no settings-prefixed keys).
     var customChord: KeyChord? = nil
 
     private static let userDefaultsKeyKey = "pttHotkey.key"
@@ -514,7 +514,7 @@ struct PTTHotkeyConfiguration: Equatable {
             control: flags.contains(.control)
         )
 
-        // K-30: custom captured chord (additive keys — absent = preset-only).
+        // settings redesign: custom captured chord (additive keys — absent = preset-only).
         var customChord: KeyChord?
         if let storedCode = defaults.object(forKey: Self.userDefaultsCustomKeyCodeKey) as? NSNumber {
             let keyCode = UInt16(truncating: storedCode)

@@ -92,6 +92,9 @@ enum ASRModelAvailability: Equatable, Sendable {
     case modelLibraryNotConfigured
     case missingModelFolder(expectedPath: String)
     case invalidModelFolder(expectedPath: String)
+    /// Folder exists and some required files arrived, but not all (v3 adoption
+    /// Task 6). `missing` names the absent files; `total` is the full manifest size.
+    case partial(expectedPath: String, missing: [String], total: Int)
     case installed(path: String)
 
     var isInstalled: Bool {
@@ -109,10 +112,19 @@ enum ASRModelAvailability: Equatable, Sendable {
             return "Missing"
         case .invalidModelFolder:
             return "Invalid"
+        case .partial(_, let missing, let total):
+            return "\(total - missing.count)/\(total)"
         case .installed:
             return "Installed"
         }
     }
+}
+
+/// One row of the per-file model manifest (v3 adoption Task 6).
+struct ASRModelFileEntry: Equatable, Sendable, Identifiable {
+    let name: String
+    let isPresent: Bool
+    var id: String { name }
 }
 
 // MARK: - Models Configuration
@@ -176,6 +188,15 @@ struct ModelsConfiguration: Equatable, Sendable {
         Self.resolveModelLibraryURL(from: modelLibraryBookmarkData)
     }
 
+    /// Drops the stored security-scoped bookmark — the POINTER to the model
+    /// library, never the files themselves (2026-08-22). Used by the DEBUG
+    /// onboarding reset so a rehearsal replays the model step from scratch;
+    /// re-picking the folder restores everything. Not part of any production
+    /// reset path.
+    static func clearStoredModelLibraryBookmark(_ defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: userDefaultsModelLibraryBookmarkKey)
+    }
+
     mutating func setModelLibraryURL(_ url: URL?) throws {
         guard let url else {
             modelLibraryBookmarkData = nil
@@ -209,7 +230,14 @@ struct ModelsConfiguration: Equatable, Sendable {
 
             let exists = AsrModels.modelsExist(at: expectedDirectory, version: version.fluidAudioVersion)
             if !exists {
-                return .invalidModelFolder(expectedPath: expectedDirectory.path)
+                // v3 adoption Task 6: refine with per-file knowledge so a half-
+                // finished download reports which files are missing instead of a
+                // blanket "invalid folder".
+                let manifest = ModelSetupSupport.modelFileManifest(for: version, libraryURL: modelLibraryURL)
+                return ModelSetupSupport.refinedAvailability(
+                    base: .invalidModelFolder(expectedPath: expectedDirectory.path),
+                    manifest: manifest
+                )
             }
 
             return .installed(path: expectedDirectory.path)

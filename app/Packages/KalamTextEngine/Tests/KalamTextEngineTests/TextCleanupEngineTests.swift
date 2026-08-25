@@ -59,7 +59,7 @@ import Foundation
 }
 
 @Test func backtrackNoCueDoesNotCancelNoProblemSentence() {
-    // K-29 (user-reported on the v1.1 build): "no problem" at the end of a
+    // bare-no backtrack rule regression (user-reported on the v1.1 build): "no problem" at the end of a
     // sentence must not cancel the preceding clause.
     let result = TextCleanupEngine().clean("Yep, there is a roadmap meeting, so no problem", configuration: config())
     #expect(result.text.contains("no problem"))
@@ -68,7 +68,7 @@ import Foundation
 }
 
 @Test func backtrackNoCueDoesNotCancelContractedNoWay() {
-    // K-29: contraction variant of the existing "there is no way" pin.
+    // bare-no backtrack rule regression: contraction variant of the existing "there is no way" pin.
     let result = TextCleanupEngine().clean("there's no way to do this for them", configuration: config())
     #expect(result.text.contains("no way to do this for them"))
     #expect(result.stats.backtrackEdits == 0)
@@ -172,7 +172,7 @@ From Star Trek in 1966 to Siri in 2011 we have come far.
     #expect(result.stats.punctuationEdits > 0)
 }
 
-// MARK: - K-34: decimals, clock times, and versions must survive punctuation normalization
+// MARK: - decimal and time punctuation corruption: decimals, clock times, and versions must survive punctuation normalization
 
 @Test func punctuationDoesNotSplitDecimalsOrMoney() {
     let result = TextCleanupEngine().clean("it costs $3.50 today", configuration: config())

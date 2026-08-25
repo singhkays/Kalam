@@ -11,7 +11,7 @@ private func privacySafeErrorSummary(_ error: Error) -> String {
 /// Thread-safe exchange between the audio render thread (producer) and Kalam's
 /// consumer threads (main thread, transcription task).
 ///
-/// K-10: the render thread must NEVER block. `publish` acquires the lock with a
+/// render-thread audio lock fix: the render thread must NEVER block. `publish` acquires the lock with a
 /// try-lock (`os_unfair_lock_trylock` behind `OSAllocatedUnfairLock.withLockIfAvailable`):
 /// when a consumer holds the lock, the buffer is dropped and counted instead of
 /// stalling the render thread (priority-inversion risk). All consumer-side
@@ -24,6 +24,10 @@ final class AudioCaptureExchange: @unchecked Sendable {
 
     struct State: @unchecked Sendable {
         var collecting = false
+        /// Monotonic capture-session id. `resetForNewSession` bumps it; stop/drain
+        /// operations that carry an expected id no-op when it no longer matches,
+        /// so a stale teardown can never touch a newer session's buffers.
+        var sessionGeneration = 0
         var callbackCount = 0
         var sampleBuffer: [Float] = []
         var recentWaveformSamples: [Float] = []
@@ -74,6 +78,7 @@ final class AudioCaptureExchange: @unchecked Sendable {
 
     func resetForNewSession() {
         lock.withLock { state in
+            state.sessionGeneration += 1
             state.collecting = true
             state.callbackCount = 0
             state.sampleBuffer.removeAll(keepingCapacity: true)
@@ -83,8 +88,19 @@ final class AudioCaptureExchange: @unchecked Sendable {
         }
     }
 
-    func stopCapture() -> [Float] {
+    /// The current capture-session id (captured by callers at session start).
+    func currentGeneration() -> Int {
+        lock.withLock { $0.sessionGeneration }
+    }
+
+    /// Stops capture and returns the samples only when `expectedGeneration`
+    /// still matches. A stale stop (belonging to an older session) no-ops and
+    /// returns empty — it must never drain a newer session's audio.
+    func stopCapture(expectedGeneration: Int?) -> [Float] {
         lock.withLock { state in
+            guard expectedGeneration == nil || state.sessionGeneration == expectedGeneration else {
+                return []
+            }
             state.collecting = false
             let out = state.sampleBuffer
             state.sampleBuffer.secureZero()
@@ -93,6 +109,11 @@ final class AudioCaptureExchange: @unchecked Sendable {
             state.recentWaveformSamples.removeAll(keepingCapacity: false)
             return out
         }
+    }
+
+    /// Unconditional stop (test seam / legacy): ignores generations.
+    func stopCapture() -> [Float] {
+        stopCapture(expectedGeneration: nil)
     }
 
     func waveform(sampleCount: Int) -> [Float] {
@@ -113,9 +134,13 @@ final class AudioCaptureExchange: @unchecked Sendable {
     }
 
     /// Drain residual converter frames at stream end (~10–30 ms of audio).
-    func drainConverterRemainder() -> [Float] {
+    /// Stale drains no-op: a newer session already owns the converter state.
+    func drainConverterRemainder(expectedGeneration: Int?) -> [Float] {
         lock.withLock { state in
             var leftovers: [Float] = []
+            guard expectedGeneration == nil || state.sessionGeneration == expectedGeneration else {
+                return []
+            }
             guard let converter = state.converter else { return [] }
             var convError: NSError?
             let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
@@ -138,6 +163,11 @@ final class AudioCaptureExchange: @unchecked Sendable {
             converter.reset()
             return leftovers
         }
+    }
+
+    /// Unconditional drain (test seam / legacy): ignores generations.
+    func drainConverterRemainder() -> [Float] {
+        drainConverterRemainder(expectedGeneration: nil)
     }
 
     // MARK: - Conversion (moved verbatim from AudioRecorder.process; runs under the lock)

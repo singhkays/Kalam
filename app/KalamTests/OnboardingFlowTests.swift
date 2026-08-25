@@ -26,12 +26,14 @@ final class OnboardingFlowTests: XCTestCase {
         config.hasCompletedRequiredSetup = true
         config.hasAttemptedAccessibilitySetup = true
         config.hasConfirmedHFCLIInstall = true
+        config.hasConfirmedModelLocation = true
         config.save(to: defaults)
 
         let loaded = OnboardingConfiguration.load(from: defaults)
         XCTAssertTrue(loaded.hasCompletedRequiredSetup)
         XCTAssertTrue(loaded.hasAttemptedAccessibilitySetup)
         XCTAssertTrue(loaded.hasConfirmedHFCLIInstall)
+        XCTAssertTrue(loaded.hasConfirmedModelLocation)
     }
 
     func testEvaluateReturnsFirstRunWhenNeverCompleted() {
@@ -188,7 +190,7 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(controller.accessibilitySetupState, .idle)
     }
 
-    // MARK: - K-24 (relaunch path reachability)
+    // MARK: - accessibility relaunch escape hatch (relaunch path reachability)
 
     @MainActor
     func testConfirmAccessibilityEnabledIfAttemptedTransitionsToPendingRelaunchWhenUntrusted() {
@@ -272,16 +274,142 @@ final class OnboardingFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testBeginHotkeyChangeClearsOnlyOnboardingProgress() {
+        var savedConfiguration = OnboardingConfiguration.defaults
+        savedConfiguration.hasPickedHotkey = true
+        var refreshCount = 0
+        let controller = makeController(
+            loadOnboardingConfiguration: { savedConfiguration },
+            saveOnboardingConfiguration: { savedConfiguration = $0 },
+            refreshAction: { refreshCount += 1 }
+        )
+
+        controller.beginHotkeyChange()
+
+        XCTAssertFalse(savedConfiguration.hasPickedHotkey)
+        XCTAssertEqual(refreshCount, 1)
+    }
+
+    @MainActor
+    func testConfirmHotkeyPersistsProgressAndRefreshes() {
+        var savedConfiguration = OnboardingConfiguration.defaults
+        var refreshCount = 0
+        let controller = makeController(
+            loadOnboardingConfiguration: { savedConfiguration },
+            saveOnboardingConfiguration: { savedConfiguration = $0 },
+            refreshAction: { refreshCount += 1 }
+        )
+
+        controller.confirmHotkey()
+
+        XCTAssertTrue(savedConfiguration.hasPickedHotkey)
+        XCTAssertEqual(refreshCount, 1)
+    }
+
+    @MainActor
+    func testUpdateHotkeyConfigurationPersistsConfigurationAndProgressThroughInjectedActions() {
+        var savedOnboardingConfiguration = OnboardingConfiguration.defaults
+        var savedHotkeyConfiguration = PTTHotkeyConfiguration.defaults
+        var refreshCount = 0
+        var updatedHotkeyConfiguration = PTTHotkeyConfiguration.defaults
+        updatedHotkeyConfiguration.activationMode = .toggle
+        let controller = makeController(
+            loadOnboardingConfiguration: { savedOnboardingConfiguration },
+            saveOnboardingConfiguration: { savedOnboardingConfiguration = $0 },
+            refreshAction: { refreshCount += 1 },
+            loadHotkeyConfiguration: { savedHotkeyConfiguration },
+            saveHotkeyConfiguration: { savedHotkeyConfiguration = $0 }
+        )
+
+        controller.updateHotkeyConfiguration(updatedHotkeyConfiguration, markPicked: true)
+
+        XCTAssertEqual(savedHotkeyConfiguration, updatedHotkeyConfiguration)
+        XCTAssertTrue(savedOnboardingConfiguration.hasPickedHotkey)
+        XCTAssertEqual(refreshCount, 1)
+    }
+
+    @MainActor
+    func testSelectMicrophoneUsesInjectedActionAndRefreshes() {
+        let descriptor = MicrophoneDeviceDescriptor(
+            id: "mic-1",
+            uid: "mic-1",
+            name: "Test Microphone",
+            deviceID: 1,
+            isAvailable: true,
+            channelCount: 2
+        )
+        var selectedDescriptor: MicrophoneDeviceDescriptor?
+        var refreshCount = 0
+        let controller = makeController(
+            refreshAction: { refreshCount += 1 },
+            selectMicrophoneAction: { selectedDescriptor = $0 }
+        )
+
+        controller.selectMicrophone(descriptor)
+
+        XCTAssertEqual(selectedDescriptor, descriptor)
+        XCTAssertEqual(refreshCount, 1)
+    }
+
+    func testOnboardingResetPreservesRealUserConfiguration() {
+        defaults.set(true, forKey: "internal.hasCompletedRequiredSetup")
+        defaults.set(true, forKey: "internal.hasAttemptedAccessibilitySetup")
+        defaults.set(true, forKey: "internal.hasPickedHotkey")
+        defaults.set(true, forKey: "internal.hasConfirmedHFCLIInstall")
+        defaults.set("v3", forKey: "models.asrVersion")
+        let bookmark = Data([1, 2, 3])
+        defaults.set(bookmark, forKey: "models.modelLibraryBookmark")
+        defaults.set("mic-1", forKey: GeneralSettingsKeys.selectedInputUID)
+        defaults.set("shiftCommand", forKey: "pttHotkey.keyCombination")
+
+        OnboardingConfiguration.reset(from: defaults)
+
+        XCTAssertFalse(defaults.bool(forKey: "internal.hasCompletedRequiredSetup"))
+        XCTAssertFalse(defaults.bool(forKey: "internal.hasAttemptedAccessibilitySetup"))
+        XCTAssertFalse(defaults.bool(forKey: "internal.hasPickedHotkey"))
+        XCTAssertFalse(defaults.bool(forKey: "internal.hasConfirmedHFCLIInstall"))
+        // Progress flags include the model-location acknowledgment.
+        XCTAssertFalse(defaults.bool(forKey: "internal.hasConfirmedModelLocation"))
+        XCTAssertEqual(defaults.string(forKey: "models.asrVersion"), "v3")
+        // OnboardingConfiguration.reset itself preserves the model library
+        // POINTER — clearing it is the DEBUG reset ceremony's explicit job
+        // (testModelLocationClearDropsOnlyThePointer below).
+        XCTAssertEqual(defaults.data(forKey: "models.modelLibraryBookmark"), bookmark)
+        XCTAssertEqual(defaults.string(forKey: GeneralSettingsKeys.selectedInputUID), "mic-1")
+        XCTAssertEqual(defaults.string(forKey: "pttHotkey.keyCombination"), "shiftCommand")
+    }
+
+    func testModelLocationClearDropsOnlyThePointer() {
+        // 2026-08-22: the DEBUG reset clears the stored security-scoped
+        // bookmark so a rehearsal replays the model step instead of silently
+        // skipping it (the carried-over-install bug). Only the pointer to
+        // the library drops — version choice and files on disk are untouched,
+        // and re-picking the folder restores everything.
+        defaults.set(Data([9, 9]), forKey: "models.modelLibraryBookmark")
+        defaults.set("v3", forKey: "models.asrVersion")
+
+        ModelsConfiguration.clearStoredModelLibraryBookmark(defaults)
+
+        XCTAssertNil(defaults.data(forKey: "models.modelLibraryBookmark"))
+        XCTAssertEqual(defaults.string(forKey: "models.asrVersion"), "v3")
+    }
+
+    @MainActor
     private func makeController(
         snapshot: OnboardingStatusSnapshot? = nil,
         accessibilityTrustCheck: @escaping () -> Bool = { false },
         loadOnboardingConfiguration: @escaping () -> OnboardingConfiguration = { .defaults },
-        saveOnboardingConfiguration: @escaping (OnboardingConfiguration) -> Void = { _ in }
+        saveOnboardingConfiguration: @escaping (OnboardingConfiguration) -> Void = { _ in },
+        refreshAction: @escaping () -> Void = {},
+        selectMicrophoneAction: @escaping (MicrophoneDeviceDescriptor) -> Void = { _ in },
+        availableMicrophoneDevicesAction: @escaping () -> [MicrophoneDeviceDescriptor] = { [] },
+        loadHotkeyConfiguration: @escaping () -> PTTHotkeyConfiguration = { .defaults },
+        saveHotkeyConfiguration: @escaping (PTTHotkeyConfiguration) -> Void = { _ in }
     ) -> OnboardingFlowController {
         OnboardingFlowController(
             snapshot: snapshot ?? baseSnapshot(),
             requestMicrophoneAccessAction: {},
-            refreshAction: {},
+            refreshAction: refreshAction,
             openSettingsAction: {},
             requestAccessibilityAccessAction: {},
             openAccessibilitySettingsAction: {},
@@ -289,6 +417,10 @@ final class OnboardingFlowTests: XCTestCase {
             relaunchAppAction: {},
             loadOnboardingConfiguration: loadOnboardingConfiguration,
             saveOnboardingConfiguration: saveOnboardingConfiguration,
+            selectMicrophoneAction: selectMicrophoneAction,
+            availableMicrophoneDevicesAction: availableMicrophoneDevicesAction,
+            loadHotkeyConfiguration: loadHotkeyConfiguration,
+            saveHotkeyConfiguration: saveHotkeyConfiguration,
             startDictationAction: {}
         )
     }
@@ -348,6 +480,7 @@ final class OnboardingFlowTests: XCTestCase {
         selectedModelAvailability: ASRModelAvailability,
         installedModelVersions: [ASRModelVersion],
         hasCompletedRequiredSetup: Bool,
+        hasConfirmedModelLocation: Bool = false,
         isAudioReady: Bool,
         isASRReady: Bool,
         selectedMicrophoneName: String? = nil,
@@ -366,6 +499,7 @@ final class OnboardingFlowTests: XCTestCase {
             selectedModelAvailability: selectedModelAvailability,
             installedModelVersions: installedModelVersions,
             hasCompletedRequiredSetup: hasCompletedRequiredSetup,
+            hasConfirmedModelLocation: hasConfirmedModelLocation,
             isAudioReady: isAudioReady,
             isASRReady: isASRReady
         )

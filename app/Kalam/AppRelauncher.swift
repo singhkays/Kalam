@@ -4,7 +4,7 @@ import OSLog
 
 /// Relaunches the app as a fresh process.
 ///
-/// K-12: replaces the old `open -n` (via a `/usr/bin/open` `Process`) +
+/// relaunch lifecycle rework: replaces the old `open -n` (via a `/usr/bin/open` `Process`) +
 /// unconditional `exit(0)`. The old code quit even when the new instance
 /// failed to launch (leaving the user with no app at all), and `exit(0)`
 /// skipped the orderly termination lifecycle (`applicationWillTerminate`:
@@ -16,7 +16,7 @@ import OSLog
 /// a failed launch is logged and the app stays alive so the user can retry.
 enum AppRelauncher {
 
-    /// Injectable seam (same pattern as `PasteService.PasteStrategies`, K-02)
+    /// Injectable seam (same pattern as `PasteService.PasteStrategies`, clipboard restore on failed paste)
     /// so the orchestration is unit-testable without spawning processes.
     struct Strategy: Sendable {
         /// Launch a second instance of the app at `url`. Must call

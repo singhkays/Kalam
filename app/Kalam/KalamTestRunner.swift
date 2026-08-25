@@ -78,7 +78,7 @@ struct KalamTestRunner {
         let normalizedLines = lines.map { line -> String in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { return line }
-            // K-28: mask spoken-number spans ITN mis-normalizes (ranges,
+            // ITN span protection: mask spoken-number spans ITN mis-normalizes (ranges,
             // idioms, digit sequences), normalize, then restore.
             let masked = protector.protect(trimmed)
             let normalized = NemoTextProcessing.normalizeSentence(masked.text, maxSpanTokens: span)

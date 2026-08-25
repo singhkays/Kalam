@@ -10,18 +10,26 @@ struct OnboardingConfiguration: Equatable {
         hasCompletedRequiredSetup: false,
         hasAttemptedAccessibilitySetup: false,
         hasPickedHotkey: false,
-        hasConfirmedHFCLIInstall: false
+        hasConfirmedHFCLIInstall: false,
+        hasConfirmedModelLocation: false
     )
 
     var hasCompletedRequiredSetup: Bool
     var hasAttemptedAccessibilitySetup: Bool
     var hasPickedHotkey: Bool
     var hasConfirmedHFCLIInstall: Bool
+    /// Set when the user confirms the model library location during a first
+    /// run (the model card's Continue). Drives the router's model
+    /// acknowledgment stop: a carried-over model must be shown once, then
+    /// never re-asked. Cleared by `reset()` so DEBUG rehearsals replay it.
+    var hasConfirmedModelLocation: Bool
 
     private static let hasCompletedRequiredSetupKey = "internal.hasCompletedRequiredSetup"
     private static let hasAttemptedAccessibilitySetupKey = "internal.hasAttemptedAccessibilitySetup"
     private static let hasPickedHotkeyKey = "internal.hasPickedHotkey"
     private static let hasConfirmedHFCLIInstallKey = "internal.hasConfirmedHFCLIInstall"
+    private static let hasConfirmedModelLocationKey = "internal.hasConfirmedModelLocation"
+    private static let debugFreshStartKey = "internal.debugFreshStart"
 
     static func load(from defaults: UserDefaults = .standard) -> OnboardingConfiguration {
         OnboardingConfiguration(
@@ -44,6 +52,11 @@ struct OnboardingConfiguration: Equatable {
                 forKey: hasConfirmedHFCLIInstallKey,
                 defaults: defaults,
                 fallback: Self.defaults.hasConfirmedHFCLIInstall
+            ),
+            hasConfirmedModelLocation: bool(
+                forKey: hasConfirmedModelLocationKey,
+                defaults: defaults,
+                fallback: Self.defaults.hasConfirmedModelLocation
             )
         )
     }
@@ -53,6 +66,7 @@ struct OnboardingConfiguration: Equatable {
         defaults.set(hasAttemptedAccessibilitySetup, forKey: Self.hasAttemptedAccessibilitySetupKey)
         defaults.set(hasPickedHotkey, forKey: Self.hasPickedHotkeyKey)
         defaults.set(hasConfirmedHFCLIInstall, forKey: Self.hasConfirmedHFCLIInstallKey)
+        defaults.set(hasConfirmedModelLocation, forKey: Self.hasConfirmedModelLocationKey)
     }
 
     static func reset(from defaults: UserDefaults = .standard) {
@@ -60,12 +74,26 @@ struct OnboardingConfiguration: Equatable {
         defaults.removeObject(forKey: hasAttemptedAccessibilitySetupKey)
         defaults.removeObject(forKey: hasPickedHotkeyKey)
         defaults.removeObject(forKey: hasConfirmedHFCLIInstallKey)
-        
-        // Thorough reset: also clear model and audio persistence
-        defaults.removeObject(forKey: "audio.selectedInputDeviceUID")
-        defaults.removeObject(forKey: "models.modelLibraryBookmark")
-        defaults.removeObject(forKey: "models.asrVersion")
-        defaults.removeObject(forKey: "internal.hasPickedHotkey") // Double check the key
+        defaults.removeObject(forKey: hasConfirmedModelLocationKey)
+    }
+
+    /// Marks the next onboarding window open as a fresh start. Set by the DEBUG
+    /// reset so the deck opens on the welcome card even though a non-destructive
+    /// reset keeps microphone/hotkey config intact (the model LOCATION is
+    /// cleared too — see `resetAllOnboardingState()`). Consumed once, on read.
+    static func requestDebugFreshStart(_ defaults: UserDefaults = .standard) {
+        defaults.set(true, forKey: debugFreshStartKey)
+    }
+
+    /// Reads the fresh-start flag WITHOUT clearing it (survives window
+    /// reopen until `clearDebugFreshStart()` runs on leaving welcome).
+    static func peekDebugFreshStart(_ defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: debugFreshStartKey)
+    }
+
+    /// Clears the fresh-start flag once setup has actually begun.
+    static func clearDebugFreshStart(_ defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: debugFreshStartKey)
     }
 
     private static func bool(forKey key: String, defaults: UserDefaults, fallback: Bool) -> Bool {
@@ -152,6 +180,13 @@ struct OnboardingStatusSnapshot: Equatable {
     let installedModelVersions: [ASRModelVersion]
     let modelAvailability: ASRModelAvailability
     let modelLibraryURL: URL?
+    /// Whether the user has confirmed the model location during this first
+    /// run. Drives the router's one-time model acknowledgment stop for
+    /// carried-over installs; irrelevant once setup is complete (repair mode
+    /// routes by broken gates only). Var: `confirmModelLocation()` flips it
+    /// synchronously on the controller's copy so the Continue press advances
+    /// against the confirmed state before the app-wide refresh lands.
+    var hasConfirmedModelLocation: Bool
     let isAudioReady: Bool
     let isASRReady: Bool
 
@@ -220,6 +255,7 @@ struct OnboardingStatusSnapshot: Equatable {
         selectedModelAvailability: ASRModelAvailability,
         installedModelVersions: [ASRModelVersion],
         hasCompletedRequiredSetup: Bool,
+        hasConfirmedModelLocation: Bool,
         isAudioReady: Bool,
         isASRReady: Bool
     ) -> OnboardingStatusSnapshot {
@@ -264,6 +300,8 @@ struct OnboardingStatusSnapshot: Equatable {
             modelStatus = .actionRequired(message: "Set up your local speech model for on-device dictation.")
         case .missingModelFolder, .invalidModelFolder:
             modelStatus = .notDetermined(message: "Finish setting up your local speech model.")
+        case .partial(_, let missing, let total):
+            modelStatus = .notDetermined(message: "\(total - missing.count) of \(total) model files arrived. Run the download command again; it skips files already on disk.")
         }
 
         let mode: OnboardingMode = hasCompletedRequiredSetup ? .repair : .firstRun
@@ -281,6 +319,7 @@ struct OnboardingStatusSnapshot: Equatable {
             installedModelVersions: installedModelVersions,
             modelAvailability: selectedModelAvailability,
             modelLibraryURL: modelLibraryURL,
+            hasConfirmedModelLocation: hasConfirmedModelLocation,
             isAudioReady: isAudioReady,
             isASRReady: isASRReady
         )
@@ -295,6 +334,8 @@ struct OnboardingStatusSnapshot: Equatable {
             newModelStatus = .actionRequired(message: "Set up your local speech model for on-device dictation.")
         case .missingModelFolder, .invalidModelFolder:
             newModelStatus = .notDetermined(message: "Finish setting up your local speech model.")
+        case .partial(_, let missing, let total):
+            newModelStatus = .notDetermined(message: "\(total - missing.count) of \(total) model files arrived. Run the download command again; it skips files already on disk.")
         }
         
         return OnboardingStatusSnapshot(
@@ -310,6 +351,9 @@ struct OnboardingStatusSnapshot: Equatable {
             installedModelVersions: installedModelVersions,
             modelAvailability: availability,
             modelLibraryURL: modelLibraryURL,
+            // A version swap doesn't change whether the user confirmed the
+            // library location this run.
+            hasConfirmedModelLocation: hasConfirmedModelLocation,
             isAudioReady: isAudioReady,
             isASRReady: false // Reset ASR readiness as we switched models
         )
@@ -359,7 +403,19 @@ final class OnboardingFlowController: ObservableObject {
     private let accessibilityTrustCheck: () -> Bool
     private let relaunchAppAction: () -> Void
     private let startDictationAction: () -> Void
+    private let selectMicrophoneAction: (MicrophoneDeviceDescriptor) -> Void
+    private let clearMicrophoneSelectionAction: () -> Void
+    private let availableMicrophoneDevicesAction: () -> [MicrophoneDeviceDescriptor]
+    private let loadHotkeyConfiguration: () -> PTTHotkeyConfiguration
+    private let saveHotkeyConfiguration: (PTTHotkeyConfiguration) -> Void
     let loadOnboardingConfiguration: () -> OnboardingConfiguration
+    var availableMicrophones: [MicrophoneDeviceDescriptor] {
+        availableMicrophoneDevicesAction()
+    }
+
+    var hotkeyConfiguration: PTTHotkeyConfiguration {
+        loadHotkeyConfiguration()
+    }
     private let saveOnboardingConfiguration: (OnboardingConfiguration) -> Void
 
     init(
@@ -383,6 +439,38 @@ final class OnboardingFlowController: ObservableObject {
         saveOnboardingConfiguration: @escaping (OnboardingConfiguration) -> Void = { config in
             config.save()
         },
+        selectMicrophoneAction: @escaping (MicrophoneDeviceDescriptor) -> Void = { descriptor in
+            UserDefaults.standard.set(descriptor.uid, forKey: GeneralSettingsKeys.selectedInputUID)
+            // Steer the RECORDING path, not just the display: the runtime
+            // resolves input via MicrophonePriorityConfiguration (the settings UI
+            // "Microphone priority" list), so the chosen device must lead it.
+            var priority = MicrophonePriorityConfiguration.load()
+            priority.priorityUIDs.removeAll { $0 == descriptor.uid }
+            priority.priorityUIDs.insert(descriptor.uid, at: 0)
+            priority.saveAndNotify()
+        },
+        clearMicrophoneSelectionAction: @escaping () -> Void = {
+            // "Unselect" = follow the Mac's own default input. That requires
+            // BOTH dropping the display override AND emptying the priority
+            // list — a non-empty list would keep steering recording to its
+            // first available entry even when the system default changes.
+            // (Empty list = highest-connected-wins; the settings UI pane already
+            // presents that semantic.)
+            UserDefaults.standard.removeObject(forKey: GeneralSettingsKeys.selectedInputUID)
+            var priority = MicrophonePriorityConfiguration.load()
+            priority.priorityUIDs = []
+            priority.saveAndNotify()
+        },
+        availableMicrophoneDevicesAction: @escaping () -> [MicrophoneDeviceDescriptor] = {
+            MicrophoneDeviceService.availableInputDevices()
+        },
+        loadHotkeyConfiguration: @escaping () -> PTTHotkeyConfiguration = {
+            PTTHotkeyConfiguration.load()
+        },
+        saveHotkeyConfiguration: @escaping (PTTHotkeyConfiguration) -> Void = { config in
+            config.save()
+            NotificationCenter.default.post(name: .pttHotkeyConfigurationDidChange, object: nil)
+        },
         startDictationAction: @escaping () -> Void
     ) {
         self.snapshot = snapshot
@@ -396,6 +484,11 @@ final class OnboardingFlowController: ObservableObject {
         self.relaunchAppAction = relaunchAppAction
         self.loadOnboardingConfiguration = loadOnboardingConfiguration
         self.saveOnboardingConfiguration = saveOnboardingConfiguration
+        self.selectMicrophoneAction = selectMicrophoneAction
+        self.clearMicrophoneSelectionAction = clearMicrophoneSelectionAction
+        self.availableMicrophoneDevicesAction = availableMicrophoneDevicesAction
+        self.loadHotkeyConfiguration = loadHotkeyConfiguration
+        self.saveHotkeyConfiguration = saveHotkeyConfiguration
         self.startDictationAction = startDictationAction
     }
 
@@ -439,7 +532,7 @@ final class OnboardingFlowController: ObservableObject {
         accessibilitySetupState = .enabledPendingRelaunch
     }
 
-    /// K-24: called on every snapshot refresh. Once the user has attempted Accessibility
+    /// accessibility relaunch escape hatch: called on every snapshot refresh. Once the user has attempted Accessibility
     /// setup (state == `.needsExternalEnable`), surface the relaunch path whenever the
     /// running process still isn't trusted — previously `.enabledPendingRelaunch` (and the
     /// "Quit & Reopen Kalam" button) was unreachable because nothing called
@@ -503,6 +596,23 @@ final class OnboardingFlowController: ObservableObject {
         startDictationAction()
     }
 
+    func beginHotkeyChange() {
+        var config = loadOnboardingConfiguration()
+        config.hasPickedHotkey = false
+        saveOnboardingConfiguration(config)
+        refreshAction()
+    }
+
+    func updateHotkeyConfiguration(_ configuration: PTTHotkeyConfiguration, markPicked: Bool = false) {
+        saveHotkeyConfiguration(configuration)
+        if markPicked {
+            var onboardingConfiguration = loadOnboardingConfiguration()
+            onboardingConfiguration.hasPickedHotkey = true
+            saveOnboardingConfiguration(onboardingConfiguration)
+        }
+        refreshAction()
+    }
+
     func confirmHotkey() {
         var config = loadOnboardingConfiguration()
         config.hasPickedHotkey = true
@@ -517,9 +627,34 @@ final class OnboardingFlowController: ObservableObject {
         refreshAction()
     }
 
+    /// First-run acknowledgment stop (2026-08-22): the model card's Continue
+    /// records that the user confirmed the detected library location, so the
+    /// router releases its hold and never re-shows a satisfied model step.
+    /// The controller's own snapshot is flipped synchronously so the advance
+    /// computed right after sees the confirmed state; the app-wide refresh
+    /// then lands with the persisted value.
+    func confirmModelLocation() {
+        var config = loadOnboardingConfiguration()
+        config.hasConfirmedModelLocation = true
+        saveOnboardingConfiguration(config)
+        snapshot.hasConfirmedModelLocation = true
+        refreshAction()
+        onAdvanceAfterModelConfirmation?()
+    }
+
+    /// Injected by the deck view: advances the route after the model-location
+    /// confirmation. Optional so tests can construct the controller without it.
+    var onAdvanceAfterModelConfirmation: (() -> Void)?
+
     func selectMicrophone(_ descriptor: MicrophoneDeviceDescriptor) {
-        UserDefaults.standard.set(descriptor.uid, forKey: GeneralSettingsKeys.selectedInputUID)
-        NotificationCenter.default.post(name: .microphonePriorityDidChange, object: nil)
+        selectMicrophoneAction(descriptor)
+        refreshAction()
+    }
+
+    /// Drops the microphone override so Kalam follows the Mac's default input.
+    /// The selection card's "unselect" destination.
+    func clearMicrophoneSelection() {
+        clearMicrophoneSelectionAction()
         refreshAction()
     }
 
@@ -527,6 +662,15 @@ final class OnboardingFlowController: ObservableObject {
     func resetAllOnboardingState() {
         logger.info("Onboarding state reset (DEBUG-only)")
         OnboardingConfiguration.reset()
+        OnboardingConfiguration.requestDebugFreshStart()
+
+        // 2026-08-22: a permission-reset rehearsal must also replay the MODEL
+        // step. A carried-over bookmark would otherwise satisfy the gate and
+        // skip the card (the carried-over-install bug). Clearing drops only
+        // the pointer to the library folder — the files stay on disk and
+        // re-picking the folder fully restores the setup. The -test flavor's
+        // separate defaults domain keeps real installs untouched.
+        ModelsConfiguration.clearStoredModelLibraryBookmark()
 
         // Provide TCC instructions
         let bundleID = Bundle.main.bundleIdentifier ?? "singhkays.Kalam"
@@ -567,798 +711,3 @@ final class OnboardingFlowController: ObservableObject {
 
 }
 
-struct OnboardingView: View {
-    @ObservedObject var controller: OnboardingFlowController
-    let onClose: () -> Void
-
-    #if DEBUG
-    @State private var isOptionKeyPressed = false
-    private let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
-    #endif
-    
-    @State private var isMicrophoneListExpanded: Bool = true
-    @State private var isModelCardExpanded: Bool = false
-
-    init(controller: OnboardingFlowController, onClose: @escaping () -> Void) {
-        self.controller = controller
-        self.onClose = onClose
-        _isMicrophoneListExpanded = State(initialValue: !controller.snapshot.microphoneStatus.isReady)
-    }
-
-    var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                Rectangle()
-                    .fill(.thickMaterial)
-
-                NoiseView()
-                    .blendMode(.overlay)
-
-                VStack(alignment: .leading, spacing: 0) {
-                    header
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 12)
-
-                    setupWell
-                        .frame(
-                            maxWidth: .infinity,
-                            minHeight: max(260, geometry.size.height * 0.45),
-                            maxHeight: .infinity
-                        )
-                        .padding(.vertical, 8)
-
-                    footer
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 4)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 16)
-                .padding(.top, 32)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 24))
-        // K-19: Esc closes the wizard (traffic lights are hidden on this window).
-        .onExitCommand(perform: onClose)
-    }
-
-    private var setupWell: some View {
-        ZStack(alignment: .top) {
-            ScrollView(showsIndicators: false) {
-                checklist
-                    .padding(.vertical, 20)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 20)
-                    .stroke(Color(nsColor: .separatorColor).opacity(0.3), lineWidth: 1)
-            )
-
-            // Internal Top Shadow
-            LinearGradient(
-                gradient: Gradient(colors: [Color.black.opacity(0.18), Color.clear]),
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 14)
-            .allowsHitTesting(false)
-
-            // Internal Bottom Shadow
-            VStack {
-                Spacer()
-                LinearGradient(
-                    gradient: Gradient(colors: [Color.clear, Color.black.opacity(0.18)]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 14)
-            }
-            .allowsHitTesting(false)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-    }
-
-    private var header: some View {
-        VStack(alignment: .center, spacing: 8) {
-            Image(nsImage: NSApp.applicationIconImage)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 64, height: 64)
-
-            Text(controller.snapshot.mode.windowTitle)
-                .font(.title2.weight(.semibold))
-
-            Text("Kalam runs entirely on your Mac. No audio or text ever leaves this device, ensuring total privacy.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.bottom, 8)
-    }
-
-    private var checklist: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            requirementRow(
-                icon: "mic.fill",
-                title: "Microphone",
-                requirement: .microphone,
-                status: microphoneDisplayStatus,
-                primary: microphonePrimaryAction,
-                secondary: controller.snapshot.microphoneStatus.isReady && !isMicrophoneListExpanded ? .init(title: "Change", style: .premium, action: { withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { isMicrophoneListExpanded = true } }) : nil,
-                trailingSuccessLabel: !isMicrophoneListExpanded ? controller.snapshot.selectedMicrophoneName : nil
-            ) {
-                if isMicrophoneListExpanded {
-                    microphoneSelectionSection
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            }
-
-            requirementRow(
-                icon: "hand.raised.fill",
-                title: "Accessibility",
-                requirement: .accessibility,
-                status: accessibilityDisplayStatus,
-                primary: accessibilityPrimaryAction,
-                secondary: accessibilitySecondaryAction
-            )
-
-            requirementRow(
-                icon: "keyboard",
-                title: "Hotkey",
-                requirement: .hotkey,
-                status: controller.snapshot.hotkeyStatus,
-                primary: hotkeyPrimaryAction,
-                secondary: controller.snapshot.hotkeyStatus.isReady ? .init(title: "Change", style: .premium, action: {
-                    let defaults = UserDefaults.standard
-                    defaults.set(false, forKey: "internal.hasPickedHotkey")
-                    controller.recheck()
-                }) : nil
-            ) {
-                if !controller.snapshot.hotkeyStatus.isReady {
-                    hotkeySetupSection
-                }
-            }
-            .disabled(!controller.snapshot.accessibilityStatus.isReady)
-            .opacity(controller.snapshot.accessibilityStatus.isReady ? 1.0 : 0.5)
-
-            requirementRow(
-                icon: "cpu",
-                title: "AI Model",
-                requirement: .model,
-                status: controller.snapshot.modelStatus,
-                primary: modelPrimaryAction,
-                secondary: modelSecondaryAction,
-                trailingSuccessLabel: modelSuccessLabel
-            ) {
-                if shouldShowModelCard {
-                    modelSetupCard
-                }
-            }
-            .disabled(!controller.snapshot.hotkeyStatus.isReady)
-            .opacity(controller.snapshot.hotkeyStatus.isReady ? 1.0 : 0.5)
-        }
-        .padding(.horizontal, 16)
-        .frame(maxWidth: .infinity, alignment: .center)
-    }
-
-    private var footer: some View {
-        VStack(alignment: .center, spacing: 10) {
-            if let runtimeMessage = controller.snapshot.runtimePreparationMessage {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text(runtimeMessage)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Button("Start Dictating") {
-                controller.startDictating()
-            }
-            .buttonStyle(OnboardingPremiumButtonStyle())
-            .disabled(controller.snapshot.isStartDictatingDisabled)
-            .keyboardShortcut(.defaultAction)
-
-            ZStack {
-                Text("\(controller.snapshot.completedRequirements) of 4 complete")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                
-                #if DEBUG
-                HStack {
-                    Spacer()
-                    debugResetButton
-                }
-                #endif
-            }
-        }
-        .frame(maxWidth: .infinity)
-        #if DEBUG
-        .onReceive(timer) { _ in
-            let isPressed = NSEvent.modifierFlags.contains(.option)
-            if isPressed != isOptionKeyPressed {
-                isOptionKeyPressed = isPressed
-            }
-        }
-        #endif
-    }
-
-    #if DEBUG
-    private var debugResetButton: some View {
-        Button {
-            controller.resetAllOnboardingState()
-        } label: {
-            Text("Reset (Option+Click)")
-                .font(.caption)
-                .underline()
-        }
-        .buttonStyle(.plain)
-        .opacity(isOptionKeyPressed ? 0.6 : 0)
-        .animation(.easeInOut, value: isOptionKeyPressed)
-    }
-    #endif
-
-    private var microphoneDisplayStatus: OnboardingRequirementStatus {
-        controller.snapshot.microphoneStatus
-    }
-
-    private var accessibilityDisplayStatus: OnboardingRequirementStatus {
-        if controller.snapshot.accessibilityStatus.isReady {
-            return controller.snapshot.accessibilityStatus
-        }
-
-        switch controller.accessibilitySetupState {
-        case .idle:
-            return controller.snapshot.accessibilityStatus
-        case .needsExternalEnable:
-            return .pendingExternal(message: "Open System Settings and enable Kalam under Accessibility.")
-        case .enabledPendingRelaunch:
-            return .pendingRelaunch(message: "Kalam still can't verify Accessibility access. If the switch is already on, restart Kalam. Otherwise, enable Kalam in System Settings.")
-        }
-    }
-
-    private var shouldShowModelCard: Bool {
-        controller.snapshot.hotkeyStatus.isReady && (!controller.snapshot.modelStatus.isReady || isModelCardExpanded)
-    }
-
-    private var modelSuccessLabel: String? {
-        guard controller.snapshot.modelStatus.isReady else { return nil }
-        return controller.snapshot.selectedModelVersion.displayName
-    }
-
-    private var microphonePrimaryAction: OnboardingAction {
-        switch controller.snapshot.microphoneStatus {
-        case .notDetermined, .actionRequired:
-            return .init(title: "Allow", style: .prominent, action: controller.requestMicrophoneAccess)
-        case .denied:
-            return .init(title: "Open Settings", style: .prominent, action: controller.openMicrophoneSettings)
-        case .ready:
-            return .init(title: "Allowed", style: .prominent, action: nil)
-        case .pendingExternal, .pendingRelaunch, .invalid:
-            return .init(title: "Recheck", style: .bordered, action: controller.recheck)
-        }
-    }
-
-    private var microphoneSecondaryAction: OnboardingAction? {
-        switch controller.snapshot.microphoneStatus {
-        case .denied:
-            return .init(title: "Recheck", style: .bordered, action: controller.recheck)
-        default:
-            return nil
-        }
-    }
-
-    private var accessibilityPrimaryAction: OnboardingAction {
-        switch accessibilityDisplayStatus {
-        case .ready:
-            return .init(title: "Granted", style: .prominent, action: nil)
-        case .pendingExternal:
-            return .init(title: "Open System Settings", style: .prominent, action: controller.openAccessibilitySettings)
-        case .pendingRelaunch:
-            return .init(title: "Quit & Reopen Kalam", style: .prominent, action: controller.relaunchApp)
-        case .denied:
-            return .init(title: "Open Settings", style: .prominent, action: controller.openAccessibilitySettings)
-        case .notDetermined, .actionRequired, .invalid:
-            return .init(title: "Grant Access", style: .prominent, action: controller.requestAccessibilityAccess)
-        }
-    }
-
-    private var accessibilitySecondaryAction: OnboardingAction? {
-        switch accessibilityDisplayStatus {
-        case .pendingRelaunch:
-            return .init(title: "Open System Settings", style: .bordered, action: controller.openAccessibilitySettings)
-        case .denied:
-            return .init(title: "Open System Settings", style: .bordered, action: controller.openAccessibilitySettings)
-        default:
-            return nil
-        }
-    }
-
-    private var modelPrimaryAction: OnboardingAction {
-        if shouldShowModelCard {
-            return .init(title: "", style: .prominent, action: nil)
-        }
-        if controller.snapshot.modelStatus.isReady {
-            return .init(title: "Ready", style: .prominent, action: nil)
-        }
-        return .init(title: "Recheck", style: .bordered, action: controller.recheck)
-    }
-
-    private var modelSecondaryAction: OnboardingAction? {
-        if controller.snapshot.modelStatus.isReady {
-            return .init(title: "Change", style: .premium, action: {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                    isModelCardExpanded.toggle()
-                }
-            })
-        }
-        return nil
-    }
-
-    private var hotkeyPrimaryAction: OnboardingAction {
-        if controller.snapshot.hotkeyStatus.isReady {
-            return .init(title: "Ready", style: .prominent, action: nil)
-        }
-        return .init(title: "Confirm", style: .prominent, action: controller.confirmHotkey)
-    }
-
-    private var hotkeySecondaryAction: OnboardingAction? {
-        if controller.snapshot.hotkeyStatus.isReady {
-            return .init(title: "Change", style: .premium, action: {
-                // To reset and show the picker again
-                var config = OnboardingConfiguration.load()
-                config.hasPickedHotkey = false
-                controller.confirmHotkey() 
-                // Wait, I should probably have a separate method or just update the flag
-                // Let's just update the flag and let refresh handle it
-                let defaults = UserDefaults.standard
-                defaults.set(false, forKey: "internal.hasPickedHotkey")
-                controller.recheck()
-            })
-        }
-        return nil
-    }
-
-    private var microphoneSelectionSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Divider()
-                .padding(.top, 4)
-
-            if controller.snapshot.microphoneStatus.isReady {
-                Text("Select Microphone")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 2)
-
-                VStack(spacing: 6) {
-                    ForEach(MicrophoneDeviceService.availableInputDevices()) { device in
-                        let isSelected = device.name == controller.snapshot.selectedMicrophoneName
-
-                        Button {
-                            controller.selectMicrophone(device)
-                        } label: {
-                            HStack(spacing: 12) {
-                                ZStack {
-                                    Circle()
-                                        .fill(isSelected ? Color.green.opacity(0.15) : Color.primary.opacity(0.05))
-                                        .frame(width: 28, height: 28)
-
-                                    Image(systemName: isSelected ? "mic.fill" : "mic")
-                                        .font(.system(size: 13, weight: .bold))
-                                        .foregroundStyle(isSelected ? .green : .secondary)
-                                }
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(device.name)
-                                        .font(.subheadline.weight(isSelected ? .semibold : .regular))
-                                        .foregroundStyle(isSelected ? .primary : .secondary)
-
-                                    if isSelected {
-                                        Text("Active Input")
-                                            .font(.system(size: 10, weight: .bold))
-                                            .foregroundStyle(.green)
-                                            .textCase(.uppercase)
-                                    }
-                                }
-
-                                Spacer()
-
-                                if isSelected {
-                                    Button {
-                                        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                                            isMicrophoneListExpanded = false
-                                        }
-                                    } label: {
-                                        Text("Confirm")
-                                    }
-                                    .buttonStyle(OnboardingPremiumButtonStyle(isCompact: true))
-                                    .transition(.scale.combined(with: .opacity))
-                                } else {
-                                    Image(systemName: "circle")
-                                        .font(.system(size: 16))
-                                        .foregroundStyle(.tertiary)
-                                }
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(isSelected ? AnyShapeStyle(Color.accentColor.opacity(0.1)) : AnyShapeStyle(.quaternary))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(isSelected ? Color.accentColor.opacity(0.3) : Color.clear, lineWidth: 1.5)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .scaleEffect(isSelected ? 1.02 : 1.0)
-                        .animation(.spring(response: 0.3), value: isSelected)
-                    }
-                }
-            } else {
-                Label("You’ll choose a microphone after access is granted.", systemImage: "mic.slash")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 2)
-            }
-        }
-        .padding(.horizontal, 4)
-    }
-
-    private var hotkeySetupSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Divider()
-            
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Activation Mode")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    
-                    SetupDropdownField(
-                        selection: Binding(
-                            get: { PTTHotkeyConfiguration.load().activationMode },
-                            set: { mode in
-                                var config = PTTHotkeyConfiguration.load()
-                                config.activationMode = mode
-                                config.save()
-                                controller.recheck()
-                            }
-                        ),
-                        options: PTTActivationMode.allCases,
-                        label: { $0.displayName }
-                    )
-                }
-                .frame(maxWidth: .infinity)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Key Combination")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    
-                    SetupDropdownField(
-                        selection: Binding(
-                            get: { PTTHotkeyConfiguration.load().keyCombination },
-                            set: { combo in
-                                var config = PTTHotkeyConfiguration.load()
-                                config.apply(keyCombination: combo)
-                                config.save()
-                                controller.recheck()
-                            }
-                        ),
-                        options: KeyCombination.allCases,
-                        label: { $0.displayName }
-                    )
-                }
-                .frame(maxWidth: .infinity)
-            }
-            
-            HStack(spacing: 8) {
-                Image(systemName: "keyboard")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                
-                Text(PTTHotkeyConfiguration.load().displayString)
-                    .font(.system(.subheadline, design: .default, weight: .bold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule()
-                            .fill(Color.primary.opacity(0.1))
-                    )
-                    .overlay(
-                        Capsule()
-                            .stroke(Color.primary.opacity(0.15), lineWidth: 1)
-                    )
-                
-                Text("This shortcut triggers dictation while Kalam is running.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.vertical, 4)
-        }
-    }
-
-    private var modelSetupCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            switch controller.modelSetupPresentationState {
-            case .needsFolder:
-                ModelAcquisitionPanel(
-                    folderURL: controller.snapshot.modelLibraryURL,
-                    statusMessage: "Choose where Kalam should store your local speech models.",
-                    wizardState: controller.modelSetupWizardState,
-                    selectedVersion: $controller.selectedDownloadVersion,
-                    downloadCommand: controller.downloadCommand,
-                    downloadCommandCopied: controller.downloadCommandCopied,
-                    installCommand: ModelSetupSupport.huggingFaceInstallCommand,
-                    installCommandCopied: controller.installCommandCopied,
-                    onChooseFolder: controller.chooseModelFolder,
-                    onChangeFolder: controller.chooseModelFolder,
-                    onOpenInFinder: controller.openModelFolderInFinder,
-                    onClearFolder: controller.clearModelFolder,
-                    onConfirmCLIInstalled: controller.confirmHFCLIInstalled,
-                    onCopyDownloadCommand: controller.copyDownloadCommand,
-                    onCopyInstallCommand: controller.copyInstallCommand
-                )
-            case .needsModel(_, _, let statusMessage):
-                ModelAcquisitionPanel(
-                    folderURL: controller.snapshot.modelLibraryURL,
-                    statusMessage: statusMessage,
-                    wizardState: controller.modelSetupWizardState,
-                    selectedVersion: $controller.selectedDownloadVersion,
-                    downloadCommand: controller.downloadCommand,
-                    downloadCommandCopied: controller.downloadCommandCopied,
-                    installCommand: ModelSetupSupport.huggingFaceInstallCommand,
-                    installCommandCopied: controller.installCommandCopied,
-                    onChooseFolder: controller.chooseModelFolder,
-                    onChangeFolder: controller.chooseModelFolder,
-                    onOpenInFinder: controller.openModelFolderInFinder,
-                    onClearFolder: controller.clearModelFolder,
-                    onConfirmCLIInstalled: controller.confirmHFCLIInstalled,
-                    onCopyDownloadCommand: controller.copyDownloadCommand,
-                    onCopyInstallCommand: controller.copyInstallCommand
-                )
-            case .repoFolderSelected(_, let selectedRepo, _, let statusMessage):
-                ModelAcquisitionPanel(
-                    folderURL: controller.snapshot.modelLibraryURL,
-                    statusMessage: statusMessage,
-                    wizardState: controller.modelSetupWizardState,
-                    selectedVersion: $controller.selectedDownloadVersion,
-                    downloadCommand: controller.downloadCommand,
-                    downloadCommandCopied: controller.downloadCommandCopied,
-                    installCommand: ModelSetupSupport.huggingFaceInstallCommand,
-                    installCommandCopied: controller.installCommandCopied,
-                    onChooseFolder: controller.chooseModelFolder,
-                    onChangeFolder: controller.chooseModelFolder,
-                    onOpenInFinder: controller.openModelFolderInFinder,
-                    onClearFolder: controller.clearModelFolder,
-                    selectedRepo: selectedRepo,
-                    onUseParentFolder: controller.useParentFolderForSelectedRepo,
-                    onConfirmCLIInstalled: controller.confirmHFCLIInstalled,
-                    onCopyDownloadCommand: controller.copyDownloadCommand,
-                    onCopyInstallCommand: controller.copyInstallCommand
-                )
-            case .ready(_, _, let statusMessage):
-                ModelAcquisitionPanel(
-                    folderURL: controller.snapshot.modelLibraryURL,
-                    statusMessage: statusMessage,
-                    wizardState: controller.modelSetupWizardState,
-                    selectedVersion: $controller.selectedDownloadVersion,
-                    downloadCommand: controller.downloadCommand,
-                    downloadCommandCopied: controller.downloadCommandCopied,
-                    installCommand: ModelSetupSupport.huggingFaceInstallCommand,
-                    installCommandCopied: controller.installCommandCopied,
-                    onChooseFolder: controller.chooseModelFolder,
-                    onChangeFolder: controller.chooseModelFolder,
-                    onOpenInFinder: controller.openModelFolderInFinder,
-                    onClearFolder: controller.clearModelFolder,
-                    onConfirmCLIInstalled: controller.confirmHFCLIInstalled,
-                    onCopyDownloadCommand: controller.copyDownloadCommand,
-                    onCopyInstallCommand: controller.copyInstallCommand
-                )
-            }
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .textBackgroundColor))
-        )
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: .infinity, alignment: .center)
-    }
-
-    @ViewBuilder
-    private func requirementRow<ExtraContent: View>(
-        icon: String,
-        title: String,
-        requirement: OnboardingRequirement,
-        status: OnboardingRequirementStatus,
-        primary: OnboardingAction,
-        secondary: OnboardingAction?,
-        trailingSuccessLabel: String? = nil,
-        @ViewBuilder extraContent: () -> ExtraContent = { EmptyView() }
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: iconName(for: requirement, status: status))
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(iconColor(for: requirement, status: status))
-                    .frame(width: 22)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                    Text(status.message)
-                        .font(.subheadline)
-                        .foregroundStyle(status.isNotDetermined ? .tertiary : .secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 12)
-
-                if status.isReady {
-                    HStack(spacing: 12) {
-                        if let secondary {
-                            actionButton(secondary)
-                        }
-
-                        if let trailingSuccessLabel {
-                            Label(trailingSuccessLabel, systemImage: "checkmark.circle.fill")
-                                .font(.footnote.bold())
-                                .foregroundStyle(.green)
-                        }
-                    }
-                } else if !primary.title.isEmpty {
-                    VStack(alignment: .trailing, spacing: 6) {
-                        actionButton(primary)
-
-                        if let secondary {
-                            actionButton(secondary)
-                        }
-                    }
-                }
-            }
-
-            extraContent()
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-        )
-        .overlay(
-            VStack {
-                Divider()
-                    .opacity(0.2)
-                Spacer()
-                Divider()
-                    .opacity(0.2)
-            }
-            .foregroundStyle(borderColor(for: requirement, status: status))
-        )
-    }
-
-    @ViewBuilder
-    private func actionButton(_ action: OnboardingAction) -> some View {
-        switch action.style {
-        case .prominent:
-            Button(action.title) {
-                action.action?()
-            }
-            .buttonStyle(OnboardingPremiumButtonStyle(isCompact: true))
-            .disabled(action.action == nil)
-        case .bordered:
-            Button(action.title) {
-                action.action?()
-            }
-            .buttonStyle(OnboardingGlassButtonStyle())
-            .disabled(action.action == nil)
-        case .link:
-            Button(action.title) {
-                action.action?()
-            }
-            .buttonStyle(.link)
-            .disabled(action.action == nil)
-        case .premium:
-            Button(action.title) {
-                action.action?()
-            }
-            .buttonStyle(OnboardingGlassButtonStyle())
-            .disabled(action.action == nil)
-        }
-    }
-
-    private func iconName(for requirement: OnboardingRequirement, status: OnboardingRequirementStatus) -> String {
-        if status.isReady {
-            return "checkmark.circle.fill"
-        }
-        if requirement == .accessibility, case .pendingRelaunch = status {
-            return "exclamationmark.triangle.fill"
-        }
-        if controller.snapshot.mode == .repair && controller.snapshot.brokenRequirements.contains(requirement) {
-            return "exclamationmark.triangle.fill"
-        }
-        switch status {
-        case .denied, .invalid:
-            return "exclamationmark.triangle.fill"
-        case .notDetermined(_):
-            switch requirement {
-            case .microphone: return "mic.fill"
-            case .accessibility: return "hand.raised.fill"
-            case .hotkey: return "keyboard"
-            case .model: return "cpu"
-            }
-        default:
-            switch requirement {
-            case .microphone:
-                return "mic.fill"
-            case .accessibility:
-                return "hand.raised.fill"
-            case .hotkey:
-                return "keyboard"
-            case .model:
-                return "cpu"
-            }
-        }
-    }
-
-    private func iconColor(for requirement: OnboardingRequirement, status: OnboardingRequirementStatus) -> Color {
-        if status.isReady {
-            return .green
-        }
-        if requirement == .accessibility, case .pendingRelaunch = status {
-            return .orange
-        }
-        if controller.snapshot.mode == .repair && controller.snapshot.brokenRequirements.contains(requirement) {
-            return .orange
-        }
-        switch status {
-        case .denied, .invalid:
-            return .orange
-        case .notDetermined(_):
-            return .secondary
-        default:
-            return .accentColor
-        }
-    }
-
-    private func borderColor(for requirement: OnboardingRequirement, status: OnboardingRequirementStatus) -> Color {
-        if requirement == .accessibility, case .pendingRelaunch = status {
-            return Color.orange.opacity(0.35)
-        }
-        if controller.snapshot.mode == .repair && controller.snapshot.brokenRequirements.contains(requirement) {
-            return Color.orange.opacity(0.45)
-        }
-        switch status {
-        case .ready:
-            return Color.green.opacity(0.25)
-        case .denied, .invalid:
-            return Color.orange.opacity(0.35)
-        default:
-            return Color(nsColor: .separatorColor).opacity(0.45)
-        }
-    }
-}
-
-enum OnboardingActionStyle {
-    case prominent
-    case bordered
-    case link
-    case premium
-}
-
-struct OnboardingAction {
-    let title: String
-    let style: OnboardingActionStyle
-    let action: (() -> Void)?
-}

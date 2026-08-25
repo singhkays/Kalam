@@ -43,7 +43,7 @@ enum AudioRecorderError: LocalizedError {
 
 /// Decides whether `prepare()` must rebuild the audio graph. Extracted from
 /// `AudioRecorder.prepare` so the early-return logic is headless-testable
-/// (K-26; the test host cannot touch `engine.inputNode`).
+/// (microphone recovery after sleep or device change; the test host cannot touch `engine.inputNode`).
 enum AudioPrepareDecision {
     static func shouldReconfigure(
         isPrepared: Bool,
@@ -63,7 +63,7 @@ final class AudioRecorder: @unchecked Sendable {
     private var preparedInputDeviceID: AudioDeviceID?
     private var preparedStateInvalidated = false
 
-    // K-10: all capture state (buffers, converter, counters) lives behind
+    // render-thread audio lock fix: all capture state (buffers, converter, counters) lives behind
     // AudioCaptureExchange; the render thread publishes non-blockingly
     // (try-lock), consumers use exclusive access.
     private let exchange = AudioCaptureExchange()
@@ -172,7 +172,7 @@ final class AudioRecorder: @unchecked Sendable {
 
     /// Forces the next `prepare()` call to fully rebuild the audio graph
     /// (engine stop, tap removal, device re-bind). Called on CoreAudio device
-    /// changes and system wake (K-26) — without it, prepare() early-returns
+    /// changes and system wake (microphone recovery after sleep or device change) — without it, prepare() early-returns
     /// on an unchanged device ID and stays bound to a stale device.
     func invalidatePreparedState() {
         preparedStateInvalidated = true
@@ -183,7 +183,7 @@ final class AudioRecorder: @unchecked Sendable {
     var isPreparedStateInvalidatedForTesting: Bool { preparedStateInvalidated }
     
     func startCollecting() throws {
-        // K-26: reset capture state BEFORE touching the engine — the old
+        // microphone recovery after sleep or device change: reset capture state BEFORE touching the engine — the old
         // order (reset at the end) left stale state when engine.start()
         // failed, and the failure was silently swallowed.
         exchange.resetForNewSession()
@@ -294,7 +294,7 @@ final class AudioRecorder: @unchecked Sendable {
     }
     
     /// Render-thread entry point (installTap callback). Never blocks — the
-    /// publish path try-locks and drops (and counts) on contention (K-10).
+    /// publish path try-locks and drops (and counts) on contention (render-thread audio lock fix).
     /// Internal for testability (KalamTests drives it with synthetic buffers).
     @discardableResult
     func process(buffer: AVAudioPCMBuffer) -> Bool {

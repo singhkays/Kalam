@@ -1,7 +1,7 @@
 import XCTest
 @testable import Kalam_test
 
-/// K-14 regression pins for the push-to-talk hotkey state machine
+/// PTT state machine test coverage regression pins for the push-to-talk hotkey state machine
 /// (hold / toggle / doubleTap / holdOrToggle), extracted from `AppDelegate`
 /// so the timing-sensitive transitions are headlessly testable.
 ///
@@ -156,7 +156,7 @@ final class PTTStateMachineTests: XCTestCase {
         XCTAssertEqual(machine.handle(isDown: true, now: 0.2, activationMode: .doubleTap, state: &state), [])
     }
 
-    // MARK: - K-37: system wake abandons live sessions
+    // MARK: - wake handler PTT field reset: system wake abandons live sessions
 
     func testAbandonActiveSessionEndsLiveRecording() {
         var state = PTTStateMachine.State()

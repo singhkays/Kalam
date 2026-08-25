@@ -146,6 +146,10 @@ actor ASRService {
                 throw ASRError.modelFolderMissing(version: version, expectedPath: expectedPath)
             case .invalidModelFolder(let expectedPath):
                 throw ASRError.invalidModelFiles(version: version, expectedPath: expectedPath)
+            case .partial(let expectedPath, let missing, _):
+                // A partial download cannot load; surface as invalid files with a
+                // precise reason (the manifest names the missing files).
+                throw ASRError.invalidModelFiles(version: version, expectedPath: expectedPath + missing.map { "\nmissing: \($0)" }.joined())
             case .installed(let path):
                 modelDirectory = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
                 guard let libraryURL = config.modelLibraryURL else {

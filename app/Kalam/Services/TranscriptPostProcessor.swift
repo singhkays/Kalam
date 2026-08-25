@@ -2,7 +2,7 @@ import Foundation
 import OSLog
 import KalamTextEngine
 
-/// K-38: the pure post-ASR text stages (cleanup -> ITN -> dictionary),
+/// off-main post-processing: the pure post-ASR text stages (cleanup -> ITN -> dictionary),
 /// extracted from the MainActor-inherited transcription task so they run
 /// off-main. Holds only Sendable snapshots; the caller captures them on the
 /// main actor and hops via a nonisolated static async call. Never logs
@@ -29,9 +29,9 @@ struct TranscriptPostProcessor: Sendable {
 
     func process(_ input: String) -> Output {
         let cleanupResult = TextCleanupEngine().clean(input, configuration: cleanupConfig)
-        // K-44: ITN answers to the same master switch as the cleanup rules.
+        // cleanup master toggle gating ITN: ITN answers to the same master switch as the cleanup rules.
         // It previously keyed off the orphaned private default
-        // `internal.itn.enabled` (default true, written by nothing since K-30
+        // `internal.itn.enabled` (default true, written by nothing since settings redesign
         // removed the old settings UI), so Cleanup OFF still normalized
         // numbers behind the pane's promise. The dictionary stays independent
         // of the master by design (scoped 2026-08-24).
@@ -50,7 +50,7 @@ struct TranscriptPostProcessor: Sendable {
         )
     }
 
-    // MARK: - ITN (ported verbatim from AppDelegate.applyITNIfEnabled, K-28)
+    // MARK: - ITN (ported verbatim from AppDelegate.applyITNIfEnabled, ITN span protection)
 
     private static let itnSpanDefaultsKey = "internal.itn.maxSpanTokens"
     private static let itnDefaultSpanTokens = 16
@@ -65,7 +65,7 @@ struct TranscriptPostProcessor: Sendable {
             return (text, false, 0, nemoAvailable, enabled, spanTokens, 0)
         }
 
-        // K-45: Nemo's currency span stops consuming at sentence-final
+        // currency cents stranding fix: Nemo's currency span stops consuming at sentence-final
         // punctuation and strands the word "cents" ("Five dollars and fifty
         // cents." -> "$5.50 cents."). Strip each line's single trailing
         // terminator up front and re-append it after normalization.
@@ -83,7 +83,7 @@ struct TranscriptPostProcessor: Sendable {
                 terminator = String(last)
                 workingLine = String(workingLine.dropLast())
             }
-            // K-28: mask spoken-number spans ITN mis-normalizes (ranges,
+            // ITN span protection: mask spoken-number spans ITN mis-normalizes (ranges,
             // idioms, digit sequences), normalize, then restore.
             let masked = protector.protect(workingLine)
             spansMasked += masked.spans.count

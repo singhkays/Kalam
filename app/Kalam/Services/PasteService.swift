@@ -23,19 +23,19 @@ final class PasteService {
 
     /// Injectable behavior for paste strategies. Production defaults are the real
     /// CGEvent/AX implementations; tests inject fakes so no real keystrokes or
-    /// accessibility calls are ever posted (K-02 regression coverage).
+    /// accessibility calls are ever posted (clipboard restore on failed paste regression coverage).
     @MainActor
     struct PasteStrategies {
         var isProcessTrusted: () -> Bool = { AXIsProcessTrusted() }
         var postUnicodeText: (String) -> Bool = { PasteService.postUnicodeTextIfPossible($0) }
         var postCmdV: () -> Bool = { PasteService.postCmdV() }
         var insertTextViaAccessibility: (String) -> String? = { PasteService.insertTextViaAccessibility($0) }
-        /// K-23: insert into a specific captured element (record-time paste target).
+        /// record-time paste target capture: insert into a specific captured element (record-time paste target).
         var insertTextIntoElement: (AXUIElement, String) -> String? = { PasteService.insertTextViaAccessibility(into: $0, text: $1) }
         var pasteboard: NSPasteboard = .general
         /// Grace delay before restoring the user's clipboard after a Cmd+V
         /// paste, giving the target app time to read the pasteboard. Only the
-        /// Cmd+V path uses this; AX/failure paths restore immediately (K-08).
+        /// Cmd+V path uses this; AX/failure paths restore immediately (pasteboard exposure minimization).
         var restoreDelay: TimeInterval = 0.15
     }
 
@@ -75,7 +75,7 @@ final class PasteService {
     }
 
     /// Which strategy consumed the transcript, deciding how long it may sit on
-    /// the pasteboard before the snapshot restore (K-08). Only the Cmd+V path
+    /// the pasteboard before the snapshot restore (pasteboard exposure minimization). Only the Cmd+V path
     /// hands the pasteboard to the target app, so only it keeps a grace delay.
     enum PasteOutcome {
         case cmdV              // target app is expected to read the pasteboard
@@ -100,7 +100,7 @@ final class PasteService {
         let insertedPasteboardState = writeAndTrackPasteboardState(pasteboard: pasteboard, text: text)
         _ = await waitForPasteboardCommit(pasteboard: pasteboard, targetChangeCount: insertedPasteboardState.changeCount)
 
-        // K-02: the transcript now sits on the user's pasteboard. Restoring the
+        // clipboard restore on failed paste: the transcript now sits on the user's pasteboard. Restoring the
         // original clipboard content is unconditional from this point — every
         // exit path (Cmd+V success, AX insert success, any failure, or
         // cancellation) schedules the restore. The defer must be registered
@@ -108,7 +108,7 @@ final class PasteService {
         var outcome = PasteOutcome.failed
         defer { restoreClipboardIfNeeded(snapshot, insertedState: insertedPasteboardState, outcome: outcome) }
 
-        // K-09/K-01: the wait is cooperative, so a canceled transcription task
+        // cooperative pasteboard polling/stale-recording paste guard: the wait is cooperative, so a canceled transcription task
         // (new recording started) reaches this point — abort the paste; the
         // defer above still restores the clipboard.
         try Task.checkCancellation()
@@ -128,7 +128,7 @@ final class PasteService {
         outcome = .accessibility
     }
 
-    /// K-23: insert into a specific captured element (the record-time paste target) instead
+    /// record-time paste target capture: insert into a specific captured element (the record-time paste target) instead
     /// of the frontmost app. Used when the frontmost app changed during transcription —
     /// bypasses the pasteboard entirely, so the transcript never sits on the clipboard.
     func paste(into element: AXUIElement, text: String) async throws {
@@ -143,13 +143,13 @@ final class PasteService {
         Self.logger.info("Paste succeeded via captured-element Accessibility insert")
     }
 
-    /// Where a transcript should be pasted (K-23).
+    /// Where a transcript should be pasted (record-time paste target capture).
     enum PasteTarget: Equatable {
         /// No capture, or the frontmost app is still the record-time target — existing pipeline.
         case frontmost
         /// The user switched apps during transcription — insert into the captured element.
         case capturedElement(AXUIElement)
-        /// K-46: the record-time app has partial AX support (no element resolvable),
+        /// partial-AX target capture no-op: the record-time app has partial AX support (no element resolvable),
         /// but its pid was captured — reactivate it and paste via the frontmost path.
         case capturedApp(pid_t)
     }
@@ -164,7 +164,7 @@ final class PasteService {
             if let capturedElement {
                 return .capturedElement(capturedElement)
             }
-            // K-46: element unavailable (partial-AX app) — the pid alone still
+            // partial-AX target capture no-op: element unavailable (partial-AX app) — the pid alone still
             // identifies the record-time target.
             return .capturedApp(capturedPID)
         }
@@ -180,7 +180,7 @@ final class PasteService {
         insertedState: InsertedPasteboardState,
         outcome: PasteOutcome
     ) {
-        // K-08: only the Cmd+V path hands the pasteboard to the target app, so
+        // pasteboard exposure minimization: only the Cmd+V path hands the pasteboard to the target app, so
         // only it keeps a (short) grace delay for the app to read it. The AX
         // path and failures restore immediately — the transcript never needs to
         // linger. The changeCount + string-equality guard is unchanged.
@@ -241,7 +241,7 @@ final class PasteService {
         }
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         while Date() < deadline {
-            // K-09: cooperative sleep — yields the MainActor between polls so
+            // cooperative pasteboard polling: cooperative sleep — yields the MainActor between polls so
             // the UI and overlay animations never stall. Cancellation aborts
             // promptly; the caller decides what that means.
             try? await Task.sleep(nanoseconds: UInt64(pollIntervalSeconds * 1_000_000_000))
@@ -320,7 +320,7 @@ final class PasteService {
         return nil
     }
 
-    /// K-23: insert into a specific captured element (the record-time paste target) instead
+    /// record-time paste target capture: insert into a specific captured element (the record-time paste target) instead
     /// of the frontmost app's focused element. Used when the frontmost app changed during
     /// transcription; bypasses the pasteboard entirely.
     private static func insertTextViaAccessibility(into element: AXUIElement, text: String) -> String? {

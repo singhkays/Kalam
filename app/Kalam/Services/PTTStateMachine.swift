@@ -2,7 +2,7 @@ import Foundation
 
 /// Pure decision logic for the push-to-talk hotkey state machine
 /// (hold / toggle / doubleTap / holdOrToggle), extracted from `AppDelegate`
-/// (K-14) so the timing-sensitive transitions are headlessly testable.
+/// (PTT state machine test coverage) so the timing-sensitive transitions are headlessly testable.
 ///
 /// The machine owns only *decision* state and emits events; `AppDelegate`
 /// owns all side effects (audio, ASR, paste, overlay, chime) and reports
@@ -67,7 +67,7 @@ struct PTTStateMachine {
             ignoreNextKeyUp = false
         }
 
-        /// K-37: system wake abandons any session that was live across sleep.
+        /// wake handler PTT field reset: system wake abandons any session that was live across sleep.
         /// Unlike `resetForConfigurationChange` (timing flags only, deliberately
         /// keeps a live session), this ENDS the session: `isRecording` must be
         /// false afterwards so the first post-wake keypress starts a fresh

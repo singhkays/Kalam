@@ -5,7 +5,7 @@ import Foundation
 /// Each successful `startRecording` advances the counter and the in-flight
 /// transcription task captures the generation of the recording it belongs to.
 /// Immediately before dispatching a paste the task asks `isCurrent(_:)`; if a
-/// newer recording has started, the old task is stale and must not paste (K-01).
+/// newer recording has started, the old task is stale and must not paste (stale-recording paste guard).
 struct RecordingSessionTracker {
     private var current = 0
 

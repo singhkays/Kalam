@@ -19,9 +19,9 @@ Kalam is a privacy-first macOS menu bar dictation app (Swift 6, deployment targe
 |---|---|
 | `app/` | Xcode project (`Kalam.xcodeproj`) + app source (`Kalam/`) + Xcode tests (`KalamTests/`) |
 | `app/Packages/KalamTextEngine/` | SwiftPM package: deterministic cleanup engine + dictionary compiler (`Sources/`) + Swift Testing suite (`Tests/`) |
-| `app/docs/` | `DEVELOPER_GUIDE.md` (architecture/runtime flow — source of truth), `SECURITY.md`, **`IMPROVEMENT_PLAN.md` (read before changing code)** |
+| `app/docs/` | `DEVELOPER_GUIDE.md` (architecture/runtime flow — source of truth), `SECURITY.md`, `CODEBASE_MAP.md` (agent-facing file map) |
 | `landing-page/` | Vite/React marketing site |
-| `scripts/` | `test-engine.sh` — headless engine tests (single entry point since K-15). |
+| `scripts/` | `test-engine.sh` — headless engine tests (single entry point since stale duplicate test script removal). |
 | `.github/workflows/` | `release.yml` (tag → build, test, DMG, GitHub release), `deploy-kalam-landing.yml` |
 | `build.sh` | DMG packaging script (used by CI) |
 
@@ -29,15 +29,15 @@ Kalam is a privacy-first macOS menu bar dictation app (Swift 6, deployment targe
 
 | File | Responsibility |
 |---|---|
-| `KalamApp.swift` | Entry, AppDelegate, hotkey event application (decision logic in `Services/PTTStateMachine.swift`), recording orchestration, paste pipeline, chime. Pure orchestration since K-03 (2026-08-11); components live in the files below. |
+| `KalamApp.swift` | Entry, AppDelegate, hotkey event application (decision logic in `Services/PTTStateMachine.swift`), recording orchestration, paste pipeline, chime. Pure orchestration since god-file extraction (2026-08-11); components live in the files below. |
 | `DictationOverlayController.swift` | Dictation overlay UI: `DictationOverlayController` + `OverlayCapsuleView` + `WaveformView` (AppKit/CALayer capsule with rainbow border, waveform, target-app row). |
 | `Services/AudioRecorder.swift` | `AudioRecorder` (AVAudioEngine + 16 kHz mono resample, tap callback, secureZero'd buffers) + `AudioRecorderError` + `Array<Float>.secureZero()`. |
 | `Services/SilenceTrimmer.swift` | `SilenceTrimmer` — energy-based endpointer with hysteresis + `normalizePeak`. |
 | `Services/SystemAudioDucker.swift` | `SystemAudioDucker` — CoreAudio virtual-main-volume ducking + `Float.clamped(to:)`. |
 | `Services/HotkeyListener.swift` | `HotkeyListener` — HotKey package + modifier-only (side-key) monitoring, PTT callbacks. |
-| `Services/PTTStateMachine.swift` | `PTTStateMachine` — pure hold/toggle/doubleTap/holdOrToggle decision logic emitting events (K-14); `AppDelegate` applies them. |
+| `Services/PTTStateMachine.swift` | `PTTStateMachine` — pure hold/toggle/doubleTap/holdOrToggle decision logic emitting events (PTT state machine test coverage); `AppDelegate` applies them. |
 | `AccessibilityHelper.swift` | `AccessibilityHelper` — AX trust check/prompt + explainer. |
-| `AppRelauncher.swift` | `AppRelauncher` — relaunch via `NSWorkspace.openApplication` + orderly `NSApp.terminate` gated on launch success (K-12). |
+| `AppRelauncher.swift` | `AppRelauncher` — relaunch via `NSWorkspace.openApplication` + orderly `NSApp.terminate` gated on launch success (relaunch lifecycle rework). |
 | `AppMetadata.swift` | `KalamExternalLinks` + `KalamAppVersion` (used by Settings UI and AppDelegate). |
 | `SettingsUI.swift` | Settings window shell: `SettingsView` orchestration (tab state, config load/persist). Per-tab views live in `Kalam/Settings/`. |
 | `OnboardingFlow.swift` | 4-step setup (Microphone, Accessibility, Hotkey, Model) + `OnboardingFlowController`. |
@@ -81,15 +81,9 @@ ASR → TextCleanupEngine.clean → ITN (if enabled) → CustomDictionaryManager
 
 - **Add a cleanup rule** → engine package: `app/Packages/KalamTextEngine/Sources/KalamTextEngine/TextCleanupEngine.swift` + an `@Test` in `Tests/KalamTextEngineTests/` + run `./scripts/test-engine.sh`.
 - **Add a dictionary feature** → `DictionaryEntry.swift` / `ReplacementCompiler.swift` + tests.
-- **Change paste behavior** → `Services/PasteService.swift`; respect the clipboard guard; test the failure path (K-02).
+- **Change paste behavior** → `Services/PasteService.swift`; respect the clipboard guard; test the failure path (clipboard restore on failed paste).
 - **Touch the grammar pass** → `app/Packages/KalamTextEngine/Sources/KalamTextEngine/TextCleanupEngine.swift` (AppKit-gated section); tests are headless via `./scripts/test-engine.sh`.
-- **Add Settings UI** → `Kalam/Settings/` (tab views: `GeneralSettingsTab`, `ShortcutSettingsTab`, `CleanupSettingsTab`, `ModelsSettingsTab`, `UpdatesSettingsTab`, `WordReplacementView`; shared helpers in `SettingsSharedComponents.swift`; config persistence stays in the `SettingsView` shell). Use `KalamTheme`/`KalamControlStyles`; label icon-only buttons (K-19).
-
-## Improvement-plan protocol
-
-- `app/docs/IMPROVEMENT_PLAN.md` tracks open work (K-01…K-21) with status, evidence, fixes, and verification steps. **Read it before starting any change.**
-- Claim an item by flipping its status to `🔄`; mark `✅` **only after implement + verify**. Add new findings with the next free K-ID.
-- Line numbers in the plan drift as code changes — re-grep before trusting them.
+- **Add Settings UI** → `Kalam/Settings/` (tab views: `GeneralSettingsTab`, `ShortcutSettingsTab`, `CleanupSettingsTab`, `ModelsSettingsTab`, `UpdatesSettingsTab`, `WordReplacementView`; shared helpers in `SettingsSharedComponents.swift`; config persistence stays in the `SettingsView` shell). Use `KalamTheme`/`KalamControlStyles`; label icon-only buttons (accessibility labels for icon-only buttons).
 
 ## Shared-mount git workflow (IMPORTANT)
 
@@ -106,7 +100,7 @@ This repo lives on a shared VirtIOFS mount; **other agent sessions may commit/ed
 
 ## Gotchas
 
-- `app/.grok/` and `app/.hermes/` are local session artifacts — never commit them (gitignore gap tracked as K-18).
+- `app/.grok/` and `app/.hermes/` are local session artifacts — never commit them (gitignore gap tracked as session-artifact gitignore gap).
 - `.build/`, `xcuserdata/`, `DerivedData/` are gitignored.
 - The `hf download` command shown in the Models UI is **copy-paste only** — the app never executes it.
 - Models are user-provisioned; the app validates required `.mlmodelc` directory presence, not content integrity (documented in `SECURITY.md`).

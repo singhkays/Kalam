@@ -2,7 +2,7 @@ import XCTest
 import AVFoundation
 @testable import Kalam_test
 
-/// K-10 regression pin. The render-thread publish path (`process`) must never
+/// render-thread audio lock fix regression pin. The render-thread publish path (`process`) must never
 /// block behind a consumer holding the capture state. RED on the pre-fix code:
 /// `process` does `bufferQueue.sync`, so every producer iteration colliding
 /// with the (multi-ms) stop critical section stalls for its remainder —
@@ -54,7 +54,7 @@ final class AudioCaptureExchangeTests: XCTestCase {
         let maxStall = meter.maxStall
         XCTAssertLessThan(
             meter.stallCount, 10,
-            "K-10: \(meter.stallCount) render-thread publishes stalled >5 ms (max \(Int(maxStall * 1000)) ms) — a blocking capture lock would stall hundreds"
+            "render-thread audio lock fix: \(meter.stallCount) render-thread publishes stalled >5 ms (max \(Int(maxStall * 1000)) ms) — a blocking capture lock would stall hundreds"
         )
         // The preload must be fully captured (480 s × 16 kHz = 7,680,000 samples;
         // the resampler tail adds a little, and a live mic adds more — lower
@@ -62,7 +62,7 @@ final class AudioCaptureExchangeTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(samples.count, 7_680_000, "preload must be fully captured")
     }
 
-    // MARK: - AudioCaptureExchange unit pins (GREEN-on-arrival; K-10)
+    // MARK: - AudioCaptureExchange unit pins (GREEN-on-arrival; render-thread audio lock fix)
 
     func testPublishAndDrainPreserveOrderAndContent() {
         let exchange = AudioCaptureExchange()
@@ -72,7 +72,7 @@ final class AudioCaptureExchangeTests: XCTestCase {
         }
         let drained = exchange.stopCapture()
         // Every published frame must arrive; AVAudioConverter pads each call up
-        // to capacity (1024 in → 1088 out observed; verbatim pre-K-10 behavior),
+        // to capacity (1024 in → 1088 out observed; verbatim pre-render-thread audio lock fix behavior),
         // so bound between no-loss (3072) and fully-padded (3264).
         XCTAssertGreaterThanOrEqual(drained.count, 3072, "no published samples may be lost")
         XCTAssertLessThanOrEqual(drained.count, 3264)
@@ -150,6 +150,64 @@ final class AudioCaptureExchangeTests: XCTestCase {
         let wave = exchange.waveform(sampleCount: 512)
         XCTAssertEqual(wave.count, 512)
         XCTAssertFalse(wave.allSatisfy { $0 == 0 })
+    }
+
+    // MARK: - Session-generation guard (rapid re-record; 2026-08-15)
+
+    func testStaleStopDoesNotDrainNewerSession() {
+        let exchange = AudioCaptureExchange()
+        exchange.resetForNewSession()
+        let firstGen = exchange.currentGeneration()
+
+        // A newer session starts before the old stop runs.
+        exchange.resetForNewSession()
+        let secondGen = exchange.currentGeneration()
+        XCTAssertGreaterThan(secondGen, firstGen)
+
+        // The stale stop must no-op; the new session keeps its samples.
+        let stale = exchange.stopCapture(expectedGeneration: firstGen)
+        XCTAssertTrue(stale.isEmpty)
+        let current = exchange.stopCapture(expectedGeneration: secondGen)
+        XCTAssertTrue(current.isEmpty, "new session has no samples yet")
+    }
+
+    func testStaleStopLeavesNewSessionSamplesIntact() {
+        let exchange = AudioCaptureExchange()
+        exchange.resetForNewSession()
+        let firstGen = exchange.currentGeneration()
+        XCTAssertTrue(exchange.publish(makeSyntheticBuffer(sampleRate: 16_000, frames: 1024)))
+
+        exchange.resetForNewSession()
+        let secondGen = exchange.currentGeneration()
+        XCTAssertTrue(exchange.publish(makeSyntheticBuffer(sampleRate: 16_000, frames: 1024)))
+
+        // Old stop must not touch the new session's buffer.
+        XCTAssertTrue(exchange.stopCapture(expectedGeneration: firstGen).isEmpty)
+
+        let drained = exchange.stopCapture(expectedGeneration: secondGen)
+        XCTAssertGreaterThanOrEqual(drained.count, 1024, "new session samples must survive a stale stop")
+    }
+
+    func testUnconditionalStopStillWorks() {
+        let exchange = AudioCaptureExchange()
+        exchange.resetForNewSession()
+        XCTAssertTrue(exchange.publish(makeSyntheticBuffer(sampleRate: 16_000, frames: 1024)))
+        let drained = exchange.stopCapture()
+        XCTAssertGreaterThanOrEqual(drained.count, 1024)
+    }
+
+    func testStaleDrainDoesNotResetNewSessionConverter() {
+        let exchange = AudioCaptureExchange()
+        exchange.resetForNewSession()
+        let firstGen = exchange.currentGeneration()
+        XCTAssertTrue(exchange.publish(makeSyntheticBuffer(sampleRate: 48_000, frames: 4_800)))
+
+        exchange.resetForNewSession()
+        XCTAssertTrue(exchange.drainConverterRemainder(expectedGeneration: firstGen).isEmpty,
+                      "a stale drain must not flush the new session's converter")
+        // The new session's tail is still flushable.
+        XCTAssertTrue(exchange.publish(makeSyntheticBuffer(sampleRate: 48_000, frames: 4_800)))
+        XCTAssertFalse(exchange.drainConverterRemainder().isEmpty)
     }
 }
 

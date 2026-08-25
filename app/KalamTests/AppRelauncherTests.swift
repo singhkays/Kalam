@@ -1,9 +1,9 @@
 import XCTest
 @testable import Kalam_test
 
-/// K-12 regression pins for the relaunch orchestration.
+/// relaunch lifecycle rework regression pins for the relaunch orchestration.
 ///
-/// The pre-K-12 code (`open -n` + unconditional `exit(0)`) had two defects
+/// The pre-relaunch lifecycle rework code (`open -n` + unconditional `exit(0)`) had two defects
 /// this suite pins against:
 /// 1. `exit(0)` ran even when launching the new instance FAILED — the app
 ///    disappeared with no way to retry.
@@ -13,7 +13,7 @@ import XCTest
 ///
 /// The tests drive `AppRelauncher.relaunch(strategy:)` with injected fake
 /// launch/terminate closures (same testable-seam pattern as
-/// `PasteService.PasteStrategies`, K-02) — no real processes are spawned.
+/// `PasteService.PasteStrategies`, clipboard restore on failed paste) — no real processes are spawned.
 @MainActor
 final class AppRelauncherTests: XCTestCase {
 

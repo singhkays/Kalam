@@ -66,7 +66,12 @@ struct ModelAcquisitionPanel: View {
                     }
                 } else {
                     Button("Choose Folder…", action: onChooseFolder)
-                        .buttonStyle(OnboardingPremiumButtonStyle(isCompact: true))
+                        // Deck-green action style (2026-08-22): this was the
+                        // last OnboardingPremiumButtonStyle in the deck — its
+                        // controlAccentColor blue predated the dark-mode theme
+                        // and broke the green accent system. A working control
+                        // takes the standard action style, not the hero bar.
+                        .buttonStyle(OnboardingActionButtonStyle(prominent: true))
                 }
             }
         }
@@ -105,8 +110,18 @@ struct ModelAcquisitionPanel: View {
             number: 3,
             title: "Download model",
             isComplete: wizardState.isDownloadComplete,
-            isActive: wizardState.currentStep == .download && folderStepUnlocked && wizardState.isCLIComplete,
-            summary: wizardState.isDownloadComplete ? "Compatible model installed." : "Choose a model version, then download it into the selected folder.",
+            // Accordion rule (2026-08-22): a COMPLETED step never renders
+            // expanded. currentStep parks on .download once folder + CLI are
+            // done, which kept the whole download machinery (dropdown, copy
+            // row, instructions) open on the READY card — flooding content
+            // past the fold exactly when nothing needed doing. Completion
+            // collapses to the summary row; the Model-ready callout carries
+            // the news.
+            isActive: wizardState.currentStep == .download
+                && folderStepUnlocked
+                && wizardState.isCLIComplete
+                && !wizardState.isDownloadComplete,
+            summary: downloadStepSummary,
             isLocked: !folderStepUnlocked || !wizardState.isCLIComplete
         ) {
             VStack(alignment: .leading, spacing: 12) {
@@ -161,6 +176,16 @@ struct ModelAcquisitionPanel: View {
             return "Choose the parent folder for your model library."
         }
         return "Choose where Kalam will store your local speech models."
+    }
+
+    /// Collapsed summary for the download step. When complete it names WHAT
+    /// was installed (the row is proof), not what to do — instruction text
+    /// would be stale guidance on a finished step.
+    private var downloadStepSummary: String {
+        if wizardState.isDownloadComplete {
+            return selectedVersion.displayName
+        }
+        return "Choose a model version, then download it into the selected folder."
     }
 
     private var folderOverflowMenu: some View {

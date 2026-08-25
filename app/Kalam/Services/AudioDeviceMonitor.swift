@@ -7,7 +7,7 @@ import OSLog
 /// switches, device death) and system wake events. Kalam uses it to re-prepare
 /// the AVAudioEngine input graph after sleep/wake and dock reconnects — without
 /// it the engine stays bound to a stale CoreAudio device until the user
-/// manually reorders microphones (K-26).
+/// manually reorders microphones (microphone recovery after sleep or device change).
 @MainActor
 final class AudioDeviceMonitor {
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "AudioDevice")

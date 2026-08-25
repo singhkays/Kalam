@@ -30,6 +30,9 @@ enum ModelSetupPresentationState: Equatable {
     case needsFolder
     case needsModel(folderURL: URL, version: ASRModelVersion, statusMessage: String)
     case repoFolderSelected(folderURL: URL, selectedRepo: ASRModelVersion, version: ASRModelVersion, statusMessage: String)
+    /// Some required files arrived but not all (v3 adoption Task 6). Renders the
+    /// S7-style recovery card naming the missing files.
+    case partialDownload(expectedPath: String, missing: [String], total: Int, version: ASRModelVersion, statusMessage: String)
     case ready(folderURL: URL, version: ASRModelVersion, statusMessage: String)
 }
 
@@ -86,6 +89,18 @@ extension OnboardingFlowController {
                 folderURL: folderURL,
                 selectedRepo: selectedRepo,
                 version: selectedDownloadVersion,
+                statusMessage: snapshot.modelStatus.message
+            )
+        }
+
+        // v3 adoption Task 6: a partial download (some files arrived) renders the
+        // dedicated recovery card with the per-file manifest.
+        if case .partial(let expectedPath, let missing, let total) = snapshot.modelAvailability {
+            return .partialDownload(
+                expectedPath: expectedPath,
+                missing: missing,
+                total: total,
+                version: snapshot.selectedModelVersion,
                 statusMessage: snapshot.modelStatus.message
             )
         }

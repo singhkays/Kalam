@@ -9,9 +9,9 @@ import Foundation
 /// - numeric ranges:   "two to three pager" -> "02:58 pager"
 /// - partitive idioms: "one of us"          -> "1 of us"
 /// - digit sequences:  "five five five..."  -> "16 9"
-/// - spoken times:     "at ten thirty"      -> "40" (sum composition, K-43)
+/// - spoken times:     "at ten thirty"      -> "40" (sum composition, spoken-time ITN composition misfire)
 ///
-/// K-42 (2026-08-24, probed against the real library): ASR also emits
+/// digit-shaped ITN protection (2026-08-24, probed against the real library): ASR also emits
 /// comma/period-separated and mixed word+digit runs; whitespace-only joins
 /// missed those. Separators now include ", ." and runs may mix words with
 /// 1-2 digit tokens.
@@ -89,7 +89,7 @@ public struct ITNSpanProtector: Sendable {
         return out
     }
 
-    // MARK: - Clock-time rendering (K-43)
+    // MARK: - Clock-time rendering (spoken-time ITN composition misfire)
 
     private static let hourWords: [String: Int] = [
         "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
@@ -169,7 +169,7 @@ public struct ITNSpanProtector: Sendable {
     // MARK: - Patterns
 
     /// "at ten thirty", "around twelve fifteen" — Nemo SUMS the two-token
-    /// pair ("40", K-43). Probe-established boundary (2026-08-24): the
+    /// pair ("40", spoken-time ITN composition misfire). Probe-established boundary (2026-08-24): the
     /// THREE-token form ("two fifty three") is handled CORRECTLY by Nemo
     /// ("02:53"), so the mask stops after tens/teens minutes and refuses
     /// when another number word follows — those stay with Nemo's correct

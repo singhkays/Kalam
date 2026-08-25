@@ -11,13 +11,12 @@ final class DictationOverlayController {
         static let recordingHeight: CGFloat = 72
         static let topInset: CGFloat = 20
         static let bottomInset: CGFloat = 16
-        static let sideInset: CGFloat = 20
     }
 
     enum OverlayAction {
         case openAccessibilitySettings
         case openMicrophoneSettings
-        /// K-23: paste a held transcript into the current frontmost app (explicit user action).
+        /// record-time paste target capture: paste a held transcript into the current frontmost app (explicit user action).
         case pasteHeldTranscript
     }
 
@@ -37,7 +36,7 @@ final class DictationOverlayController {
     private var waveformTask: Task<Void, Never>?
     private var timerTask: Task<Void, Never>?
     private var waveformProvider: (() -> [Float])?
-    /// K-23: injected by the app — pastes a held transcript into the current frontmost app.
+    /// record-time paste target capture: injected by the app — pastes a held transcript into the current frontmost app.
     private var pasteHeldTranscriptAction: (() -> Void)?
     private var recordingStartTime: CFAbsoluteTime = 0
     private var currentStateSetTime: CFAbsoluteTime = 0
@@ -51,7 +50,7 @@ final class DictationOverlayController {
         waveformProvider = provider
     }
 
-    /// K-23: wire the held-transcript "Paste" action to the app (which owns the paste pipeline).
+    /// record-time paste target capture: wire the held-transcript "Paste" action to the app (which owns the paste pipeline).
     func setPasteHeldTranscriptAction(_ action: @escaping () -> Void) {
         pasteHeldTranscriptAction = action
     }
@@ -117,7 +116,7 @@ final class DictationOverlayController {
         view.setWaveformVisible(showsWaveform)
         currentStateSetTime = CFAbsoluteTimeGetCurrent()
         let presentation = presentation(for: state, targetAppName: targetAppName, targetAppIcon: targetAppIcon)
-        // K-36: the overlay is click-through EXCEPT while an actionable state
+        // overlay action buttons unclickable: the overlay is click-through EXCEPT while an actionable state
         // (held-transcript "Paste", error "Open") is presented — with
         // ignoresMouseEvents stuck on, those buttons can never be clicked.
         w.ignoresMouseEvents = (presentation.action == nil)
@@ -294,12 +293,10 @@ final class DictationOverlayController {
 
         let origin: CGPoint
         switch placement {
-        case .topLeft:
-            origin = CGPoint(x: visibleFrame.minX + Metrics.sideInset, y: max(visibleFrame.minY, min(maxY - Metrics.topInset, maxY)))
         case .topCenter:
             origin = CGPoint(x: clampedCenterX, y: max(visibleFrame.minY, min(maxY - Metrics.topInset, maxY)))
-        case .topRight:
-            origin = CGPoint(x: maxX - Metrics.sideInset, y: max(visibleFrame.minY, min(maxY - Metrics.topInset, maxY)))
+        case .bottomCenter:
+            origin = CGPoint(x: clampedCenterX, y: max(visibleFrame.minY, min(visibleFrame.minY + Metrics.bottomInset, maxY)))
         }
         return NSRect(x: origin.x, y: origin.y, width: ww, height: wh)
     }

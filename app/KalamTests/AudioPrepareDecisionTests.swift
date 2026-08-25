@@ -1,7 +1,7 @@
 import XCTest
 @testable import Kalam_test
 
-// K-26: the prepare() early-return was the stale-binding bug — after
+// microphone recovery after sleep or device change: the prepare() early-return was the stale-binding bug — after
 // sleep/wake the engine stayed bound to a dead CoreAudio device until the
 // user manually reordered microphones.
 final class AudioPrepareDecisionTests: XCTestCase {

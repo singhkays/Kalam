@@ -126,7 +126,7 @@ final class CustomDictionaryManagerTests: XCTestCase {
         XCTAssertTrue(examples.contains("Apple → Orange"))
     }
 
-    // MARK: - K-20 persistence edges
+    // MARK: - dictionary data-loss edge cases persistence edges
 
     private func makeIsolatedManager() throws -> (CustomDictionaryManager, URL) {
         let dir = FileManager.default.temporaryDirectory

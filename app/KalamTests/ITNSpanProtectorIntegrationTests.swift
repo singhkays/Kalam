@@ -2,7 +2,7 @@ import XCTest
 import KalamTextEngine
 @testable import Kalam_test
 
-// K-28: end-to-end protector + real NemoTextProcessing library. Skips when
+// ITN span protection: end-to-end protector + real NemoTextProcessing library. Skips when
 // the framework is not linked in the test environment.
 final class ITNSpanProtectorIntegrationTests: XCTestCase {
     private func runPipeline(_ text: String) -> String {

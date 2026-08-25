@@ -167,7 +167,7 @@ enum SilenceTrimmer {
         return samples.map { min(max($0 * scale, -1.0), 1.0) }
     }
     
-    // MARK: - Energy analysis (shared with SpeechQualityGuard, K-27)
+    // MARK: - Energy analysis (shared with SpeechQualityGuard, noise-clip ASR rejection)
 
     /// Per-window RMS energy in clamped dB ([-60, 0]). Extracted verbatim
     /// from `trim` so the speech-quality guard and the endpointer agree.
