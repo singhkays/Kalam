@@ -28,10 +28,7 @@ enum IndicatorStyle: String, CaseIterable, Codable, Sendable {
 
     /// Migrate stored values: anything unknown or absent falls back to machined.
     static func migrating(fromStored raw: String?) -> IndicatorStyle {
-        switch raw {
-        case "whisper": return .whisper
-        case "caret": return .caret
-        default: return .machined
-        }
+        guard let raw else { return .machined }
+        return IndicatorStyle(rawValue: raw) ?? .machined
     }
 }
