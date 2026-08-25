@@ -103,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var asrRecordingBlockMessage = "Model loading..."
     private var isAudioReady = false
     private var pttDownTime: CFAbsoluteTime = 0
+    private var startLatencyProbe: RecordingStartLatencyProbe?
     private var pttUpTime: CFAbsoluteTime = 0
     private var hotkeyConfiguration: PTTHotkeyConfiguration = .load()
     private var transcriptionTask: Task<Void, Never>?
@@ -156,7 +157,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             LatencyTuningOptions.pasteDelayShortMsKey: LatencyTuningOptions.defaultPasteDelayShortMs,
             LatencyTuningOptions.pasteDelayLongMsKey: LatencyTuningOptions.defaultPasteDelayLongMs,
             LatencyTuningOptions.pasteFallbackTotalMsKey: LatencyTuningOptions.defaultPasteFallbackTotalMs,
-            LatencyTuningOptions.enableStageTimingKey: LatencyTuningOptions.defaultEnableStageTiming
+            LatencyTuningOptions.enableStageTimingKey: LatencyTuningOptions.defaultEnableStageTiming,
+            "internal.latency.startStageTiming": true
         ])
         
         SystemAudioDucker.shared.initialize()
@@ -814,6 +816,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             switch event {
             case .start(let triggerMode):
                 pttDownTime = now
+                var probe = RecordingStartLatencyProbe()
+                probe.mark(.hotkeyReceived)
+                startLatencyProbe = probe
                 _ = startRecording(triggerMode: triggerMode)
             case .stop:
                 pttUpTime = now
@@ -876,10 +881,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return false
         }
+        startLatencyProbe?.mark(.guardsCompleted)
 
         do {
             let pickedUID = try prepareAudioForRecording()
             selectedInputUID = pickedUID
+            startLatencyProbe?.mark(.audioPrepared)
             UserDefaults.standard.set(pickedUID, forKey: GeneralSettingsKeys.selectedInputUID)
         } catch {
             logger.warning("Audio input setup failed before recording errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
@@ -943,8 +950,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlay.showError("Microphone unavailable", action: .openMicrophoneSettings, autoHideAfter: 4.0)
             return false
         }
+        startLatencyProbe?.mark(.engineStarted)
         pttState.recordingDidStart(triggerMode)
         overlay.showRecording(isHoldMode: triggerMode == .hold)
+        startLatencyProbe?.mark(.indicatorShown)
+        if let line = startLatencyProbe?.summaryLine() {
+            logger.info("Recording start latency \(line, privacy: .public)")
+        }
+        startLatencyProbe = nil
         return true
     }
     
