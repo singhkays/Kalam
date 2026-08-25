@@ -209,6 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Load custom dictionary at startup
         CustomDictionaryManager.shared.bootstrap()
         logITNStatusOnStartup()
+        warmupPostProcessing()
         
         hotkeyConfiguration = PTTHotkeyConfiguration.load()
         selectedInputUID = UserDefaults.standard.string(forKey: GeneralSettingsKeys.selectedInputUID)
@@ -723,6 +724,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             logger.info("ITN ready version=\(version, privacy: .public)")
         } else {
             logger.warning("ITN unavailable")
+        }
+    }
+
+    /// First-use warmup for post-processing subsystems whose lazy init would
+    /// otherwise land inside the FIRST dictation after every launch (measured
+    /// 2026-08-25: cleanup+itn+dictionary stage 52 ms first press vs 5 ms warm,
+    /// dominated by NSSpellChecker.shared first use in the grammar pass).
+    /// Utility QoS, off the critical path; results discarded.
+    private func warmupPostProcessing() {
+        Task(priority: .utility) {
+            _ = NemoTextProcessing.normalizeSentence("warmup one two three")
+            #if canImport(AppKit)
+            // Mirror the engine's grammar-pass call shape (checkString with
+            // .spelling + .grammar) so the same subsystems initialize now.
+            let checker = NSSpellChecker.shared
+            let docTag = NSSpellChecker.uniqueSpellDocumentTag()
+            _ = checker.check(
+                "warmup sentence",
+                range: NSRange(location: 0, length: 15),
+                types: NSTextCheckingTypes(NSTextCheckingResult.CheckingType.spelling.union(.grammar).rawValue),
+                options: nil,
+                inSpellDocumentWithTag: docTag,
+                orthography: nil,
+                wordCount: nil
+            )
+            checker.closeSpellDocument(withTag: docTag)
+            #endif
+            await MainActor.run { [weak self] in
+                self?.logger.info("Post-processing warmup complete")
+            }
         }
     }
 
