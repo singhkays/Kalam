@@ -357,8 +357,20 @@ final class DictationOverlayController {
     /// recording state is active (startTimerUpdates is gated on showsWaveform), so the
     /// chip re-anchors on caret moves for exactly the states it owns.
     fileprivate func updateCaretChipForTick(formattedTime: String) {
+        let chipVisibleBefore = caretChipWindow?.isVisible == true
         updateCaretChip(state: .recordingToggle, element: caretAnchorElement)
+        let chipVisibleNow = caretChipWindow?.isVisible == true
         caretChipContentView?.updateTime(formattedTime)
+        // Review finding: the record-time capture lands AFTER indicator-up, so the first
+        // transition almost always renders the deck; promote/demote here so exactly one
+        // surface is ever visible.
+        if chipVisibleNow && !chipVisibleBefore {
+            // Chip went live: retire the corner window.
+            window?.alphaValue = 0.0
+        } else if !chipVisibleNow && chipVisibleBefore {
+            // Anchor died mid-recording: restore the deck, never indicator-less.
+            window?.alphaValue = 1.0
+        }
     }
 
     private func ensureWindow() {
