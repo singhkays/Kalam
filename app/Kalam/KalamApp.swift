@@ -755,7 +755,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let microphoneAuthorization = AVCaptureDevice.authorizationStatus(for: .audio)
         if microphoneAuthorization == .authorized {
             do {
-                try audio.prepare(preferredInputDeviceID: nil)
+                // Same candidate walk as press time so preparedInputDeviceID already
+                // matches the device the first press will request (early-return path).
+                _ = try prepareAudioForRecording()
                 isAudioReady = true
             } catch {
                 isAudioReady = false

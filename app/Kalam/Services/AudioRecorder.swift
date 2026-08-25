@@ -103,6 +103,7 @@ final class AudioRecorder: @unchecked Sendable {
             preferredDeviceID: preferredInputDeviceID,
             invalidated: preparedStateInvalidated
         ) {
+            logger.debug("Audio graph already prepared; skipping reconfigure")
             return
         }
         preparedStateInvalidated = false
