@@ -32,6 +32,10 @@ enum AccessibilityFocusResolver {
         var diagnostics: [String] = []
 
         let systemWideElement = AXUIElementCreateSystemWide()
+        // Bound the query like the per-app element below: without an explicit
+        // timeout this inherits the AX default (seconds) and a wedged AX peer
+        // can stall the press path.
+        _ = AXUIElementSetMessagingTimeout(systemWideElement, messagingTimeoutSeconds)
         if let focusedElement = copyElementAttribute(
             kAXFocusedUIElementAttribute as CFString,
             from: systemWideElement,
