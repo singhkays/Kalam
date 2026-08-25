@@ -61,3 +61,6 @@ app/docs/IMPROVEMENT_PLAN.md
 app/docs/MANUAL_VERIFICATION_CHECKLIST.md
 app/docs/dev-design/
 app/docs/plans/
+
+# Local agent session artifacts (never commit)
+app/.commandcode/
