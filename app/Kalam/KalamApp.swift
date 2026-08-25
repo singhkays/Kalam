@@ -995,6 +995,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 dictationTargetElement = resolution.element
                 logger.info("Dictation target captured appName=\(resolution.appName, privacy: .public) strategy=\(resolution.strategy, privacy: .public) pid=\(frontmost.processIdentifier, privacy: .public)")
                 overlay.refinePlacementIfMoved(focusHint: resolution.element)
+                // K-48 Task 7: same element anchors the at-the-caret chip when selected.
+                overlay.setCaretAnchorElement(resolution.element)
             case .failure(let error):
                 // partial-AX target capture no-op: partial-AX apps (e.g. Sublime Text) answer none of the AX
                 // queries, but the pid alone still identifies the record-time target —
