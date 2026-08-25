@@ -2,6 +2,9 @@ import Foundation
 import AppKit
 import ApplicationServices
 
+/// K-48 machined palette: brand green #52B788.
+private let indicatorBrandGreen = NSColor(srgbRed: 82/255.0, green: 183/255.0, blue: 136/255.0, alpha: 1.0)
+
 // MARK: - Dictation Overlay
 @MainActor
 final class DictationOverlayController {
@@ -45,6 +48,9 @@ final class DictationOverlayController {
     private let compactWindowSize = NSSize(width: Metrics.overlayWidth, height: Metrics.compactHeight)
     private let recordingWindowSize = NSSize(width: Metrics.overlayWidth, height: Metrics.recordingHeight)
     private var currentWindowSize = NSSize(width: Metrics.overlayWidth, height: Metrics.compactHeight)
+    /// K-48: indicator style captured ONCE per dictation session at the show/present entry point.
+    /// Hook (sessionStyle): captured but NOT branched on yet — whisper/caret rendering arrives in Tasks 5/7.
+    private var sessionStyle: IndicatorStyle = .machined
 
     func setWaveformProvider(_ provider: @escaping () -> [Float]) {
         waveformProvider = provider
@@ -56,6 +62,8 @@ final class DictationOverlayController {
     }
 
     func showRecording(isHoldMode: Bool) {
+        // K-48 mid-flight rule: read the setting exactly once per session; style changes apply at the next session.
+        sessionStyle = GeneralSettingsConfiguration.load().indicatorStyle
         // Capture the frontmost app that will receive the pasted text.
         let frontApp = NSWorkspace.shared.frontmostApplication
         let targetName = frontApp?.localizedName ?? ""
@@ -359,7 +367,7 @@ private final class OverlayCapsuleView: NSView {
         static let topRowHeight: CGFloat = 20
         static let topRowTopPadding: CGFloat = 7
         static let waveformTopSpacing: CGFloat = 4
-        static let cornerRadius: CGFloat = 12
+        static let cornerRadius: CGFloat = 14
         static let hPadding: CGFloat = 12
     }
 
@@ -383,6 +391,7 @@ private final class OverlayCapsuleView: NSView {
     // Recording-mode top row
     private let appIconView = NSImageView()
     private let appNameLabel = NSTextField(labelWithString: "")
+    private let recordingDotView = NSView()
     private let timerLabel = NSTextField(labelWithString: "00:00")
 
     // Waveform
@@ -409,6 +418,7 @@ private final class OverlayCapsuleView: NSView {
             // Show recording-mode top row
             appIconView.isHidden = false
             appNameLabel.isHidden = false
+            recordingDotView.isHidden = false
             timerLabel.isHidden = false
             messageLabel.isHidden = true
             actionButton.isHidden = true
@@ -425,6 +435,7 @@ private final class OverlayCapsuleView: NSView {
             // Standard compact row
             appIconView.isHidden = true
             appNameLabel.isHidden = true
+            recordingDotView.isHidden = true
             timerLabel.isHidden = true
             messageLabel.isHidden = false
             messageLabel.stringValue = presentation.message
@@ -468,56 +479,15 @@ private final class OverlayCapsuleView: NSView {
         blurView.layer?.cornerRadius = Metrics.cornerRadius
         blurView.layer?.masksToBounds = true
         blurView.layer?.borderWidth = 0.5
-        blurView.layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
+        blurView.layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
         blurView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(blurView)
 
         // Dark tint layer — more translucent for a grey look
         tintView.wantsLayer = true
-        tintView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.28).cgColor
+        tintView.layer?.backgroundColor = NSColor(srgbRed: 20/255.0, green: 20/255.0, blue: 18/255.0, alpha: 0.55).cgColor
         tintView.translatesAutoresizingMaskIntoConstraints = false
         blurView.addSubview(tintView, positioned: .below, relativeTo: nil)
-
-        // ── Rainbow Gradient Border (Static Mask + Rotating Colors) ──
-        let maskContainer = CALayer()
-        maskContainer.masksToBounds = true
-        blurView.layer?.addSublayer(maskContainer)
-        self.gradientContainerLayer = maskContainer
-
-        let gradientLayer = CAGradientLayer()
-        gradientLayer.colors = [
-            NSColor(red: 1.00, green: 0.50, blue: 0.20, alpha: 0.9).cgColor, // Vibrant Orange
-            NSColor(red: 0.40, green: 1.00, blue: 0.40, alpha: 0.9).cgColor, // Vibrant Green
-            NSColor(red: 0.20, green: 0.60, blue: 1.00, alpha: 0.9).cgColor, // Vibrant Blue
-            NSColor(red: 0.80, green: 0.40, blue: 1.00, alpha: 0.9).cgColor, // Vibrant Purple
-            NSColor(red: 1.00, green: 0.50, blue: 0.20, alpha: 0.9).cgColor  // Loop back
-        ]
-        gradientLayer.type = .conic
-        gradientLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
-        gradientLayer.endPoint = CGPoint(x: 1.0, y: 0.5)
-        maskContainer.addSublayer(gradientLayer)
-        self.gradientBorderLayer = gradientLayer
-
-        // Glow effect on the container (visible through the mask)
-        maskContainer.shadowColor = NSColor.white.cgColor
-        maskContainer.shadowOffset = .zero
-        maskContainer.shadowRadius = 4.0
-        maskContainer.shadowOpacity = 0.5
-
-        let shapeLayer = CAShapeLayer()
-        shapeLayer.lineWidth = 2.0
-        shapeLayer.fillColor = nil
-        shapeLayer.strokeColor = NSColor.black.cgColor // Mask color
-        maskContainer.mask = shapeLayer
-        self.gradientShapeLayer = shapeLayer
-
-        // Constant clockwise rotation animation on the gradient colors
-        let rotation = CABasicAnimation(keyPath: "transform.rotation.z")
-        rotation.fromValue = 0
-        rotation.toValue = 2 * Double.pi
-        rotation.duration = 3.5
-        rotation.repeatCount = .infinity
-        gradientLayer.add(rotation, forKey: "rotateColors")
 
         // ── Non-recording message label ──
         messageLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
@@ -552,8 +522,31 @@ private final class OverlayCapsuleView: NSView {
         appNameLabel.isHidden = true
         blurView.addSubview(appNameLabel)
 
+        // Recording status dot — brand green fill with soft glow (K-48 machined surface).
+        recordingDotView.wantsLayer = true
+        recordingDotView.layer?.backgroundColor = indicatorBrandGreen.cgColor
+        recordingDotView.layer?.cornerRadius = 3.5
+        recordingDotView.layer?.masksToBounds = false
+        recordingDotView.layer?.shadowColor = indicatorBrandGreen.cgColor
+        recordingDotView.layer?.shadowOpacity = 0.4
+        recordingDotView.layer?.shadowRadius = 8
+        recordingDotView.layer?.shadowOffset = .zero
+        recordingDotView.isHidden = true
+        blurView.addSubview(recordingDotView)
+
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            let breathe = CABasicAnimation(keyPath: "opacity")
+            breathe.fromValue = 0.55
+            breathe.toValue = 1.0
+            breathe.duration = 1.2
+            breathe.autoreverses = true
+            breathe.repeatCount = .infinity
+            breathe.timingFunction = CAMediaTimingFunction(controlPoints: 0.32, 0.72, 0.0, 1.0)
+            recordingDotView.layer?.add(breathe, forKey: "breathe")
+        }
+
         // Timer — monospaced digits, right-aligned
-        timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         timerLabel.textColor = NSColor.white.withAlphaComponent(0.55)
         timerLabel.alignment = .right
         timerLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -563,7 +556,7 @@ private final class OverlayCapsuleView: NSView {
         // Waveform
         waveformView.translatesAutoresizingMaskIntoConstraints = false
         waveformView.wantsLayer = true
-        waveformView.layer?.zPosition = 100 // Ensure it's on top of everything including rainbow border
+        waveformView.layer?.zPosition = 100 // Keep bars above the dark tint surface
         blurView.addSubview(waveformView)
 
         NSLayoutConstraint.activate([
@@ -595,7 +588,13 @@ private final class OverlayCapsuleView: NSView {
             // Recording top row — app name
             appNameLabel.leadingAnchor.constraint(equalTo: appIconView.trailingAnchor, constant: 7),
             appNameLabel.centerYAnchor.constraint(equalTo: appIconView.centerYAnchor),
-            appNameLabel.trailingAnchor.constraint(lessThanOrEqualTo: timerLabel.leadingAnchor, constant: -8),
+            appNameLabel.trailingAnchor.constraint(lessThanOrEqualTo: recordingDotView.leadingAnchor, constant: -8),
+
+            // Recording top row — status dot (sits before the timer)
+            recordingDotView.widthAnchor.constraint(equalToConstant: 7),
+            recordingDotView.heightAnchor.constraint(equalToConstant: 7),
+            recordingDotView.centerYAnchor.constraint(equalTo: appIconView.centerYAnchor),
+            recordingDotView.trailingAnchor.constraint(equalTo: timerLabel.leadingAnchor, constant: -8),
 
             // Recording top row — timer
             timerLabel.trailingAnchor.constraint(equalTo: blurView.trailingAnchor, constant: -Metrics.hPadding),
@@ -612,25 +611,6 @@ private final class OverlayCapsuleView: NSView {
         waveformTopConstraint?.isActive = true
         waveformHeightConstraint?.isActive = true
         waveformView.isHidden = true
-    }
-
-    private var gradientContainerLayer: CALayer?
-    private var gradientBorderLayer: CAGradientLayer?
-    private var gradientShapeLayer: CAShapeLayer?
-
-    override func layout() {
-        super.layout()
-        if let container = gradientContainerLayer, let gradient = gradientBorderLayer, let shape = gradientShapeLayer {
-            container.frame = blurView.bounds
-            
-            // Gradient is a square larger than the capsule so it can rotate without gaps
-            let side = max(blurView.bounds.width, blurView.bounds.height) * 1.5
-            gradient.frame = CGRect(x: (blurView.bounds.width - side) / 2, y: (blurView.bounds.height - side) / 2, width: side, height: side)
-            
-            let path = NSBezierPath(roundedRect: blurView.bounds, xRadius: Metrics.cornerRadius, yRadius: Metrics.cornerRadius)
-            shape.path = path.cgPath
-            shape.frame = blurView.bounds
-        }
     }
 
     @objc private func didTapAction() {
@@ -777,8 +757,8 @@ private final class WaveformView: NSView {
         let centerY = bounds.midY
         let vPadding: CGFloat = 4
         let drawH = totalH - (vPadding * 2)
-        // Reduced minH slightly for a cleaner look in silence
-        let minH: CGFloat = max(2.0, drawH * 0.05)
+        // Silence floor: keep a minimum visible bar (~4pt equivalent) even in silence
+        let minH: CGFloat = max(4.0, drawH * 0.05)
         let maxH: CGFloat = max(minH + 5, drawH * 0.96)
 
         renderRadiantFlow(totalW: totalW, entryX: entryX, step: step, bw: bw, centerY: centerY, minH: minH, maxH: maxH)
@@ -805,11 +785,9 @@ private final class WaveformView: NSView {
             layer.frame = CGRect(x: x, y: y, width: bw, height: h)
             
             let progress = max(0.0, min(1.0, x / entryX))
-            let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            let minAlpha: CGFloat = isDark ? 0.45 : 0.18
-            let maxAlpha: CGFloat = isDark ? 0.95 : 0.40
-            let alpha = minAlpha + (maxAlpha - minAlpha) * progress
-            layer.backgroundColor = NSColor.labelColor.withAlphaComponent(alpha).cgColor
+            // Machined deck is always-dark: fixed ink ramp on brand green (#52B788).
+            let alpha: CGFloat = 0.45 + (0.95 - 0.45) * progress
+            layer.backgroundColor = indicatorBrandGreen.withAlphaComponent(alpha).cgColor
             layer.shadowOpacity = 0
         }
     }
