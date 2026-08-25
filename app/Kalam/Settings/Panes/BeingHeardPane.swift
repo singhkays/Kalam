@@ -31,6 +31,7 @@ struct BeingHeardPane: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             behaviorCard
+            stylePreviewStrip
             microphoneCard
         }
     }
@@ -58,6 +59,7 @@ struct BeingHeardPane: View {
             toggleRow("Escape cancels recording", "Discards the take.", $model.escapeCancels)
             toggleRow("Mute other audio while recording", "Pauses playback.", $model.muteOtherAudio)
             indicatorRow
+            styleRow
         }
         .background(Color.kPanel)
         .overlay(RoundedRectangle(cornerRadius: SettingsLayout.cardRadius).stroke(Color.kHair))
@@ -68,7 +70,7 @@ struct BeingHeardPane: View {
     private var indicatorRow: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Recording indicator")
+                Text("Recording indicator position")
                     .font(SettingsType.styleRowTitle)
                     .compassTracking(SettingsType.trackRowTitle)
                 Text("Where the listening pill appears.")
@@ -109,6 +111,136 @@ struct BeingHeardPane: View {
         }
         .padding(SettingsLayout.diveRowPad)
         .overlay(alignment: .top) { Divider().background(Color.kHair2) }
+    }
+
+    private var styleRow: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Recording indicator style")
+                    .font(SettingsType.styleRowTitle)
+                    .compassTracking(SettingsType.trackRowTitle)
+                Text("What listening looks like on screen.")
+                    .font(SettingsType.styleRowDetail)
+                    .foregroundStyle(Color.kInk2)
+            }
+            Spacer()
+            // D.1e: Menu anchored to chip — single-select, never toggles inside.
+            Menu {
+                ForEach(IndicatorStyle.allCases, id: \.self) { style in
+                    Button {
+                        model.indicatorStyle = style
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(style.label)
+                                Text(style.subtitle)
+                                    .font(SettingsType.styleRowDetail)
+                                    .foregroundStyle(Color.kInk2)
+                            }
+                            if model.indicatorStyle == style {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(model.indicatorStyle.label)
+                        .font(SettingsFont.mono(SettingsType.hotkeyChip))
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Color.kInk3)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(Color.kPanel)
+                .overlay(RoundedRectangle(cornerRadius: SettingsLayout.radiusButton).stroke(Color.kHair))
+                .cornerRadius(SettingsLayout.radiusButton)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
+        .padding(SettingsLayout.diveRowPad)
+        .overlay(alignment: .top) { Divider().background(Color.kHair2) }
+    }
+
+    private var stylePreviewStrip: some View {
+        HStack(spacing: 10) {
+            ForEach(IndicatorStyle.allCases, id: \.self) { style in
+                let selected = model.indicatorStyle == style
+                Button {
+                    model.indicatorStyle = style
+                } label: {
+                    VStack(spacing: 8) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(red: 0.14, green: 0.14, blue: 0.15),
+                                            Color(red: 0.06, green: 0.06, blue: 0.07)
+                                        ],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                                .frame(height: 72)
+                            switch style {
+                            case .machined:
+                                RoundedRectangle(cornerRadius: 7)
+                                    .fill(Color.white.opacity(0.04))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 7)
+                                            .stroke(Color.white.opacity(0.14))
+                                    )
+                                    .frame(width: 64, height: 22)
+                                    .overlay(
+                                        HStack(spacing: 3) {
+                                            Capsule().fill(Color.kGreen).frame(width: 3, height: 6)
+                                            Capsule().fill(Color.kGreen).frame(width: 3, height: 13)
+                                            Capsule().fill(Color.kGreen).frame(width: 3, height: 9)
+                                        }
+                                    )
+                            case .whisper:
+                                Capsule()
+                                    .stroke(Color.white.opacity(0.3))
+                                    .frame(width: 44, height: 12)
+                            case .caret:
+                                HStack(spacing: 4) {
+                                    Circle()
+                                        .fill(Color.kGreen)
+                                        .frame(width: 8, height: 8)
+                                    Rectangle()
+                                        .fill(Color.black.opacity(0.6))
+                                        .frame(width: 1.5, height: 14)
+                                }
+                            }
+                        }
+                        HStack(spacing: 6) {
+                            Text(style.rawValue.uppercased())
+                                .font(SettingsFont.mono(8.5))
+                                .compassTracking(SettingsType.trackMonoState)
+                                .foregroundStyle(selected ? Color.kGreen : Color.kInk3)
+                            if selected {
+                                Text("SELECTED")
+                                    .font(SettingsFont.mono(8.5))
+                                    .compassTracking(SettingsType.trackMonoState)
+                                    .foregroundStyle(Color.kGreen)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: SettingsLayout.radiusControl)
+                            .stroke(selected ? Color.kGreen : Color.kHair, lineWidth: selected ? 2 : 1)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.top, 10)
     }
 
     private var microphoneCard: some View {
