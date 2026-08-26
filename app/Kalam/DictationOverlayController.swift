@@ -179,6 +179,15 @@ final class DictationOverlayController {
             updateCaretChip(state: state, element: caretAnchorElement)
             if caretChipWindow?.isVisible == true {
                 // Chip is live: corner window stays hidden; loops drive clock/levels/re-anchor.
+                // Task 5 B gating: caret listening never shows a ring; machined listening never (waveform is hero).
+                // Strip ring offscreen while chip owns feedback — chip never spins, deck stays hidden.
+                if let mapped = indicatorState(for: state), mapped == .listening {
+                    contentView?.hideGreenRing()
+                    caretChipContentView?.hideGreenRing()
+                } else {
+                    contentView?.hideGreenRing()
+                    caretChipContentView?.hideGreenRing()
+                }
                 w.alphaValue = 0.0
                 startWaveformUpdates()
                 startTimerUpdates()
@@ -193,6 +202,27 @@ final class DictationOverlayController {
         view.setWaveformVisible(showsWaveform && !compact)
         // K-48 Task 5: per-session surface switch — pill styling vs machined deck.
         view.setCompactSurface(active: compact, darkAppearance: sessionUsesDarkAppearance, reduceMotion: sessionReduceMotion)
+        // Task 5 B gating: whisper listening slow 3.6s, all transcribing fast 2.4s, caret/machined listening never; strip ring offscreen.
+        do {
+            let mapped = indicatorState(for: state)
+            if let s = mapped, s == .transcribing {
+                if compact {
+                    contentView?.showGreenRing(speed: .transcribing)
+                } else if !(caretChipOwnsFeedback(for: state) && caretChipWindow?.isVisible == true) {
+                    contentView?.showGreenRing(speed: .transcribing)
+                }
+                caretChipContentView?.hideGreenRing()
+            } else if mapped == .listening, sessionStyle == .whisper {
+                contentView?.showGreenRing(speed: .listening)
+                caretChipContentView?.hideGreenRing()
+            } else {
+                contentView?.hideGreenRing()
+                caretChipContentView?.hideGreenRing()
+            }
+            if caretChipOwnsFeedback(for: state), mapped == .listening {
+                caretChipContentView?.hideGreenRing()
+            }
+        }
         currentStateSetTime = CFAbsoluteTimeGetCurrent()
         let presentation = presentation(for: state, targetAppName: targetAppName, targetAppIcon: targetAppIcon)
         // overlay action buttons unclickable: the overlay is click-through EXCEPT while an actionable state
@@ -378,9 +408,24 @@ final class DictationOverlayController {
         if chipVisibleNow && !chipVisibleBefore {
             // Chip went live: retire the corner window.
             window?.alphaValue = 0.0
+            // Task 5 B gating: caret listening never — chip owns feedback, strip any deck ring
+            contentView?.hideGreenRing()
+            caretChipContentView?.hideGreenRing()
         } else if !chipVisibleNow && chipVisibleBefore {
             // Anchor died mid-recording: restore the deck, never indicator-less.
             window?.alphaValue = 1.0
+            // Task 5: fallback to deck — re-apply gating. Listening (this tick is listening-only) hides ring;
+            // if transcribing after fallback, show fast ring on deck.
+            // Note: tick models listening; reuse transcribing gate for correctness if state ever widens.
+            let mapped: IndicatorState? = .listening
+            if mapped == .transcribing {
+                contentView?.showGreenRing(speed: .transcribing)
+                caretChipContentView?.hideGreenRing()
+            } else {
+                // Caret/machined listening never shows ring even on fallback deck
+                contentView?.hideGreenRing()
+                caretChipContentView?.hideGreenRing()
+            }
         }
     }
 
