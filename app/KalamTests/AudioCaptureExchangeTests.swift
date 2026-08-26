@@ -209,6 +209,49 @@ final class AudioCaptureExchangeTests: XCTestCase {
         XCTAssertTrue(exchange.publish(makeSyntheticBuffer(sampleRate: 48_000, frames: 4_800)))
         XCTAssertFalse(exchange.drainConverterRemainder().isEmpty)
     }
+
+    // MARK: K-49 lever (b): eager converter construction
+
+    func testPrebuildConverterCreatesConverterForRequestedFormat() {
+        let exchange = AudioCaptureExchange()
+        XCTAssertNil(exchange.converterInfoForTesting)
+        let ok = exchange.prebuildConverter(inputSampleRate: 48_000, inputChannelCount: 2)
+        XCTAssertTrue(ok)
+        let info = exchange.converterInfoForTesting
+        XCTAssertEqual(info?.sampleRate, 48_000)
+        XCTAssertEqual(info?.channelCount, 2)
+    }
+
+    func testFirstPublishedBufferReusesPrebuiltConverter() {
+        let exchange = AudioCaptureExchange()
+        exchange.resetForNewSession()
+        XCTAssertTrue(exchange.prebuildConverter(inputSampleRate: 48_000, inputChannelCount: 2))
+        // 0.01 s @ 48 kHz stereo. AVAudioConverter batches small inputs, so a
+        // single tiny publish may yield 0 output frames (fallback path) — the
+        // assertions below only pin that the PRE-BUILT converter stayed in
+        // place, not on produced sample counts.
+        let buffer = makeSyntheticBuffer(sampleRate: 48_000, channels: 2, frames: 480)
+        let before = exchange.stats().callbacks
+        XCTAssertTrue(exchange.publish(buffer))
+        // Same rate/channel pair after publish proves processLocked did NOT
+        // rebuild (a rebuild would rewrite the recorded input format — and a
+        // failed conversion would have taken the PCM-fallback path instead).
+        let info = exchange.converterInfoForTesting
+        XCTAssertEqual(info?.sampleRate, 48_000)
+        XCTAssertEqual(info?.channelCount, 2)
+        XCTAssertEqual(exchange.stats().callbacks, before + 1)
+    }
+
+    func testMismatchedFormatStillRebuildsLazily() {
+        let exchange = AudioCaptureExchange()
+        exchange.resetForNewSession()
+        XCTAssertTrue(exchange.prebuildConverter(inputSampleRate: 44_100, inputChannelCount: 1))
+        let buffer = makeSyntheticBuffer(sampleRate: 48_000, channels: 1, frames: 480)
+        XCTAssertTrue(exchange.publish(buffer))
+        let info = exchange.converterInfoForTesting
+        XCTAssertEqual(info?.sampleRate, 48_000)  // lazy path intact
+        XCTAssertEqual(info?.channelCount, 1)
+    }
 }
 
 // MARK: - Helpers

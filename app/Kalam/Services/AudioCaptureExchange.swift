@@ -93,6 +93,45 @@ final class AudioCaptureExchange: @unchecked Sendable {
         lock.withLock { $0.sessionGeneration }
     }
 
+    /// K-49 lever (b): build the resample converter eagerly at session start
+    /// so the render thread's FIRST buffer does not pay construction on the
+    /// critical path. Mirrors the rebuild conditions in `processLocked`; a
+    /// mismatched request is ignored (render thread rebuilds lazily exactly
+    /// as before). Returns true when a converter is in place for precisely
+    /// this input format.
+    @discardableResult
+    func prebuildConverter(inputSampleRate: Double, inputChannelCount: AVAudioChannelCount) -> Bool {
+        lock.withLock { state in
+            if state.converter != nil,
+               state.converterInputSampleRate == inputSampleRate,
+               state.converterInputChannelCount == inputChannelCount {
+                return true
+            }
+            guard let format = AVAudioFormat(
+                    commonFormat: .pcmFormatFloat32,
+                    sampleRate: inputSampleRate,
+                    channels: inputChannelCount,
+                    interleaved: false
+                ),
+                let converter = AVAudioConverter(from: format, to: targetFormat) else {
+                return false
+            }
+            state.converter = converter
+            state.converterInputSampleRate = inputSampleRate
+            state.converterInputChannelCount = inputChannelCount
+            return true
+        }
+    }
+
+    /// Test seam: the recorded input format of the converter currently in
+    /// place, or nil when none exists.
+    var converterInfoForTesting: (sampleRate: Double, channelCount: AVAudioChannelCount)? {
+        lock.withLock { state in
+            guard state.converter != nil else { return nil }
+            return (state.converterInputSampleRate, state.converterInputChannelCount)
+        }
+    }
+
     /// Stops capture and returns the samples only when `expectedGeneration`
     /// still matches. A stale stop (belonging to an older session) no-ops and
     /// returns empty — it must never drain a newer session's audio.

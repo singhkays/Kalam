@@ -156,6 +156,36 @@ final class AudioRecorder: @unchecked Sendable {
             }
         }
 
+        // K-49 lever (a): best-effort device-ring shrink on whichever device
+        // the graph is bound to (preferred or system default input).
+        let boundDeviceID: AudioDeviceID?
+        if preferredInputDeviceID != nil {
+            var bound = AudioDeviceID(0)
+            var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+            var addr = AudioObjectPropertyAddress(
+                mSelector: kAudioOutputUnitProperty_CurrentDevice,
+                mScope: kAudioUnitScope_Global,
+                mElement: 0)
+            let inputAU = input.audioUnit
+            let qStatus = inputAU.map {
+                AudioUnitGetProperty($0, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &bound, &size)
+            }
+            boundDeviceID = (qStatus == noErr) ? bound : nil
+        } else {
+            var def = AudioDeviceID(0)
+            var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+            var addr = AudioObjectPropertyAddress(
+                mSelector: kAudioHardwarePropertyDefaultInputDevice,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain)
+            let qStatus = AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &def)
+            boundDeviceID = (qStatus == noErr) ? def : nil
+        }
+        if let boundDeviceID, let applied = Self.shrinkDeviceRingBuffer(deviceID: boundDeviceID) {
+            logger.info("Device ring buffer applied frames=\(applied, privacy: .public)")
+        }
+
         let inputFormat = input.outputFormat(forBus: 0)
         
         guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else {
@@ -177,6 +207,27 @@ final class AudioRecorder: @unchecked Sendable {
     /// on an unchanged device ID and stays bound to a stale device.
     func invalidatePreparedState() {
         preparedStateInvalidated = true
+    }
+
+    /// K-49 lever (a): shrink the device-level HAL ring so less un-drained
+    /// audio sits in the driver at key-up. Best-effort: devices may clamp or
+    /// refuse; the APPLIED value is returned after read-back, or nil when the
+    /// set failed. Never fatal — recording proceeds either way.
+    static func shrinkDeviceRingBuffer(deviceID: AudioDeviceID, requestedFrames: UInt32 = 512) -> UInt32? {
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyBufferFrameSize,
+            mScope: kAudioObjectPropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain)
+        var requested = requestedFrames
+        let setStatus = AudioObjectSetPropertyData(
+            deviceID, &addr, 0, nil,
+            UInt32(MemoryLayout<UInt32>.size), &requested)
+        guard setStatus == noErr else { return nil }
+        var applied: UInt32 = 0
+        var dataSize = UInt32(MemoryLayout<UInt32>.size)
+        let getStatus = AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &dataSize, &applied)
+        guard getStatus == noErr else { return nil }
+        return applied
     }
 
     var isPreparedForTesting: Bool { isPrepared }
@@ -221,6 +272,14 @@ final class AudioRecorder: @unchecked Sendable {
                 self?.process(buffer: buffer)
             }
             tapInstalled = true
+
+            // K-49 lever (b): pre-build the resample converter so the render
+            // thread's first buffer skips construction.
+            let prebuilt = exchange.prebuildConverter(
+                inputSampleRate: tapFormat.sampleRate,
+                inputChannelCount: tapFormat.channelCount
+            )
+            logger.info("Converter pre-built ok=\(prebuilt, privacy: .public) inputSampleRate=\(tapFormat.sampleRate, privacy: .public)")
         }
 
         logger.info("Started collecting audio samples")
