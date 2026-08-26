@@ -1355,7 +1355,8 @@ private final class CaretChipView: NSView {
             layer.borderColor = NSColor.black.withAlphaComponent(0.13).cgColor
             timerLabel.textColor = NSColor.black.withAlphaComponent(0.65)
         }
-        let ink = dark ? indicatorBrandGreen : NSColor.black
+        // B: caret glyph/dot stay brand green on both paper and obsidian; border/tint already differentiate
+        let ink = indicatorBrandGreen
         bars.forEach { $0.layer?.backgroundColor = ink.cgColor }
         dotView.layer?.backgroundColor = ink.cgColor
     }
