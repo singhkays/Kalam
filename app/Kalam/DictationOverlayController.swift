@@ -129,10 +129,12 @@ final class DictationOverlayController {
         stopTimerUpdates()
         caretAnchorElement = nil
         hideCaretChip()
-        // Quality review: strip infinite CAAnimations while hidden so nothing
-        // renders in the background between sessions.
-        contentView?.removeSessionAnimations()
+        // Task 6 offscreen leak guard: strip infinite CAAnimations while hidden so no
+        // CABasicAnimation renders in background between sessions. Both views get both
+        // teardown calls — hideGreenRing strips spin + breathe and removes layers,
+        // removeSessionAnimations strips dot/shimmer and also calls hideGreenRing.
         contentView?.hideGreenRing()
+        contentView?.removeSessionAnimations()
         caretChipContentView?.hideGreenRing()
         caretChipContentView?.removeSessionAnimations()
         // placementScreen is deliberately PERSISTED across sessions: nil-ing it
@@ -1016,6 +1018,14 @@ private final class OverlayCapsuleView: NSView {
         outerStrokeLayer.frame = bounds
         outerStrokeLayer.path = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
         layoutRing()
+        // Task 6 offscreen leak guard: if window alpha 0 or view hidden, strip animations so nothing spins offscreen.
+        if window?.alphaValue == 0 || isHidden {
+            if ringIsInstalled {
+                hideGreenRing()
+            }
+            recordingDotView.layer?.removeAnimation(forKey: "breathe")
+            dots.forEach { $0.layer?.removeAnimation(forKey: "shimmer") }
+        }
     }
 
     // MARK: - Task 4: green clockwise arc helpers
@@ -1071,7 +1081,20 @@ private final class OverlayCapsuleView: NSView {
         if ringIsInstalled {
             ringLayer.removeAnimation(forKey: "spin")
             ringGlowLayer.removeAnimation(forKey: "spin")
-            // already showing static — keep breathing
+            // Task 6: convert spinning->static correctly — add breathe if missing
+            if ringLayer.animation(forKey: "breathe") == nil {
+                ringLayer.opacity = 0.48
+                ringGlowLayer.opacity = 0.38
+                let breathe = CABasicAnimation(keyPath: "opacity")
+                breathe.fromValue = 0.3
+                breathe.toValue = 0.6
+                breathe.duration = 3.2
+                breathe.autoreverses = true
+                breathe.repeatCount = .infinity
+                breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                ringLayer.add(breathe, forKey: "breathe")
+                ringGlowLayer.add(breathe, forKey: "breathe")
+            }
             return
         }
         ringIsInstalled = true
@@ -1093,6 +1116,8 @@ private final class OverlayCapsuleView: NSView {
     }
 
     private func updateRingSpeed(_ speed: RingSpeed) {
+        // Task 6: centralize speeds — sole source is ringListeningDuration / ringTranscribingDuration
+        guard !sessionReduceMotion else { showStaticGreenHairline(); return }
         let dur = speed == .listening ? ringListeningDuration : ringTranscribingDuration
         ringLayer.removeAnimation(forKey: "spin")
         ringGlowLayer.removeAnimation(forKey: "spin")
@@ -1183,6 +1208,8 @@ private final class OverlayCapsuleView: NSView {
     /// K-48 review finding I-1: animations follow the PER-SESSION Reduce Motion value.
     /// Two independent gates: the deck dot breathes on machined surfaces; the shimmer
     /// drives the compact transcribing pill. Neither runs under Reduce Motion or hide().
+    /// Task 6: also strip ring spin under Reduce Motion (convert to static hairline) and
+    /// offscreen (hide) so no CABasicAnimation renders in background.
     func updateBreatheAnimation() {
         if !isCompactSurface && !sessionReduceMotion {
             if recordingDotView.layer?.animation(forKey: "breathe") == nil {
@@ -1215,13 +1242,57 @@ private final class OverlayCapsuleView: NSView {
         } else {
             dots.forEach { $0.layer?.removeAnimation(forKey: "shimmer") }
         }
+        // Task 6: Reduce Motion parity — strip ring spin when Reduce Motion is on.
+        // showGreenRing already guards new presentations via showStaticGreenHairline,
+        // but an already-spinning ring (e.g. mid-session Reduce Motion flip) must be
+        // stripped here so nothing spins under Reduce Motion.
+        if sessionReduceMotion, ringIsInstalled {
+            let hasSpin = ringLayer.animation(forKey: "spin") != nil || ringGlowLayer.animation(forKey: "spin") != nil
+            if hasSpin {
+                ringLayer.removeAnimation(forKey: "spin")
+                ringGlowLayer.removeAnimation(forKey: "spin")
+                // Convert spinning ring to static breathing hairline in-place.
+                if ringLayer.animation(forKey: "breathe") == nil {
+                    ringLayer.opacity = 0.48
+                    ringGlowLayer.opacity = 0.38
+                    let breathe = CABasicAnimation(keyPath: "opacity")
+                    breathe.fromValue = 0.3
+                    breathe.toValue = 0.6
+                    breathe.duration = 3.2
+                    breathe.autoreverses = true
+                    breathe.repeatCount = .infinity
+                    breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    ringLayer.add(breathe, forKey: "breathe")
+                    ringGlowLayer.add(breathe, forKey: "breathe")
+                }
+            }
+        }
+        // Task 6 offscreen leak guard: when window alpha is 0 or view hidden, strip
+        // both spin and breathe so nothing animates offscreen. hide() also calls
+        // removeSessionAnimations, but updateBreatheAnimation may fire while hidden.
+        if window?.alphaValue == 0 || isHidden {
+            if ringIsInstalled && (ringLayer.animation(forKey: "spin") != nil || ringLayer.animation(forKey: "breathe") != nil) {
+                hideGreenRing()
+            }
+        }
     }
 
-    /// Quality review: hide() strips infinite animations so nothing animates offscreen.
+    /// Task 6: hide() + layout() strip infinite animations so nothing animates offscreen.
+    /// Also verifies window alpha 0 strips both spin and breathe (hideGreenRing does both).
     func removeSessionAnimations() {
         recordingDotView.layer?.removeAnimation(forKey: "breathe")
         dots.forEach { $0.layer?.removeAnimation(forKey: "shimmer") }
+        // Task 6: explicitly strip both spin and breathe keys; hideGreenRing covers both plus removal
+        ringLayer.removeAnimation(forKey: "spin")
+        ringGlowLayer.removeAnimation(forKey: "spin")
+        ringLayer.removeAnimation(forKey: "breathe")
+        ringGlowLayer.removeAnimation(forKey: "breathe")
         hideGreenRing()
+        // Offscreen leak guard: when window alpha is 0, assert no spin/breathe remains
+        if window?.alphaValue == 0 {
+            assert(ringLayer.animation(forKey: "spin") == nil && ringLayer.animation(forKey: "breathe") == nil,
+                   "Task 6: ring animations must be nil when window hidden")
+        }
     }
 
     /// K-48 Task 5: compact glyph bars track the last three waveform samples.
@@ -1675,6 +1746,12 @@ private final class CaretChipView: NSView {
         outerStrokeLayer.frame = bounds
         outerStrokeLayer.path = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
         layoutRing()
+        // Task 6 offscreen leak guard: if window alpha 0 or view hidden, strip ring so nothing spins offscreen.
+        if window?.alphaValue == 0 || isHidden {
+            if ringIsInstalled {
+                hideGreenRing()
+            }
+        }
     }
 
     // MARK: - Task 4: green clockwise arc helpers (mirrors OverlayCapsuleView)
@@ -1730,6 +1807,20 @@ private final class CaretChipView: NSView {
         if ringIsInstalled {
             ringLayer.removeAnimation(forKey: "spin")
             ringGlowLayer.removeAnimation(forKey: "spin")
+            // Task 6: convert spinning->static — add breathe if missing
+            if ringLayer.animation(forKey: "breathe") == nil {
+                ringLayer.opacity = 0.48
+                ringGlowLayer.opacity = 0.38
+                let breathe = CABasicAnimation(keyPath: "opacity")
+                breathe.fromValue = 0.3
+                breathe.toValue = 0.6
+                breathe.duration = 3.2
+                breathe.autoreverses = true
+                breathe.repeatCount = .infinity
+                breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                ringLayer.add(breathe, forKey: "breathe")
+                ringGlowLayer.add(breathe, forKey: "breathe")
+            }
             return
         }
         ringIsInstalled = true
@@ -1750,6 +1841,8 @@ private final class CaretChipView: NSView {
     }
 
     private func updateRingSpeed(_ speed: RingSpeed) {
+        // Task 6: centralize speeds — sole source is ringListeningDuration / ringTranscribingDuration
+        guard !sessionReduceMotion else { showStaticGreenHairline(); return }
         let dur = speed == .listening ? ringListeningDuration : ringTranscribingDuration
         ringLayer.removeAnimation(forKey: "spin")
         ringGlowLayer.removeAnimation(forKey: "spin")
@@ -1763,11 +1856,22 @@ private final class CaretChipView: NSView {
         ringGlowLayer.add(spin, forKey: "spin")
     }
 
+    /// Task 6: teardown strips both spin and breathe; verify window alpha 0 leaves no animation
     func removeSessionAnimations() {
+        ringLayer.removeAnimation(forKey: "spin")
+        ringGlowLayer.removeAnimation(forKey: "spin")
+        ringLayer.removeAnimation(forKey: "breathe")
+        ringGlowLayer.removeAnimation(forKey: "breathe")
         hideGreenRing()
+        if window?.alphaValue == 0 {
+            assert(ringLayer.animation(forKey: "spin") == nil && ringLayer.animation(forKey: "breathe") == nil,
+                   "Task 6: caret ring animations must be nil when window hidden")
+        }
     }
 
     /// Per-session surface (mirrors the whisper pill tokens).
+    /// Task 6: idempotently handles appearance flips + ReduceMotion without early returns;
+    /// propagates ReduceMotion and strips ring spin in-place so nothing spins under Reduce Motion or offscreen.
     func applySurfaceStylingForSession(dark: Bool, reduceMotion: Bool? = nil) {
         if let rm = reduceMotion { sessionReduceMotion = rm }
         guard let layer = blurView.layer else { return }
@@ -1790,6 +1894,33 @@ private final class CaretChipView: NSView {
         bars.forEach { $0.layer?.backgroundColor = ink.cgColor }
         dotView.layer?.backgroundColor = ink.cgColor
         needsLayout = true
+        // Task 6: Reduce Motion parity — if Reduce Motion just turned on, convert any spinning ring to static breathing
+        if sessionReduceMotion, ringIsInstalled {
+            let hasSpin = ringLayer.animation(forKey: "spin") != nil || ringGlowLayer.animation(forKey: "spin") != nil
+            if hasSpin {
+                ringLayer.removeAnimation(forKey: "spin")
+                ringGlowLayer.removeAnimation(forKey: "spin")
+                if ringLayer.animation(forKey: "breathe") == nil {
+                    ringLayer.opacity = 0.48
+                    ringGlowLayer.opacity = 0.38
+                    let breathe = CABasicAnimation(keyPath: "opacity")
+                    breathe.fromValue = 0.3
+                    breathe.toValue = 0.6
+                    breathe.duration = 3.2
+                    breathe.autoreverses = true
+                    breathe.repeatCount = .infinity
+                    breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    ringLayer.add(breathe, forKey: "breathe")
+                    ringGlowLayer.add(breathe, forKey: "breathe")
+                }
+            }
+        }
+        // Task 6 offscreen guard: if window hidden, strip ring animations so nothing leaks offscreen
+        if window?.alphaValue == 0 || isHidden {
+            if ringIsInstalled {
+                hideGreenRing()
+            }
+        }
     }
 
     func updateTime(_ formatted: String) {
