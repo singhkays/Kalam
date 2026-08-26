@@ -147,10 +147,38 @@ The keydown-to-indicator path is latency-sensitive; keep it ordered mic-first:
    (every AX reference is messaging-timeout-bounded in `AccessibilityFocusResolver`,
    including returned elements) and a silent `refinePlacementIfMoved` correction.
 
-Stage timing logs one line per successful start (`Recording start latency …`,
-info level, timings only), gated by `LatencyTuningOptions.startStageTimingKey`.
-The engine-start floor (~85-110 ms measured) is HAL spin-up and stays by design:
-the engine stops after each session so the macOS mic indicator turns off.
+Stage timing logs one line per successful start (`Recording start latency …`, info level,
+timings only), gated by `LatencyTuningOptions.startStageTimingKey`. The engine-start floor
+(~85-110 ms measured) is HAL spin-up and stays by design: the engine stops after each
+session so the macOS mic indicator turns off.
+
+## Stop-to-Paste Latency
+
+Three levers cut the key-up-to-paste path; the pipeline order above is untouched.
+
+**Energy-polled stop.** After PTT key-up, `stopTask` no longer sleeps the full post-roll:
+`PostRollDecision` polls the trailing buffer's energy while `postRollForSegment` stays as
+the floor and a hard ceiling of +150 ms (`AppDelegate.postRollEarlyExitExtraMaxMs`) bounds
+the worst case to the old behavior plus that allowance. Between them, the stop finishes
+after 3 consecutive silent polls of 20 ms analysis windows, under an absolute −35 dBFS cap
+so a uniformly loud tail can never self-classify as silent. The generation contract is
+unchanged — pin before the first suspension and finish via `finishStop(expectedGeneration:)`
+— and `cancelRecording()` still tears down immediately.
+
+**Route-conditional paste settle.** Only the `.frontmost` CGEvent route pays the settle wait
+(50/80 ms defaults, `internal.latency.pasteDelayShortMs`/`LongMs`); captured-element routes
+paste focus-independently via AX set-value and captured-app does its own activate+settle
+poll, so their wait is skipped. Consequence of deciding the route pre-wait (~50-80 ms
+earlier): a user switching apps during the former wait now resolves like any other
+post-transcription switch. A PID-posted Cmd+V experiment ships dark behind
+`internal.latency.pidPasteEnabled` (default OFF) with automatic fallback to the global
+Cmd+V post on refusal or nil PID.
+
+**Fused trim stage.** `SilenceTrimmer.trimAndNormalize` performs endpointing + peak
+normalization in one output pass via vDSP (`vDSP_maxmgv` peak scan, scale + clamp),
+semantically identical to the legacy two-pass `normalizePeak(trim(...))` and parity-pinned.
+`SpeechQualityGuard` runs on the normalized clip; its window-vs-percentile comparisons are
+offset-invariant, so normalization cannot change its verdict.
 
 ## Dictionary Behavior
 
