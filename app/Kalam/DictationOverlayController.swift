@@ -124,6 +124,9 @@ final class DictationOverlayController {
         stopTimerUpdates()
         caretAnchorElement = nil
         hideCaretChip()
+        // Quality review: strip infinite CAAnimations while hidden so nothing
+        // renders in the background between sessions.
+        contentView?.removeSessionAnimations()
         // placementScreen is deliberately PERSISTED across sessions: nil-ing it
         // here forced every session start to re-walk AX for placement before the
         // capsule could show. refinePlacementIfMoved corrects it if the user
@@ -974,34 +977,47 @@ private final class OverlayCapsuleView: NSView {
         [pillLevelBar0, pillLevelBar1, pillLevelBar2].forEach { $0.layer?.backgroundColor = ink.cgColor }
     }
 
-    /// K-48 review finding I-1: the dot's breathing animation follows the PER-SESSION
-    /// Reduce Motion value (captured in showRecording), not a one-time app-lifetime check.
+    /// K-48 review finding I-1: animations follow the PER-SESSION Reduce Motion value.
+    /// Two independent gates: the deck dot breathes on machined surfaces; the shimmer
+    /// drives the compact transcribing pill. Neither runs under Reduce Motion or hide().
     func updateBreatheAnimation() {
-        if isCompactSurface || sessionReduceMotion {
+        if !isCompactSurface && !sessionReduceMotion {
+            if recordingDotView.layer?.animation(forKey: "breathe") == nil {
+                let breathe = CABasicAnimation(keyPath: "opacity")
+                breathe.fromValue = 0.55
+                breathe.toValue = 1.0
+                breathe.duration = 1.2
+                breathe.autoreverses = true
+                breathe.repeatCount = .infinity
+                breathe.timingFunction = CAMediaTimingFunction(controlPoints: 0.32, 0.72, 0.0, 1.0)
+                recordingDotView.layer?.add(breathe, forKey: "breathe")
+            }
+        } else {
             recordingDotView.layer?.removeAnimation(forKey: "breathe")
+        }
+
+        if isCompactSurface && !sessionReduceMotion {
+            for (index, dot) in dots.enumerated() {
+                guard dot.layer?.animation(forKey: "shimmer") == nil else { continue }
+                let bounce = CABasicAnimation(keyPath: "opacity")
+                bounce.fromValue = 0.3
+                bounce.toValue = 1.0
+                bounce.duration = 1.2
+                bounce.autoreverses = true
+                bounce.repeatCount = .infinity
+                bounce.timeOffset = CFTimeInterval(index) * 0.15
+                bounce.timingFunction = CAMediaTimingFunction(controlPoints: 0.32, 0.72, 0.0, 1.0)
+                dot.layer?.add(bounce, forKey: "shimmer")
+            }
+        } else {
             dots.forEach { $0.layer?.removeAnimation(forKey: "shimmer") }
-            return
         }
-        guard recordingDotView.layer?.animation(forKey: "breathe") == nil else { return }
-        let breathe = CABasicAnimation(keyPath: "opacity")
-        breathe.fromValue = 0.55
-        breathe.toValue = 1.0
-        breathe.duration = 1.2
-        breathe.autoreverses = true
-        breathe.repeatCount = .infinity
-        breathe.timingFunction = CAMediaTimingFunction(controlPoints: 0.32, 0.72, 0.0, 1.0)
-        recordingDotView.layer?.add(breathe, forKey: "breathe")
-        for (index, dot) in dots.enumerated() {
-            let bounce = CABasicAnimation(keyPath: "opacity")
-            bounce.fromValue = 0.3
-            bounce.toValue = 1.0
-            bounce.duration = 1.2
-            bounce.autoreverses = true
-            bounce.repeatCount = .infinity
-            bounce.timeOffset = CFTimeInterval(index) * 0.15
-            bounce.timingFunction = CAMediaTimingFunction(controlPoints: 0.32, 0.72, 0.0, 1.0)
-            dot.layer?.add(bounce, forKey: "shimmer")
-        }
+    }
+
+    /// Quality review: hide() strips infinite animations so nothing animates offscreen.
+    func removeSessionAnimations() {
+        recordingDotView.layer?.removeAnimation(forKey: "breathe")
+        dots.forEach { $0.layer?.removeAnimation(forKey: "shimmer") }
     }
 
     /// K-48 Task 5: compact glyph bars track the last three waveform samples.
