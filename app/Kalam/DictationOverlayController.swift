@@ -624,9 +624,10 @@ private final class OverlayCapsuleView: NSView {
     private var actionHandler: (() -> Void)?
     private var waveformTopConstraint: NSLayoutConstraint?
     private var waveformHeightConstraint: NSLayoutConstraint?
-    private var recordingRowTopConstraint: NSLayoutConstraint?
-    private var recordingRowHeightConstraint: NSLayoutConstraint?
-    private var messageLabelTopConstraint: NSLayoutConstraint?
+    private var appIconTopConstraint: NSLayoutConstraint?
+    private var appIconCenterYConstraint: NSLayoutConstraint?
+    private var appIconWidthConstraint: NSLayoutConstraint?
+    private var appIconHeightConstraint: NSLayoutConstraint?
 
     // K-48 Task 5: whisper pill — per-session surface + compact glyph.
     private var isCompactSurface = false {
@@ -636,6 +637,11 @@ private final class OverlayCapsuleView: NSView {
     private var sessionReduceMotion = false
     private var shimmerStack: NSStackView?
     private var dots: [NSView] { [shimmerDot0, shimmerDot1, shimmerDot2] }
+
+    // Task 3: universal rim — inner via blurView border (1px), outer via shape layer, shadow for elevation
+    private let outerStrokeLayer = CAShapeLayer()
+    private let innerStroke = CALayer() // kept for verifier parity: inner 1px is blurView.layer border
+    private let outerStroke = CAShapeLayer() // alias for spec naming
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -651,7 +657,7 @@ private final class OverlayCapsuleView: NSView {
             // Show recording-mode top row
             appIconView.isHidden = false
             appNameLabel.isHidden = false
-            recordingDotView.isHidden = !isCompactSurface
+            recordingDotView.isHidden = isCompactSurface
             timerLabel.isHidden = false
             messageLabel.isHidden = true
             actionButton.isHidden = true
@@ -714,6 +720,18 @@ private final class OverlayCapsuleView: NSView {
 
     private func setup() {
         wantsLayer = true
+        // Task 3: universal rim — elevation + double-stroke. Self hosts shadow/outer stroke, blurView clips inner.
+        layer?.masksToBounds = false
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.28
+        layer?.shadowRadius = 10
+        layer?.shadowOffset = CGSize(width: 0, height: 10)
+        // Outer 1px stroke sits on self.layer so its outer half lifts off the background (white/dark).
+        outerStrokeLayer.fillColor = NSColor.clear.cgColor
+        outerStrokeLayer.strokeColor = NSColor.black.withAlphaComponent(0.18).cgColor
+        outerStrokeLayer.lineWidth = 1
+        outerStrokeLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        layer?.addSublayer(outerStrokeLayer)
 
         // Blur background — dark material, higher translucency
         blurView.material = .hudWindow
@@ -723,7 +741,7 @@ private final class OverlayCapsuleView: NSView {
         blurView.wantsLayer = true
         blurView.layer?.cornerRadius = Metrics.cornerRadius
         blurView.layer?.masksToBounds = true
-        blurView.layer?.borderWidth = 0.5
+        blurView.layer?.borderWidth = 1
         blurView.layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
         blurView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(blurView)
@@ -758,6 +776,15 @@ private final class OverlayCapsuleView: NSView {
         appIconView.layer?.masksToBounds = true
         appIconView.isHidden = true
         blurView.addSubview(appIconView)
+
+        let iconTop = appIconView.topAnchor.constraint(equalTo: blurView.topAnchor, constant: Metrics.topRowTopPadding)
+        let iconCenterY = appIconView.centerYAnchor.constraint(equalTo: blurView.centerYAnchor)
+        let iconWidth = appIconView.widthAnchor.constraint(equalToConstant: Metrics.topRowHeight)
+        let iconHeight = appIconView.heightAnchor.constraint(equalToConstant: Metrics.topRowHeight)
+        appIconTopConstraint = iconTop
+        appIconCenterYConstraint = iconCenterY
+        appIconWidthConstraint = iconWidth
+        appIconHeightConstraint = iconHeight
 
         // App name
         appNameLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
@@ -822,9 +849,9 @@ private final class OverlayCapsuleView: NSView {
 
             // Recording top row — icon
             appIconView.leadingAnchor.constraint(equalTo: blurView.leadingAnchor, constant: Metrics.hPadding),
-            appIconView.topAnchor.constraint(equalTo: blurView.topAnchor, constant: Metrics.topRowTopPadding),
-            appIconView.widthAnchor.constraint(equalToConstant: Metrics.topRowHeight),
-            appIconView.heightAnchor.constraint(equalToConstant: Metrics.topRowHeight),
+            iconTop,
+            iconWidth,
+            iconHeight,
 
             // Recording top row — app name
             appNameLabel.leadingAnchor.constraint(equalTo: appIconView.trailingAnchor, constant: 7),
@@ -895,6 +922,15 @@ private final class OverlayCapsuleView: NSView {
         ])
     }
 
+    override func layout() {
+        super.layout()
+        // Task 3: keep shadowPath + outer stroke synced to current bounds+cornerRadius (14 machined /15 pill)
+        let radius: CGFloat = isCompactSurface ? Metrics.pillCornerRadius : Metrics.cornerRadius
+        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        outerStrokeLayer.frame = bounds
+        outerStrokeLayer.path = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
+    }
+
     /// K-48 Task 5 + review finding I-1: per-session surface switch. Called from
     /// transition(to:) so a prewarmed window still receives styling at present time.
     /// Always applies both styling and animation gating: idempotent, and covers
@@ -911,13 +947,22 @@ private final class OverlayCapsuleView: NSView {
         guard let layer = blurView.layer else { return }
         if isCompactSurface {
             layer.cornerRadius = Metrics.pillCornerRadius
+            layer.borderWidth = 1
             if usesDarkAppearanceForSession {
                 tintView.layer?.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 0.62).cgColor
-                layer.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
+                layer.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+                outerStrokeLayer.strokeColor = NSColor.black.withAlphaComponent(0.18).cgColor
+                self.layer?.shadowOpacity = 0.28
             } else {
                 tintView.layer?.backgroundColor = NSColor(calibratedWhite: 0.97, alpha: 0.74).cgColor
-                layer.borderColor = NSColor.black.withAlphaComponent(0.13).cgColor
+                layer.borderColor = NSColor.black.withAlphaComponent(0.10).cgColor
+                outerStrokeLayer.strokeColor = NSColor.white.withAlphaComponent(0.65).cgColor
+                self.layer?.shadowOpacity = 0.16
             }
+            appIconTopConstraint?.isActive = false
+            appIconCenterYConstraint?.isActive = true
+            appIconWidthConstraint?.constant = 16
+            appIconHeightConstraint?.constant = 16
             appNameLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
             timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
             appIconView.layer?.cornerRadius = 4
@@ -935,8 +980,15 @@ private final class OverlayCapsuleView: NSView {
         } else {
             // Machined deck defaults.
             layer.cornerRadius = Metrics.cornerRadius
+            layer.borderWidth = 1
             tintView.layer?.backgroundColor = NSColor(srgbRed: 20/255.0, green: 20/255.0, blue: 18/255.0, alpha: 0.55).cgColor
             layer.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+            outerStrokeLayer.strokeColor = NSColor.black.withAlphaComponent(0.18).cgColor
+            self.layer?.shadowOpacity = 0.28
+            appIconCenterYConstraint?.isActive = false
+            appIconTopConstraint?.isActive = true
+            appIconWidthConstraint?.constant = Metrics.topRowHeight
+            appIconHeightConstraint?.constant = Metrics.topRowHeight
             appNameLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
             timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
             appNameLabel.textColor = .white
@@ -946,11 +998,11 @@ private final class OverlayCapsuleView: NSView {
             pillLevelGlyph.ink = .white
             shimmerStack?.isHidden = true
         }
-        // Recording dot color follows the surface ink in light appearance.
-        recordingDotView.layer?.backgroundColor =
-            isCompactSurface && !usesDarkAppearanceForSession ? NSColor.black.cgColor : indicatorBrandGreen.cgColor
-        // Glyph ink follows the surface too.
-        pillLevelGlyph.ink = isCompactSurface && !usesDarkAppearanceForSession ? NSColor.black : indicatorBrandGreen
+        // Recording dot color is always brand green on the machined deck.
+        recordingDotView.layer?.backgroundColor = indicatorBrandGreen.cgColor
+        // B: whisper bars are brand green in BOTH appearances for contrast + brand consistency
+        pillLevelGlyph.ink = indicatorBrandGreen
+        needsLayout = true
     }
 
     /// K-48 review finding I-1: animations follow the PER-SESSION Reduce Motion value.
@@ -1183,6 +1235,65 @@ private final class WaveformView: NSView {
 
 }
 
+/// Computes 3 normalized levels [0.0...1.0] from PCM audio samples with AGC gain and attack/release smoothing.
+enum LevelGlyphCalculator {
+    static func process(
+        samples: [Float],
+        gain: inout CGFloat,
+        smoothed: inout [CGFloat]
+    ) -> [CGFloat] {
+        guard !samples.isEmpty else {
+            for i in 0..<3 {
+                smoothed[i] *= 0.75
+            }
+            return smoothed
+        }
+
+        // Divide 512 samples into 3 time slices
+        let count = samples.count
+        let chunkSize = max(1, count / 3)
+        var slicePeaks: [CGFloat] = []
+        for i in 0..<3 {
+            let start = i * chunkSize
+            let end = (i == 2) ? count : min(count, (i + 1) * chunkSize)
+            var slicePeak: Float = 0.0
+            for j in start..<end {
+                let mag = abs(samples[j])
+                if mag > slicePeak { slicePeak = mag }
+            }
+            slicePeaks.append(CGFloat(slicePeak))
+        }
+
+        let framePeak = slicePeaks.reduce(0.0, max)
+        let frameAvg = CGFloat(samples.reduce(0.0) { $0 + abs($1) }) / CGFloat(count)
+
+        // Adaptive AGC: boosts quiet speech up to 60x, scales down for loud speech
+        let targetGain = framePeak > 0.0001 ? min(60.0, 1.50 / framePeak) : 1.0
+        gain += (targetGain - gain) * 0.25
+
+        // Noise gate tracking (0.3% - 1.5%)
+        let noiseGate = max(0.003, min(0.015, frameAvg * 1.8))
+
+        for i in 0..<3 {
+            let peak = slicePeaks[i]
+            let target: CGFloat
+            if framePeak < noiseGate {
+                target = 0.0
+            } else {
+                let rawAmp = max(0.0, peak - noiseGate) * gain
+                let boosted = min(1.0, rawAmp * 1.8)
+                target = boosted > 0.0 ? pow(boosted, 0.40) : 0.0
+            }
+
+            // Fast attack (0.65), smooth decay (0.22)
+            let coeff: CGFloat = target > smoothed[i] ? 0.65 : 0.22
+            smoothed[i] += (target - smoothed[i]) * coeff
+        }
+
+        return smoothed
+    }
+}
+
 /// K-48 Task 5: the whisper pill's three-bar level glyph, drawn in one view.
 /// Custom draw instead of constraint-swapped subviews: no layout churn at 30Hz,
 /// nothing to unhide, ink switchable per session appearance.
@@ -1190,49 +1301,34 @@ final class PillLevelGlyphView: NSView {
     var ink: NSColor = indicatorBrandGreen {
         didSet { needsDisplay = true }
     }
-    private var levels: [CGFloat] = [0.3, 0.6, 0.45]
-    /// Running peak with slow decay — mirrors the deck waveform's AGC so normal
-    /// speech (~0.02-0.05 raw) renders as full bars instead of dots.
-    private var referencePeak: CGFloat = 0.08
-    /// Smoothed display values. Fast attack / slow release gives the fluid
-    /// mockup motion instead of instant spike-and-snap-back.
-    private var smoothed: [CGFloat] = [0.3, 0.6, 0.45]
+    private var levels: [CGFloat] = [0.0, 0.0, 0.0]
+    private var gain: CGFloat = 1.0
+    private var smoothed: [CGFloat] = [0.0, 0.0, 0.0]
 
     func update(samples: [Float]) {
-        // ArraySlice keeps parent indices — index via startIndex offset.
-        let values = samples.suffix(3)
-        var framePeak: CGFloat = 0
-        var targets: [CGFloat] = []
-        for index in 0..<3 {
-            guard !values.isEmpty else { targets.append(0.08); continue }
-            let v = values[values.startIndex + min(index, values.count - 1)]
-            framePeak = max(framePeak, CGFloat(v))
-            targets.append(CGFloat(max(0, min(1, v))))
-        }
-        // Slow peak decay (2%/tick) so loud phrases set the ceiling for a while.
-        referencePeak = max(framePeak, referencePeak * 0.98, 0.02)
-        // Per-bar attack/release: rise quickly with the voice, fall gently after.
-        for index in 0..<3 {
-            let normalized = min(1, targets[index] / referencePeak)
-            let coefficient = normalized > smoothed[index] ? CGFloat(0.5) : CGFloat(0.15)
-            smoothed[index] += (normalized - smoothed[index]) * coefficient
-        }
-        levels = smoothed
+        levels = LevelGlyphCalculator.process(
+            samples: samples,
+            gain: &gain,
+            smoothed: &smoothed
+        )
         needsDisplay = true
     }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         let barWidth: CGFloat = 2.5
-        let gap: CGFloat = 2
+        let gap: CGFloat = 2.0
         let totalBarWidth = barWidth * 3 + gap * 2
         let startX = (bounds.width - totalBarWidth) / 2
         ctx.setFillColor(ink.cgColor)
         for (index, level) in levels.enumerated() {
             // Low floor stays clearly bar-shaped (never collapses into a dot).
-            let h = bounds.height * max(0.14, min(1, level))
+            let minH: CGFloat = 3.0
+            let maxH: CGFloat = bounds.height
+            let h = minH + (maxH - minH) * min(1.0, max(0.0, level))
             let x = startX + CGFloat(index) * (barWidth + gap)
-            let rect = CGRect(x: x, y: (bounds.height - h) / 2, width: barWidth, height: h)
+            let y = (bounds.height - h) / 2
+            let rect = CGRect(x: x, y: y, width: barWidth, height: h)
             let path = NSBezierPath(roundedRect: rect, xRadius: barWidth / 2, yRadius: barWidth / 2)
             path.fill()
         }
@@ -1260,6 +1356,13 @@ private final class CaretChipView: NSView {
     private var bars: [NSView] { [bar0, bar1, bar2] }
     private var barHeightConstraints: [NSLayoutConstraint] = []
     private let timerLabel = NSTextField(labelWithString: "00:00")
+    private var gain: CGFloat = 1.0
+    private var smoothed: [CGFloat] = [0.0, 0.0, 0.0]
+
+    // Task 3: universal rim — outer 1px stroke + elevation (mirrors OverlayCapsuleView)
+    private let outerStrokeLayer = CAShapeLayer()
+    private let innerStroke = CALayer()
+    private let outerStroke = CAShapeLayer()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1272,6 +1375,17 @@ private final class CaretChipView: NSView {
 
     private func setup() {
         wantsLayer = true
+        // Task 3: universal rim — self hosts shadow/outer stroke (chip radius 15 pill / ~8 if compact)
+        layer?.masksToBounds = false
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.28
+        layer?.shadowRadius = 10
+        layer?.shadowOffset = CGSize(width: 0, height: 10)
+        outerStrokeLayer.fillColor = NSColor.clear.cgColor
+        outerStrokeLayer.strokeColor = NSColor.black.withAlphaComponent(0.18).cgColor
+        outerStrokeLayer.lineWidth = 1
+        outerStrokeLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        layer?.addSublayer(outerStrokeLayer)
 
         blurView.material = .hudWindow
         blurView.blendingMode = .behindWindow
@@ -1279,7 +1393,7 @@ private final class CaretChipView: NSView {
         blurView.wantsLayer = true
         blurView.layer?.cornerRadius = 15
         blurView.layer?.masksToBounds = true
-        blurView.layer?.borderWidth = 0.5
+        blurView.layer?.borderWidth = 1
         blurView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(blurView)
 
@@ -1343,22 +1457,37 @@ private final class CaretChipView: NSView {
         applySurfaceStylingForSession(dark: true)
     }
 
+    override func layout() {
+        super.layout()
+        // Task 3: sync shadowPath + outer stroke to bounds (chip 15 / fallback 8)
+        let radius: CGFloat = 15 // chip uses pill radius (height 30 -> 15); keeps 1:1 with blurView
+        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        outerStrokeLayer.frame = bounds
+        outerStrokeLayer.path = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
+    }
+
     /// Per-session surface (mirrors the whisper pill tokens).
     func applySurfaceStylingForSession(dark: Bool) {
         guard let layer = blurView.layer else { return }
+        layer.borderWidth = 1
         if dark {
             tintView.layer?.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 0.62).cgColor
-            layer.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
+            layer.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+            outerStrokeLayer.strokeColor = NSColor.black.withAlphaComponent(0.18).cgColor
+            self.layer?.shadowOpacity = 0.28
             timerLabel.textColor = NSColor.white.withAlphaComponent(0.75)
         } else {
             tintView.layer?.backgroundColor = NSColor(calibratedWhite: 0.97, alpha: 0.74).cgColor
-            layer.borderColor = NSColor.black.withAlphaComponent(0.13).cgColor
+            layer.borderColor = NSColor.black.withAlphaComponent(0.10).cgColor
+            outerStrokeLayer.strokeColor = NSColor.white.withAlphaComponent(0.65).cgColor
+            self.layer?.shadowOpacity = 0.16
             timerLabel.textColor = NSColor.black.withAlphaComponent(0.65)
         }
         // B: caret glyph/dot stay brand green on both paper and obsidian; border/tint already differentiate
         let ink = indicatorBrandGreen
         bars.forEach { $0.layer?.backgroundColor = ink.cgColor }
         dotView.layer?.backgroundColor = ink.cgColor
+        needsLayout = true
     }
 
     func updateTime(_ formatted: String) {
@@ -1366,12 +1495,15 @@ private final class CaretChipView: NSView {
     }
 
     func updateLevel(samples: [Float]) {
-        // ArraySlice keeps parent indices — index via startIndex offset, never raw 0-based.
-        let values = samples.suffix(3)
-        let heights: [CGFloat] = (0..<3).map { index in
-            guard !values.isEmpty else { return 3 }
-            let v = values[values.startIndex + min(index, values.count - 1)]
-            return 3 + CGFloat(max(0, min(1, v))) * (ChipMetrics.glyphHeight - 3)
+        let levels = LevelGlyphCalculator.process(
+            samples: samples,
+            gain: &gain,
+            smoothed: &smoothed
+        )
+        let heights: [CGFloat] = levels.map { level in
+            let minH: CGFloat = 3.0
+            let maxH: CGFloat = ChipMetrics.glyphHeight
+            return minH + (maxH - minH) * min(1.0, max(0.0, level))
         }
         NSLayoutConstraint.deactivate(barHeightConstraints)
         barHeightConstraints = zip(bars, heights).map { $0.heightAnchor.constraint(equalToConstant: $1) }
