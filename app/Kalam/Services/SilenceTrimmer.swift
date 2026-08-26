@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 import OSLog
 
@@ -5,6 +6,15 @@ import OSLog
 
 enum SilenceTrimmer {
     private static let logger = Logger(subsystem: "singhkays.Kalam", category: "SilenceTrimmer")
+
+    /// Shared endpointer core result (K-51): segmentation + fallback decision.
+    /// `fellBack == true` means the caller must use the FULL input
+    /// (conservative fallback); otherwise `ranges` lists the kept
+    /// sample-index ranges in order.
+    fileprivate struct Plan {
+        let ranges: [Range<Int>]
+        let fellBack: Bool
+    }
 
     // Main entry. Defaults tuned for dense speech with very little silence.
     static func trim(
@@ -19,37 +29,62 @@ enum SilenceTrimmer {
         fallbackMinKeepRatio: Double = 0.8  // Baseline guardrail for short clips
     ) -> [Float] {
         guard !samples.isEmpty else { return samples }
-        
+
         let maxAmplitude = samples.map { abs($0) }.max() ?? 0
         logger.info("Trimming audio maxAmplitude=\(maxAmplitude, privacy: .public)")
-        
+
         if maxAmplitude < 0.00001 {
             logger.info("Audio is silent below amplitude threshold")
             return []
         }
-        
+
+        guard let plan = planSegments(
+            samples: samples, sampleRate: sampleRate, maxAmplitude: maxAmplitude,
+            windowMs: windowMs, padMs: padMs, startMarginDb: startMarginDb,
+            stopMarginDb: stopMarginDb, hangoverMs: hangoverMs,
+            fallbackMinSeconds: fallbackMinSeconds, fallbackMinKeepRatio: fallbackMinKeepRatio
+        ) else { return [] }
+
+        if plan.fellBack { return samples }
+        var out: [Float] = []
+        out.reserveCapacity(plan.ranges.reduce(0) { $0 + $1.count })
+        for r in plan.ranges { out.append(contentsOf: samples[r]) }
+        return out
+    }
+
+    /// Shared endpointer core (K-51): segmentation + fallback decision,
+    /// extracted verbatim from `trim`. Returns nil only when the caller must
+    /// produce an EMPTY clip (silent input, or no speech detected on a quiet
+    /// clip); `fellBack == true` means the caller must use the FULL input
+    /// (conservative fallback), otherwise `ranges` lists the kept sample-index
+    /// ranges in order.
+    private static func planSegments(
+        samples: [Float], sampleRate: Int, maxAmplitude: Float,
+        windowMs: Int, padMs: Int, startMarginDb: Float, stopMarginDb: Float,
+        hangoverMs: Int, fallbackMinSeconds: Double, fallbackMinKeepRatio: Double
+    ) -> Plan? {
         let energiesDb = windowedEnergiesDb(samples: samples, sampleRate: sampleRate, windowMs: windowMs)
         let winSamples = max(1, (sampleRate * windowMs) / 1000)
-        
-        guard !energiesDb.isEmpty else { return samples }
-        
+
+        guard !energiesDb.isEmpty else { return Plan(ranges: [], fellBack: true) }
+
         // Estimate noise floor using 5th percentile (more conservative for dense speech with less noise variability)
         let noiseFloorDb = percentile(energiesDb, p: 0.05)
         let startThresholdDb = noiseFloorDb + startMarginDb
         let stopThresholdDb = noiseFloorDb + stopMarginDb
         logger.info("Silence thresholds noiseFloorDb=\(noiseFloorDb, privacy: .public) startThresholdDb=\(startThresholdDb, privacy: .public) stopThresholdDb=\(stopThresholdDb, privacy: .public)")
-        
+
         // Scan the buffer to extract multiple speech segments, dropping long silences
         let padWins = max(0, (padMs + windowMs - 1) / windowMs)
         let hangoverWins = max(1, (hangoverMs + windowMs - 1) / windowMs)
-        
+
         var segments: [(start: Int, end: Int)] = []
-        
+
         var inSpeech = false
         var startWin = 0
         var belowCount = 0
         var lastSpeechWin = -1
-        
+
         for (idx, db) in energiesDb.enumerated() {
             if !inSpeech {
                 if db >= startThresholdDb {
@@ -71,51 +106,51 @@ enum SilenceTrimmer {
                 }
             }
         }
-        
+
         if inSpeech {
             segments.append((start: startWin, end: lastSpeechWin))
         }
-        
+
         if segments.isEmpty {
             logger.info("No speech detected after endpointing")
             // Conservative fallback: send full audio if it looks speech-y
             if maxAmplitude > 0.001 {
                 logger.info("Returning full audio for ASR fallback")
-                return samples
+                return Plan(ranges: [], fellBack: true)
             }
-            return []
+            return nil
         }
-        
+
         // Pad and merge overlapping segments
         var paddedSegments: [(start: Int, end: Int)] = []
         for seg in segments {
             let paddedStart = max(0, seg.start - padWins)
             let paddedEnd = min(energiesDb.count - 1, seg.end + padWins)
-            
+
             if let last = paddedSegments.last, last.end >= paddedStart {
                 paddedSegments[paddedSegments.count - 1] = (start: last.start, end: max(last.end, paddedEnd))
             } else {
                 paddedSegments.append((start: paddedStart, end: paddedEnd))
             }
         }
-        
-        var outSamples: [Float] = []
+
+        var keptRanges: [Range<Int>] = []
         var trimmedCount = 0
-        
+
         for seg in paddedSegments {
             let startIndex = seg.start * winSamples
             let endIndex = min(samples.count, (seg.end + 1) * winSamples)
             if endIndex > startIndex {
-                outSamples.append(contentsOf: samples[startIndex..<endIndex])
+                keptRanges.append(startIndex..<endIndex)
                 trimmedCount += (endIndex - startIndex)
             }
         }
-        
+
         // Fallback policy if the trim looks too aggressive
         let originalDur = Double(samples.count) / Double(sampleRate)
         let trimmedDur = Double(trimmedCount) / Double(sampleRate)
         let keepRatio = Double(trimmedCount) / Double(samples.count)
-        
+
         // Duration-aware fallback:
         // - Short clips remain conservative to avoid clipped utterances.
         // - Long clips allow more aggressive trimming to reduce ASR latency on trailing silence.
@@ -137,22 +172,86 @@ enum SilenceTrimmer {
             dynamicMinSeconds = fallbackMinSeconds
             dynamicMinKeepRatio = fallbackMinKeepRatio
         }
-        
+
         logger.info("Trim decision segments=\(segments.count, privacy: .public) padWins=\(padWins, privacy: .public) keptSamples=\(trimmedCount, privacy: .public) trimmedMs=\(Int(trimmedDur * 1000), privacy: .public) originalMs=\(Int(originalDur * 1000), privacy: .public) keepRatioPercent=\(Int(keepRatio * 100), privacy: .public)")
         logger.info("Trim fallback thresholds minMs=\(Int(dynamicMinSeconds * 1000), privacy: .public) minKeepRatioPercent=\(Int(dynamicMinKeepRatio * 100), privacy: .public)")
-        
+
         let shouldFallback =
         (originalDur >= 1.2 && trimmedDur < dynamicMinSeconds) ||
         (keepRatio < dynamicMinKeepRatio)
-        
+
         if trimmedCount <= 0 || shouldFallback {
             logger.info("Falling back to full audio clip")
-            return samples
+            return Plan(ranges: [], fellBack: true)
         }
-        
-        return outSamples
+
+        return Plan(ranges: keptRanges, fellBack: false)
     }
-    
+
+    /// K-51: endpointing + peak normalization in ONE output pass. Semantically
+    /// identical to `normalizePeak(trim(samples:))` (parity-pinned) — the kept
+    /// samples are assembled once, peak-scanned with `vDSP.maxmgv`, scaled
+    /// with `vDSP_vsmul`, and clamped with `vDSP.clip`. The legacy 5%-skip and
+    /// 1e-6 floor rules are preserved exactly.
+    static func trimAndNormalize(
+        samples: [Float],
+        sampleRate: Int,
+        targetDbFS: Float = -3.0,
+        windowMs: Int = 20,
+        padMs: Int = 300,
+        startMarginDb: Float = 10,
+        stopMarginDb: Float = 6,
+        hangoverMs: Int = 300,
+        fallbackMinSeconds: Double = 4.0,
+        fallbackMinKeepRatio: Double = 0.8
+    ) -> [Float] {
+        guard !samples.isEmpty else { return samples }
+
+        let maxAmplitude = samples.map { abs($0) }.max() ?? 0
+        logger.info("Trimming audio maxAmplitude=\(maxAmplitude, privacy: .public)")
+
+        if maxAmplitude < 0.00001 {
+            logger.info("Audio is silent below amplitude threshold")
+            return []
+        }
+
+        guard let plan = planSegments(
+            samples: samples, sampleRate: sampleRate, maxAmplitude: maxAmplitude,
+            windowMs: windowMs, padMs: padMs, startMarginDb: startMarginDb,
+            stopMarginDb: stopMarginDb, hangoverMs: hangoverMs,
+            fallbackMinSeconds: fallbackMinSeconds, fallbackMinKeepRatio: fallbackMinKeepRatio
+        ) else { return [] }
+
+        var out = plan.fellBack ? samples : {
+            var assembled: [Float] = []
+            assembled.reserveCapacity(plan.ranges.reduce(0) { $0 + $1.count })
+            for r in plan.ranges { assembled.append(contentsOf: samples[r]) }
+            return assembled
+        }()
+        normalizeInPlace(&out, targetDbFS: targetDbFS)
+        return out
+    }
+
+    /// In-place twin of `normalizePeak`'s math via vDSP (single traversal).
+    private static func normalizeInPlace(_ samples: inout [Float], targetDbFS: Float) {
+        guard !samples.isEmpty else { return }
+        var maxAbs: Float = 0
+        samples.withUnsafeMutableBufferPointer { buf in
+            vDSP_maxmgv(buf.baseAddress!, 1, &maxAbs, vDSP_Length(buf.count))
+        }
+        guard maxAbs >= 1e-6 else { return }
+        let targetAmp = pow(10.0, targetDbFS / 20.0)
+        let scale = targetAmp / maxAbs
+        guard abs(scale - 1.0) >= 0.05 else { return }   // legacy within-5% skip
+        samples.withUnsafeMutableBufferPointer { buf in
+            var s = scale
+            vDSP_vsmul(buf.baseAddress!, 1, &s, buf.baseAddress!, 1, vDSP_Length(buf.count))
+            var lo: Float = -1.0
+            var hi: Float = 1.0
+            vDSP_vclip(buf.baseAddress!, 1, &lo, &hi, buf.baseAddress!, 1, vDSP_Length(buf.count))
+        }
+    }
+
     // Peak normalize to target dBFS (default -3 dBFS), clamped to [-1, 1].
     static func normalizePeak(_ samples: [Float], targetDbFS: Float = -3.0) -> [Float] {
         guard !samples.isEmpty else { return samples }
@@ -166,7 +265,7 @@ enum SilenceTrimmer {
         }
         return samples.map { min(max($0 * scale, -1.0), 1.0) }
     }
-    
+
     // MARK: - Energy analysis (shared with SpeechQualityGuard, noise-clip ASR rejection)
 
     /// Per-window RMS energy in clamped dB ([-60, 0]). Extracted verbatim

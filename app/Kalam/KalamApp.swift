@@ -1141,7 +1141,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             stageMark("audio-stop+fetch")
             
             // Trim with hysteresis/hangover/padding + conservative fallback
-            let trimmed = SilenceTrimmer.trim(samples: samples, sampleRate: 16_000)
+            // K-51: fused endpointing + peak normalization (one pass).
+            let trimmed = SilenceTrimmer.trimAndNormalize(samples: samples, sampleRate: 16_000)
             stageMark("trim")
             guard !trimmed.isEmpty else {
                 self.logger.info("No speech detected after trimming")
@@ -1165,7 +1166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Normalize before ASR without spawning an extra child task; this keeps the
                 // transcription flow inside one actor-inherited task for Swift 6 safety.
                 let asrStart = CFAbsoluteTimeGetCurrent()
-                var normalized = SilenceTrimmer.normalizePeak(trimmed, targetDbFS: -3.0)
+                var normalized = trimmed   // already peak-normalized by the fused trim stage
                 
                 // Ensure audio is at least 300ms (4800 samples at 16kHz) to avoid FluidAudio short-utterance rejection
                 if normalized.count < 4800 {
