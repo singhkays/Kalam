@@ -653,6 +653,9 @@ private final class OverlayCapsuleView: NSView {
         var isRecording: Bool = false
     }
 
+    // Container clip for obsidian glass: NSVisualEffectView behindWindow ignores layer.mask/cornerRadius,
+    // so stadium rounding must be provided by a clipping container (wantsLayer + masksToBounds + cornerCurve).
+    private let clipContainer = NSView()
     // Shared subviews
     private let blurView = NSVisualEffectView()
     private let tintView = NSView()
@@ -831,6 +834,16 @@ private final class OverlayCapsuleView: NSView {
         glowMask.opacity = 0.38
         ringGlowLayer.mask = glowMask
 
+        // Container clip: NSVisualEffectView with behindWindow ignores layer.mask/cornerRadius for its backdrop.
+        // Clip via a container NSView that provides the stadium cornerRadius; blurView itself still carries
+        // an explicit mask as a secondary guarantee but the container is the source-of-truth for clipping.
+        clipContainer.wantsLayer = true
+        clipContainer.layer?.masksToBounds = true
+        clipContainer.layer?.cornerCurve = .continuous
+        clipContainer.layer?.cornerRadius = Metrics.cornerRadius
+        clipContainer.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(clipContainer)
+
         // Blur background — dark material, higher translucency
         // Fix: wantsLayer BEFORE material/cornerRadius so layer exists; mask guarantees clip for NSVisualEffectView backdrop
         blurView.wantsLayer = true
@@ -845,10 +858,11 @@ private final class OverlayCapsuleView: NSView {
         blurView.layer?.borderWidth = 1
         blurView.layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
         // Explicit mask: NSVisualEffectView's backdrop ignores cornerRadius/masksToBounds on some builds
+        // Retained as secondary guarantee; primary clip is clipContainer.
         blurMaskLayer.fillColor = NSColor.black.cgColor
         blurView.layer?.mask = blurMaskLayer
         blurView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(blurView)
+        clipContainer.addSubview(blurView)
 
         // Dark tint layer — more translucent for a grey look
         tintView.wantsLayer = true
@@ -932,11 +946,16 @@ private final class OverlayCapsuleView: NSView {
         blurView.addSubview(waveformView)
 
         NSLayoutConstraint.activate([
-            // Blur fills capsule
-            blurView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            blurView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            blurView.topAnchor.constraint(equalTo: topAnchor),
-            blurView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            // Container clip fills capsule; blur fills container (container provides stadium clip for behindWindow)
+            clipContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            clipContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            clipContainer.topAnchor.constraint(equalTo: topAnchor),
+            clipContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            blurView.leadingAnchor.constraint(equalTo: clipContainer.leadingAnchor),
+            blurView.trailingAnchor.constraint(equalTo: clipContainer.trailingAnchor),
+            blurView.topAnchor.constraint(equalTo: clipContainer.topAnchor),
+            blurView.bottomAnchor.constraint(equalTo: clipContainer.bottomAnchor),
 
             // Tint fills blur
             tintView.leadingAnchor.constraint(equalTo: blurView.leadingAnchor),
@@ -1029,13 +1048,18 @@ private final class OverlayCapsuleView: NSView {
     override func layout() {
         super.layout()
         // Task 3: keep shadowPath + outer stroke synced to current bounds+cornerRadius (14 machined /15 pill)
+        // obsidian fix: container clip provides true stadium clipping for behindWindow; blurView mask is secondary
         let radius: CGFloat = isCompactSurface ? Metrics.pillCornerRadius : Metrics.cornerRadius
         layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
         outerStrokeLayer.frame = bounds
         let insetBounds = bounds.insetBy(dx: 0.5, dy: 0.5)
         let innerRadius = max(0, radius - 0.5)
         outerStrokeLayer.path = CGPath(roundedRect: insetBounds, cornerWidth: innerRadius, cornerHeight: innerRadius, transform: nil)
-        // Explicit mask guarantees stadium clip even when NSVisualEffectView ignores cornerRadius
+        // Container clip — source-of-truth for stadium clip (behindWindow ignores blurView.layer.mask)
+        clipContainer.layer?.cornerRadius = radius
+        clipContainer.layer?.masksToBounds = true
+        clipContainer.layer?.cornerCurve = .continuous
+        // Explicit mask guarantees stadium clip even when NSVisualEffectView ignores cornerRadius (secondary)
         blurMaskLayer.frame = blurView.bounds
         blurMaskLayer.path = CGPath(roundedRect: blurView.bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
         blurView.layer?.cornerRadius = radius
@@ -1060,13 +1084,19 @@ private final class OverlayCapsuleView: NSView {
         ringGlowLayer.frame = bounds
         if let mask = ringLayer.mask as? CAShapeLayer {
             mask.frame = bounds
-            mask.path = CGPath(roundedRect: bounds.insetBy(dx: ringLineWidth / 2, dy: ringLineWidth / 2), cornerWidth: radius, cornerHeight: radius, transform: nil)
-            mask.cornerRadius = radius
+            // 1.5px ring inset 0.75: mask stroke sits exactly on stadium clip, not interior smear
+            let inset: CGFloat = ringLineWidth / 2 // 0.75
+            let insetRadius = max(0, radius - inset)
+            mask.path = CGPath(roundedRect: bounds.insetBy(dx: inset, dy: inset), cornerWidth: insetRadius, cornerHeight: insetRadius, transform: nil)
+            mask.cornerRadius = insetRadius
         }
         if let mask = ringGlowLayer.mask as? CAShapeLayer {
             mask.frame = bounds
-            mask.path = CGPath(roundedRect: bounds.insetBy(dx: 3, dy: 3), cornerWidth: radius, cornerHeight: radius, transform: nil)
-            mask.cornerRadius = radius
+            // 6px glow inset 3: keep halo aligned to stadium, prevent interior smear
+            let inset: CGFloat = 3
+            let insetRadius = max(0, radius - inset)
+            mask.path = CGPath(roundedRect: bounds.insetBy(dx: inset, dy: inset), cornerWidth: insetRadius, cornerHeight: insetRadius, transform: nil)
+            mask.cornerRadius = insetRadius
         }
     }
 
@@ -1189,19 +1219,12 @@ private final class OverlayCapsuleView: NSView {
         if isCompactSurface {
             layer.cornerRadius = Metrics.pillCornerRadius
             layer.borderWidth = 1
-            // Pill appearance follows session; machined is always dark (see else)
-            blurView.appearance = NSAppearance(named: usesDarkAppearanceForSession ? .darkAqua : .aqua)
-            if usesDarkAppearanceForSession {
-                tintView.layer?.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 0.62).cgColor
-                layer.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
-                outerStrokeLayer.strokeColor = NSColor.black.withAlphaComponent(0.18).cgColor
-                self.layer?.shadowOpacity = 0.28
-            } else {
-                tintView.layer?.backgroundColor = NSColor(calibratedWhite: 0.97, alpha: 0.74).cgColor
-                layer.borderColor = NSColor.black.withAlphaComponent(0.10).cgColor
-                outerStrokeLayer.strokeColor = NSColor.white.withAlphaComponent(0.65).cgColor
-                self.layer?.shadowOpacity = 0.16
-            }
+            // Universal obsidian glass: whisper pill always dark, regardless of session appearance
+            blurView.appearance = NSAppearance(named: .darkAqua)
+            tintView.layer?.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 0.62).cgColor
+            layer.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+            outerStrokeLayer.strokeColor = NSColor.black.withAlphaComponent(0.18).cgColor
+            self.layer?.shadowOpacity = 0.28
             appIconTopConstraint?.isActive = false
             appIconCenterYConstraint?.isActive = true
             appIconWidthConstraint?.constant = 16
@@ -1210,16 +1233,9 @@ private final class OverlayCapsuleView: NSView {
             timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
             appIconView.layer?.cornerRadius = 4
             pillLevelGlyph.isHidden = false
-            // Review gap 4: light-appearance pill needs dark-on-light label ink.
-            let nameInk = usesDarkAppearanceForSession ? NSColor.white : NSColor.black
-            appNameLabel.textColor = nameInk
-            timerLabel.textColor = usesDarkAppearanceForSession
-                ? NSColor.white.withAlphaComponent(0.55)
-                : NSColor.black.withAlphaComponent(0.65)
-            // Re-review residual: the transcribing pill's message label needs the same treatment.
-            messageLabel.textColor = usesDarkAppearanceForSession
-                ? NSColor.white
-                : NSColor.black.withAlphaComponent(0.85)
+            appNameLabel.textColor = .white
+            timerLabel.textColor = NSColor.white.withAlphaComponent(0.55)
+            messageLabel.textColor = .white
         } else {
             // Machined deck defaults — always dark hudWindow regardless of session appearance
             layer.cornerRadius = Metrics.cornerRadius
@@ -1246,14 +1262,17 @@ private final class OverlayCapsuleView: NSView {
         recordingDotView.layer?.backgroundColor = indicatorBrandGreen.cgColor
         // B: whisper bars are brand green in BOTH appearances for contrast + brand consistency
         pillLevelGlyph.ink = indicatorBrandGreen
-        // Keep mask in sync with new radius; layout() finalizes, but seed here for immediate clip
+        // Keep container clip + mask in sync with new radius; layout() finalizes, but seed here for immediate clip
         let currentRadius: CGFloat = isCompactSurface ? Metrics.pillCornerRadius : Metrics.cornerRadius
+        clipContainer.layer?.cornerRadius = currentRadius
+        clipContainer.layer?.masksToBounds = true
+        clipContainer.layer?.cornerCurve = .continuous
         blurMaskLayer.frame = blurView.bounds
         if blurView.bounds.width > 0 && blurView.bounds.height > 0 {
             blurMaskLayer.path = CGPath(roundedRect: blurView.bounds, cornerWidth: currentRadius, cornerHeight: currentRadius, transform: nil)
         }
         needsLayout = true
-        // Force layout now so shadowPath/outerStroke aren't one frame behind (prevents square flash)
+        // Force layout now so shadowPath/outerStroke/clipContainer aren't one frame behind (prevents square flash)
         layoutSubtreeIfNeeded()
     }
 
@@ -1646,6 +1665,8 @@ private final class CaretChipView: NSView {
         static let timerMinWidth: CGFloat = 34
     }
 
+    // Container clip for obsidian glass (mirrors OverlayCapsuleView): behindWindow ignores blurView.layer.mask
+    private let clipContainer = NSView()
     private let blurView = NSVisualEffectView()
     private let tintView = NSView()
     private let dotView = NSView()
@@ -1730,6 +1751,14 @@ private final class CaretChipView: NSView {
         glowMask.opacity = 0.38
         ringGlowLayer.mask = glowMask
 
+        // Container clip: behindWindow ignores blurView.layer.mask — clipContainer provides stadium rounding
+        clipContainer.wantsLayer = true
+        clipContainer.layer?.masksToBounds = true
+        clipContainer.layer?.cornerCurve = .continuous
+        clipContainer.layer?.cornerRadius = 15
+        clipContainer.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(clipContainer)
+
         // Fix: wantsLayer BEFORE material/cornerRadius; mask guarantees NSVisualEffectView clip
         blurView.wantsLayer = true
         blurView.material = .hudWindow
@@ -1740,11 +1769,11 @@ private final class CaretChipView: NSView {
         blurView.layer?.masksToBounds = true
         blurView.layer?.cornerCurve = .continuous
         blurView.layer?.borderWidth = 1
-        // Explicit mask: backdrop ignores cornerRadius on some builds
+        // Explicit mask: backdrop ignores cornerRadius on some builds (secondary to container)
         blurMaskLayer.fillColor = NSColor.black.cgColor
         blurView.layer?.mask = blurMaskLayer
         blurView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(blurView)
+        clipContainer.addSubview(blurView)
 
         tintView.wantsLayer = true
         tintView.translatesAutoresizingMaskIntoConstraints = false
@@ -1776,10 +1805,15 @@ private final class CaretChipView: NSView {
         blurView.addSubview(timerLabel)
 
         NSLayoutConstraint.activate([
-            blurView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            blurView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            blurView.topAnchor.constraint(equalTo: topAnchor),
-            blurView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            clipContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            clipContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            clipContainer.topAnchor.constraint(equalTo: topAnchor),
+            clipContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            blurView.leadingAnchor.constraint(equalTo: clipContainer.leadingAnchor),
+            blurView.trailingAnchor.constraint(equalTo: clipContainer.trailingAnchor),
+            blurView.topAnchor.constraint(equalTo: clipContainer.topAnchor),
+            blurView.bottomAnchor.constraint(equalTo: clipContainer.bottomAnchor),
 
             tintView.leadingAnchor.constraint(equalTo: blurView.leadingAnchor),
             tintView.trailingAnchor.constraint(equalTo: blurView.trailingAnchor),
@@ -1809,13 +1843,18 @@ private final class CaretChipView: NSView {
     override func layout() {
         super.layout()
         // Task 3: sync shadowPath + outer stroke to bounds (chip 15 / fallback 8)
+        // obsidian fix: container clip is primary for behindWindow; mask secondary
         let radius: CGFloat = 15 // chip uses pill radius (height 30 -> 15); keeps 1:1 with blurView
         layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
         outerStrokeLayer.frame = bounds
         let insetBounds = bounds.insetBy(dx: 0.5, dy: 0.5)
         let innerRadius = max(0, radius - 0.5)
         outerStrokeLayer.path = CGPath(roundedRect: insetBounds, cornerWidth: innerRadius, cornerHeight: innerRadius, transform: nil)
-        // Explicit mask guarantees stadium clip for NSVisualEffectView
+        // Container clip — source-of-truth for stadium (behindWindow ignores blurView.layer.mask)
+        clipContainer.layer?.cornerRadius = radius
+        clipContainer.layer?.masksToBounds = true
+        clipContainer.layer?.cornerCurve = .continuous
+        // Explicit mask guarantees stadium clip for NSVisualEffectView (secondary)
         blurMaskLayer.frame = blurView.bounds
         blurMaskLayer.path = CGPath(roundedRect: blurView.bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
         blurView.layer?.cornerRadius = radius
@@ -1838,13 +1877,17 @@ private final class CaretChipView: NSView {
         ringGlowLayer.frame = bounds
         if let mask = ringLayer.mask as? CAShapeLayer {
             mask.frame = bounds
-            mask.path = CGPath(roundedRect: bounds.insetBy(dx: ringLineWidth / 2, dy: ringLineWidth / 2), cornerWidth: radius, cornerHeight: radius, transform: nil)
-            mask.cornerRadius = radius
+            let inset: CGFloat = ringLineWidth / 2 // 0.75
+            let insetRadius = max(0, radius - inset)
+            mask.path = CGPath(roundedRect: bounds.insetBy(dx: inset, dy: inset), cornerWidth: insetRadius, cornerHeight: insetRadius, transform: nil)
+            mask.cornerRadius = insetRadius
         }
         if let mask = ringGlowLayer.mask as? CAShapeLayer {
             mask.frame = bounds
-            mask.path = CGPath(roundedRect: bounds.insetBy(dx: 3, dy: 3), cornerWidth: radius, cornerHeight: radius, transform: nil)
-            mask.cornerRadius = radius
+            let inset: CGFloat = 3
+            let insetRadius = max(0, radius - inset)
+            mask.path = CGPath(roundedRect: bounds.insetBy(dx: inset, dy: inset), cornerWidth: insetRadius, cornerHeight: insetRadius, transform: nil)
+            mask.cornerRadius = insetRadius
         }
     }
 
@@ -1949,6 +1992,7 @@ private final class CaretChipView: NSView {
     /// Task 6: idempotently handles appearance flips + ReduceMotion without early returns;
     /// propagates ReduceMotion and strips ring spin in-place so nothing spins under Reduce Motion or offscreen.
     func applySurfaceStylingForSession(dark: Bool, reduceMotion: Bool? = nil) {
+        _ = dark // universal obsidian: always dark, param retained for call-site compatibility
         if let rm = reduceMotion { sessionReduceMotion = rm }
         guard let layer = blurView.layer else { return }
         // Ensure mask survives layer recreation
@@ -1968,26 +2012,21 @@ private final class CaretChipView: NSView {
         self.layer?.shadowRadius = 10
         self.layer?.shadowOffset = CGSize(width: 0, height: 10)
         layer.borderWidth = 1
-        // Chip appearance follows session dark/light; force NSAppearance so hudWindow renders correctly in light mode
-        blurView.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-        if dark {
-            tintView.layer?.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 0.62).cgColor
-            layer.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
-            outerStrokeLayer.strokeColor = NSColor.black.withAlphaComponent(0.18).cgColor
-            self.layer?.shadowOpacity = 0.28
-            timerLabel.textColor = NSColor.white.withAlphaComponent(0.75)
-        } else {
-            tintView.layer?.backgroundColor = NSColor(calibratedWhite: 0.97, alpha: 0.74).cgColor
-            layer.borderColor = NSColor.black.withAlphaComponent(0.10).cgColor
-            outerStrokeLayer.strokeColor = NSColor.white.withAlphaComponent(0.65).cgColor
-            self.layer?.shadowOpacity = 0.16
-            timerLabel.textColor = NSColor.black.withAlphaComponent(0.65)
-        }
+        // Universal obsidian glass: caret chip always dark
+        blurView.appearance = NSAppearance(named: .darkAqua)
+        tintView.layer?.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 0.62).cgColor
+        layer.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+        outerStrokeLayer.strokeColor = NSColor.black.withAlphaComponent(0.18).cgColor
+        self.layer?.shadowOpacity = 0.28
+        timerLabel.textColor = NSColor.white.withAlphaComponent(0.75)
         // B: caret glyph/dot stay brand green on both paper and obsidian; border/tint already differentiate
         let ink = indicatorBrandGreen
         bars.forEach { $0.layer?.backgroundColor = ink.cgColor }
         dotView.layer?.backgroundColor = ink.cgColor
-        // Keep mask in sync; layout() will finalize frame, seed here for immediate clip
+        // Keep container clip + mask in sync; layout() will finalize frame, seed here for immediate clip
+        clipContainer.layer?.cornerRadius = 15
+        clipContainer.layer?.masksToBounds = true
+        clipContainer.layer?.cornerCurve = .continuous
         blurMaskLayer.frame = blurView.bounds
         if blurView.bounds.width > 0 && blurView.bounds.height > 0 {
             blurMaskLayer.path = CGPath(roundedRect: blurView.bounds, cornerWidth: 15, cornerHeight: 15, transform: nil)
