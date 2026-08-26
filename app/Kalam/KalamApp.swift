@@ -65,10 +65,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         static let defaultEnableStageTiming = true
     }
 
-    /// K-49: additive hard ceiling over the adaptive post-roll for the
-    /// early-exit stop. Worst case (speech to the very end) matches the old
-    /// fixed-sleep behavior plus this allowance.
-    static let postRollEarlyExitExtraMaxMs = 150
+    /// K-49: small safety floor for the early-exit stop. The trailing-phoneme
+    /// protection comes from the 3-consecutive-silent-polls rule; this floor
+    /// just avoids finishing on the very first polls after key-up.
+    static let postRollEarlyExitMinMs = 60
 
     /// Adaptive post-roll for the audio stop pipeline: estimate segment duration
     /// from PTT hold time, clamp to the configured 100–150 ms range (50–400/500
@@ -1089,11 +1089,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 defaults: .standard,
                 logger: self.logger
             )
-            // K-49: the adaptive value is the FLOOR now; the tail-energy poll
-            // may finish sooner than the old fixed sleep ever allowed.
+            // K-49: the tail-silence poll is the trailing-phoneme protection
+            // (3 consecutive silent 20 ms windows + a small safety floor). The
+            // old adaptive post-roll value is now the CEILING, so the stop can
+            // only finish EARLIER than the old fixed sleep, never later.
             let config = PostRollDecision.Config(
-                minMs: postRollMs,
-                maxMs: postRollMs + Self.postRollEarlyExitExtraMaxMs
+                minMs: Self.postRollEarlyExitMinMs,
+                maxMs: postRollMs
             )
             return await self.audio.stopWithEarlyExit(pinnedGeneration: audioGeneration, config: config)
         }

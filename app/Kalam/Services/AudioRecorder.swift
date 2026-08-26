@@ -171,6 +171,9 @@ final class AudioRecorder: @unchecked Sendable {
                 AudioUnitGetProperty($0, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &bound, &size)
             }
             boundDeviceID = (qStatus == noErr) ? bound : nil
+            if boundDeviceID == nil {
+                logger.info("Device ring shrink skipped: bound-device query failed osStatus=\(qStatus.map { Int($0) } ?? -1, privacy: .public)")
+            }
         } else {
             var def = AudioDeviceID(0)
             var size = UInt32(MemoryLayout<AudioDeviceID>.size)
@@ -181,9 +184,16 @@ final class AudioRecorder: @unchecked Sendable {
             let qStatus = AudioObjectGetPropertyData(
                 AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &def)
             boundDeviceID = (qStatus == noErr) ? def : nil
+            if boundDeviceID == nil {
+                logger.info("Device ring shrink skipped: default-input query failed osStatus=\(Int(qStatus), privacy: .public)")
+            }
         }
-        if let boundDeviceID, let applied = Self.shrinkDeviceRingBuffer(deviceID: boundDeviceID) {
-            logger.info("Device ring buffer applied frames=\(applied, privacy: .public)")
+        if let boundDeviceID {
+            if let applied = Self.shrinkDeviceRingBuffer(deviceID: boundDeviceID) {
+                logger.info("Device ring buffer applied frames=\(applied, privacy: .public)")
+            } else {
+                logger.info("Device ring buffer shrink failed (set or read-back); leaving device default")
+            }
         }
 
         let inputFormat = input.outputFormat(forBus: 0)

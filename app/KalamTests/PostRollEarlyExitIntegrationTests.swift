@@ -43,15 +43,15 @@ final class PostRollEarlyExitIntegrationTests: XCTestCase {
         // burst (observed live: zeros surfaced only after ~250 ms of feeding).
         try await Task.sleep(nanoseconds: 300_000_000)
 
-        let config = PostRollDecision.Config(minMs: 120, maxMs: 270)
+        let config = PostRollDecision.Config(minMs: 60, maxMs: 150)
         let start = CFAbsoluteTimeGetCurrent()
         let samples = await recorder.stopWithEarlyExit(pinnedGeneration: generation, config: config)
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
 
         XCTAssertFalse(samples.isEmpty)
-        // Early exit must land well under the 270 ceiling; generous margin
-        // for VM scheduling noise.
-        XCTAssertLessThan(elapsedMs, 240)
+        // Early exit must finish at/below the old fixed-sleep ceiling (150)
+        // with generous margin for VM scheduling noise.
+        XCTAssertLessThan(elapsedMs, 145)
     }
 
     @MainActor
@@ -69,13 +69,13 @@ final class PostRollEarlyExitIntegrationTests: XCTestCase {
         }
         defer { feeder.cancel() }
 
-        let config = PostRollDecision.Config(minMs: 80, maxMs: 230)
+        let config = PostRollDecision.Config(minMs: 40, maxMs: 150)
         let start = CFAbsoluteTimeGetCurrent()
         _ = await recorder.stopWithEarlyExit(pinnedGeneration: generation, config: config)
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
 
         // Ceiling honored (plus generous scheduling slack); never EARLY.
-        XCTAssertGreaterThanOrEqual(elapsedMs, 210)
+        XCTAssertGreaterThanOrEqual(elapsedMs, 130)
     }
 
     @MainActor
