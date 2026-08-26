@@ -1191,26 +1191,33 @@ final class PillLevelGlyphView: NSView {
         didSet { needsDisplay = true }
     }
     private var levels: [CGFloat] = [0.3, 0.6, 0.45]
-    /// Running peak with decay — the deck's WaveformView applies AGC internally, but
-    /// raw mic samples peak around 0.02-0.05 in normal speech, which renders as dots
-    /// without normalization. This mirrors that AGC behavior for the compact glyph.
+    /// Running peak with slow decay — mirrors the deck waveform's AGC so normal
+    /// speech (~0.02-0.05 raw) renders as full bars instead of dots.
     private var referencePeak: CGFloat = 0.08
+    /// Smoothed display values. Fast attack / slow release gives the fluid
+    /// mockup motion instead of instant spike-and-snap-back.
+    private var smoothed: [CGFloat] = [0.3, 0.6, 0.45]
 
     func update(samples: [Float]) {
         // ArraySlice keeps parent indices — index via startIndex offset.
         let values = samples.suffix(3)
-        var next: [CGFloat] = []
         var framePeak: CGFloat = 0
+        var targets: [CGFloat] = []
         for index in 0..<3 {
-            guard !values.isEmpty else { next.append(0.15); continue }
+            guard !values.isEmpty else { targets.append(0.08); continue }
             let v = values[values.startIndex + min(index, values.count - 1)]
             framePeak = max(framePeak, CGFloat(v))
-            next.append(CGFloat(max(0, min(1, v))))
+            targets.append(CGFloat(max(0, min(1, v))))
         }
-        // Decay toward the frame peak so loud phrases set the ceiling and quiet
-        // tails stay proportional; floor prevents divide-by-zero blowup.
-        referencePeak = max(framePeak, referencePeak * 0.92, 0.02)
-        levels = next.map { min(1, $0 / referencePeak) }
+        // Slow peak decay (2%/tick) so loud phrases set the ceiling for a while.
+        referencePeak = max(framePeak, referencePeak * 0.98, 0.02)
+        // Per-bar attack/release: rise quickly with the voice, fall gently after.
+        for index in 0..<3 {
+            let normalized = min(1, targets[index] / referencePeak)
+            let coefficient = normalized > smoothed[index] ? CGFloat(0.5) : CGFloat(0.15)
+            smoothed[index] += (normalized - smoothed[index]) * coefficient
+        }
+        levels = smoothed
         needsDisplay = true
     }
 
@@ -1222,7 +1229,8 @@ final class PillLevelGlyphView: NSView {
         let startX = (bounds.width - totalBarWidth) / 2
         ctx.setFillColor(ink.cgColor)
         for (index, level) in levels.enumerated() {
-            let h = max(3, bounds.height * max(0.18, level))
+            // Low floor stays clearly bar-shaped (never collapses into a dot).
+            let h = bounds.height * max(0.14, min(1, level))
             let x = startX + CGFloat(index) * (barWidth + gap)
             let rect = CGRect(x: x, y: (bounds.height - h) / 2, width: barWidth, height: h)
             let path = NSBezierPath(roundedRect: rect, xRadius: barWidth / 2, yRadius: barWidth / 2)
