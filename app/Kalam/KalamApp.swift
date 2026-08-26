@@ -63,6 +63,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         static let defaultEnableStageTiming = true
     }
 
+    /// K-49: additive hard ceiling over the adaptive post-roll for the
+    /// early-exit stop. Worst case (speech to the very end) matches the old
+    /// fixed-sleep behavior plus this allowance.
+    static let postRollEarlyExitExtraMaxMs = 150
+
     /// Adaptive post-roll for the audio stop pipeline: estimate segment duration
     /// from PTT hold time, clamp to the configured 100–150 ms range (50–400/500
     /// hard bounds), floors at the min for short bursts to avoid over-trimming.
@@ -1082,8 +1087,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 defaults: .standard,
                 logger: self.logger
             )
-            try? await Task.sleep(nanoseconds: UInt64(postRollMs) * 1_000_000)
-            return self.audio.finishStop(expectedGeneration: audioGeneration)
+            // K-49: the adaptive value is the FLOOR now; the tail-energy poll
+            // may finish sooner than the old fixed sleep ever allowed.
+            let config = PostRollDecision.Config(
+                minMs: postRollMs,
+                maxMs: postRollMs + Self.postRollEarlyExitExtraMaxMs
+            )
+            return await self.audio.stopWithEarlyExit(pinnedGeneration: audioGeneration, config: config)
         }
         recordingStopTask = stopTask
         

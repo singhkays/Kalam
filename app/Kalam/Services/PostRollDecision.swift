@@ -20,9 +20,24 @@ enum PostRollDecision {
         var maxMs: Int
         var pollIntervalMs: Int = 15
         /// Consecutive silent polls required to finish before the max.
+        /// `0` means finish as soon as the minimum elapses.
         var requiredSilentPolls: Int = 3
 
         var minIntervalNanos: UInt64 { UInt64(max(1, pollIntervalMs)) * 1_000_000 }
+
+        /// Asserts `maxMs >= minMs`: the configured minimum ALWAYS elapses,
+        /// so a config whose ceiling sits below its floor would silently
+        /// break that safety posture (debug-only guard).
+        init(minMs: Int, maxMs: Int, pollIntervalMs: Int = 15, requiredSilentPolls: Int = 3) {
+            assert(
+                maxMs >= minMs,
+                "PostRollDecision.Config: maxMs (\(maxMs)) must be >= minMs (\(minMs))"
+            )
+            self.minMs = minMs
+            self.maxMs = maxMs
+            self.pollIntervalMs = pollIntervalMs
+            self.requiredSilentPolls = requiredSilentPolls
+        }
     }
 
     static func shouldFinish(config: Config, elapsedMs: Int, consecutiveSilentPolls: Int) -> Bool {
@@ -33,7 +48,8 @@ enum PostRollDecision {
 
     /// Tail-silence verdict for a trailing sample slice (16 kHz mono).
     ///
-    /// Silent iff EVERY `windowMs` window is at or below BOTH:
+    /// An EMPTY tail counts as silent (nothing published yet this session is
+    /// not speech). Otherwise silent iff EVERY `windowMs` window is at or below BOTH:
     ///  - the slice's own 5th-percentile floor + `stopMarginDb` (relative,
     ///    matching the endpointer's stop margin), AND
     ///  - the `absoluteCapDb` cap — so a uniformly LOUD tail (continuous

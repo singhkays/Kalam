@@ -281,6 +281,48 @@ final class AudioRecorder: @unchecked Sendable {
         return out
     }
 
+    /// Trailing capture samples for post-roll polling (consumer side; may
+    /// block). Reads the waveform ring, which mirrors everything published
+    /// this session — capacity 4096 samples (256 ms at 16 kHz) covers the
+    /// three 20 ms analysis windows the tail verdict needs.
+    func recentCaptureSamples(count: Int) -> [Float] {
+        exchange.waveform(sampleCount: count)
+    }
+
+    /// K-49: adaptive post-roll with energy-polled early exit. Polls the
+    /// trailing buffer every `config.pollIntervalMs`; finishes as soon as the
+    /// tail reads silent for `requiredSilentPolls` consecutive polls AND the
+    /// minimum elapsed, or at the ceiling, whichever comes first. The
+    /// generation was pinned by the CALLER before the first suspension; the
+    /// final teardown is the same `finishStop` critical section the fixed
+    /// sleep used, so rapid-re-record staleness semantics are unchanged.
+    func stopWithEarlyExit(pinnedGeneration: Int, config: PostRollDecision.Config) async -> [Float] {
+        let start = CFAbsoluteTimeGetCurrent()
+        var consecutiveSilent = 0
+        // ~60 ms slice = three 20 ms analysis windows for the tail verdict.
+        while true {
+            try? await Task.sleep(nanoseconds: config.minIntervalNanos)
+            if Task.isCancelled { break }
+            let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
+            if PostRollDecision.tailIsSilent(
+                samples: recentCaptureSamples(count: 960),
+                sampleRate: 16_000
+            ) {
+                consecutiveSilent += 1
+            } else {
+                consecutiveSilent = 0
+            }
+            if PostRollDecision.shouldFinish(
+                config: config,
+                elapsedMs: elapsedMs,
+                consecutiveSilentPolls: consecutiveSilent
+            ) {
+                break
+            }
+        }
+        return finishStop(expectedGeneration: pinnedGeneration)
+    }
+
     func cancelCapture() async {
         _ = finishStop(expectedGeneration: currentCaptureGeneration)
     }

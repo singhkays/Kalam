@@ -29,6 +29,26 @@ final class PostRollDecisionTests: XCTestCase {
         XCTAssertTrue(PostRollDecision.shouldFinish(config: config, elapsedMs: 120, consecutiveSilentPolls: 3))
     }
 
+    func testExactlyAtMinimumWithRequiredSilentPollsFinishes() {
+        // Boundary pin: elapsed == minMs (not just >) satisfies the floor.
+        let config = PostRollDecision.Config(minMs: 100, maxMs: 150)
+        XCTAssertTrue(PostRollDecision.shouldFinish(config: config, elapsedMs: 100, consecutiveSilentPolls: 3))
+    }
+
+    func testZeroElapsedNeverFinishes() {
+        // Boundary pin: no polls have happened yet; must not finish.
+        let config = PostRollDecision.Config(minMs: 100, maxMs: 150)
+        XCTAssertFalse(PostRollDecision.shouldFinish(config: config, elapsedMs: 0, consecutiveSilentPolls: 3))
+    }
+
+    func testZeroRequiredSilentPollsFinishesAsSoonAsMinimumElapses() {
+        // Documented behavior: requiredSilentPolls == 0 disables the silence
+        // gate entirely — finishing happens the moment the minimum elapses.
+        let config = PostRollDecision.Config(minMs: 100, maxMs: 150, requiredSilentPolls: 0)
+        XCTAssertFalse(PostRollDecision.shouldFinish(config: config, elapsedMs: 99, consecutiveSilentPolls: 0))
+        XCTAssertTrue(PostRollDecision.shouldFinish(config: config, elapsedMs: 100, consecutiveSilentPolls: 0))
+    }
+
     // MARK: tailIsSilent
 
     func testDigitalSilenceTailIsSilent() {
