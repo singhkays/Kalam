@@ -196,23 +196,66 @@ struct BeingHeardPane: View {
                                     .frame(width: 64, height: 22)
                                     .overlay(
                                         HStack(spacing: 3) {
-                                            Capsule().fill(Color.kGreen).frame(width: 3, height: 6)
-                                            Capsule().fill(Color.kGreen).frame(width: 3, height: 13)
-                                            Capsule().fill(Color.kGreen).frame(width: 3, height: 9)
+                                            Capsule().fill(Color(hex: "52B788")).frame(width: 3, height: 6)
+                                            Capsule().fill(Color(hex: "52B788")).frame(width: 3, height: 13)
+                                            Capsule().fill(Color(hex: "52B788")).frame(width: 3, height: 9)
                                         }
                                     )
                             case .whisper:
-                                Capsule()
-                                    .stroke(Color.white.opacity(0.3))
-                                    .frame(width: 44, height: 12)
-                            case .caret:
+                                // Populated pill per study v2: icon + name + level glyph + timer.
                                 HStack(spacing: 4) {
-                                    Circle()
-                                        .fill(Color.kGreen)
+                                    RoundedRectangle(cornerRadius: 2.5)
+                                        .fill(Color.white.opacity(0.75))
                                         .frame(width: 8, height: 8)
-                                    Rectangle()
-                                        .fill(Color.black.opacity(0.6))
-                                        .frame(width: 1.5, height: 14)
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(Color.white.opacity(0.85))
+                                        .frame(width: 16, height: 4)
+                                    Spacer(minLength: 3)
+                                    HStack(spacing: 1.5) {
+                                        Capsule().fill(Color(hex: "52B788")).frame(width: 1.5, height: 4)
+                                        Capsule().fill(Color(hex: "52B788")).frame(width: 1.5, height: 7)
+                                        Capsule().fill(Color(hex: "52B788")).frame(width: 1.5, height: 5)
+                                    }
+                                    Text("0:07")
+                                        .font(.system(size: 6.5, weight: .medium).monospacedDigit())
+                                        .foregroundStyle(Color.white.opacity(0.62))
+                                }
+                                .padding(.horizontal, 5)
+                                .frame(width: 64, height: 15)
+                                .background(
+                                    Capsule().fill(Color.black.opacity(0.55))
+                                )
+                                .overlay(
+                                    Capsule().stroke(Color.white.opacity(0.28))
+                                )
+                            case .caret:
+                                // Inline chip per study v2: dot + bars + timer trailing a caret bar
+                                // on a light page background (no app name — pinned ruling).
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(Color(red: 0.98, green: 0.98, blue: 0.97))
+                                        .frame(width: 72, height: 26)
+                                    HStack(spacing: 3) {
+                                        Rectangle()
+                                            .fill(Color(hex: "1A5C3A"))
+                                            .frame(width: 1, height: 9)
+                                        Circle()
+                                            .fill(Color(hex: "52B788"))
+                                            .frame(width: 4.5, height: 4.5)
+                                        HStack(spacing: 1) {
+                                            Capsule().fill(Color(hex: "52B788")).frame(width: 1.2, height: 3)
+                                            Capsule().fill(Color(hex: "52B788")).frame(width: 1.2, height: 5.5)
+                                            Capsule().fill(Color(hex: "52B788")).frame(width: 1.2, height: 4)
+                                        }
+                                        Text("0:47")
+                                            .font(.system(size: 6, weight: .medium).monospacedDigit())
+                                            .foregroundStyle(Color.white.opacity(0.78))
+                                            .padding(.horizontal, 2.5)
+                                            .padding(.vertical, 1)
+                                            .background(
+                                                Capsule().fill(Color.black.opacity(0.82))
+                                            )
+                                    }
                                 }
                             }
                         }
@@ -221,6 +264,7 @@ struct BeingHeardPane: View {
                                 .font(SettingsType.styleSampleWellLabel)
                                 .compassTracking(SettingsType.trackMonoState)
                                 .foregroundStyle(selected ? Color.kGreen : Color.kInk3)
+                            Spacer(minLength: 4)
                             if selected {
                                 Text("SELECTED")
                                     .font(SettingsType.styleSampleWellLabel)
