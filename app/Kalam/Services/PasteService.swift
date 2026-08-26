@@ -29,6 +29,11 @@ final class PasteService {
         var isProcessTrusted: () -> Bool = { AXIsProcessTrusted() }
         var postUnicodeText: (String) -> Bool = { PasteService.postUnicodeTextIfPossible($0) }
         var postCmdV: () -> Bool = { PasteService.postCmdV() }
+        /// K-50 experiment: deliver the Cmd+V chord directly to a PID instead
+        /// of posting globally. Some apps drop unfocused injected events —
+        /// gated behind `internal.latency.pidPasteEnabled` (default OFF) with
+        /// automatic fallback to the global post.
+        var postCmdVToPid: (pid_t) -> Bool = { PasteService.postCmdVToPid($0) }
         var insertTextViaAccessibility: (String) -> String? = { PasteService.insertTextViaAccessibility($0) }
         /// record-time paste target capture: insert into a specific captured element (record-time paste target).
         var insertTextIntoElement: (AXUIElement, String) -> String? = { PasteService.insertTextViaAccessibility(into: $0, text: $1) }
@@ -84,6 +89,15 @@ final class PasteService {
     }
 
     func paste(_ text: String) async throws {
+        try await paste(text, preferPid: nil, pidPostingEnabled: false)
+    }
+
+    /// - Parameters:
+    ///   - preferPid: record-time target PID for the PID-posted Cmd+V
+    ///     experiment. Only consulted on the Cmd+V leg (short dictations
+    ///     still take the unicode path untouched).
+    ///   - pidPostingEnabled: defaults-gated kill switch (default false).
+    func paste(_ text: String, preferPid: pid_t?, pidPostingEnabled: Bool) async throws {
         // Check Accessibility without prompting in the hot path.
         guard strategies.isProcessTrusted() else {
             Self.logger.warning("Accessibility not trusted; aborting paste")
@@ -113,6 +127,13 @@ final class PasteService {
         // defer above still restores the clipboard.
         try Task.checkCancellation()
 
+        if pidPostingEnabled, let preferPid, strategies.postCmdVToPid(preferPid) {
+            Self.logger.info("Paste succeeded via PID-posted Cmd+V pid=\(preferPid, privacy: .public)")
+            outcome = .cmdV
+            return
+        } else if pidPostingEnabled, preferPid != nil {
+            Self.logger.warning("PID-posted Cmd+V refused; falling back to global post")
+        }
         if strategies.postCmdV() {
             Self.logger.info("Paste succeeded via Cmd+V")
             outcome = .cmdV
@@ -168,6 +189,14 @@ final class PasteService {
             // identifies the record-time target.
             return .capturedApp(capturedPID)
         }
+    }
+
+    /// K-50: only the frontmost CGEvent route depends on the frontmost app
+    /// having settled. Captured-element pastes via AX set-value are focus-
+    /// independent; captured-app performs its own activate + settle poll.
+    static func requiresFrontmostSettle(_ target: PasteTarget) -> Bool {
+        if case .frontmost = target { return true }
+        return false
     }
 
     struct InsertedPasteboardState {
@@ -273,6 +302,32 @@ final class PasteService {
         vDown.post(tap: .cghidEventTap)
         vUp.post(tap: .cghidEventTap)
         cmdUp.post(tap: .cghidEventTap)
+        return true
+    }
+
+    /// K-50 experiment: post the Cmd+V chord directly to a PID. Honesty note:
+    /// like `postCmdV`, a `true` return means EVENTS WERE POSTED, not that
+    /// the target consumed them — the compatibility matrix (manual gate) is
+    /// what earns the `internal.latency.pidPasteEnabled` flag being flipped
+    /// ON, and the kill-switch is the instant rollback.
+    private static func postCmdVToPid(_ pid: pid_t) -> Bool {
+        let source = CGEventSource(stateID: .combinedSessionState)
+        let cmdKey: CGKeyCode = 55
+        let vKey: CGKeyCode = 9
+        guard let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: cmdKey, keyDown: true),
+              let vDown = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true),
+              let vUp = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false),
+              let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: cmdKey, keyDown: false)
+        else {
+            Self.logger.warning("Failed to create PID-posted Cmd+V CGEvents")
+            return false
+        }
+        vDown.flags = .maskCommand
+        vUp.flags = .maskCommand
+        cmdDown.postToPid(pid)
+        vDown.postToPid(pid)
+        vUp.postToPid(pid)
+        cmdUp.postToPid(pid)
         return true
     }
 

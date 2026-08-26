@@ -427,6 +427,73 @@ final class PasteServiceTests: XCTestCase {
             .capturedApp(7)
         )
     }
+
+    // MARK: K-50 route-conditional settle
+
+    /// Helper forcing the Cmd+V leg (unicode fails) on an isolated pasteboard,
+    /// so the user's real clipboard is never touched.
+    private func makeFailingUnicodeStrategies() -> PasteService.PasteStrategies {
+        var strategies = PasteService.PasteStrategies()
+        strategies.isProcessTrusted = { true }
+        strategies.postUnicodeText = { _ in false }
+        strategies.pasteboard = makeIsolatedPasteboard()
+        return strategies
+    }
+
+    func testOnlyFrontmostRouteRequiresSettle() {
+        XCTAssertTrue(PasteService.requiresFrontmostSettle(.frontmost))
+        let element = AXUIElementCreateSystemWide()
+        XCTAssertFalse(PasteService.requiresFrontmostSettle(.capturedElement(element)))
+        XCTAssertFalse(PasteService.requiresFrontmostSettle(.capturedApp(42)))
+    }
+
+    func testPidPostingDisabledGoesStraightToGlobalCmdV() async throws {
+        var strategies = makeFailingUnicodeStrategies()
+        var pidCalls = 0
+        strategies.postCmdVToPid = { _ in pidCalls += 1; return true }
+        strategies.postCmdV = { true }
+        let service = PasteService(strategies: strategies)
+        try await service.paste("hello", preferPid: 99, pidPostingEnabled: false)
+        XCTAssertEqual(pidCalls, 0)
+    }
+
+    func testPidPostingEnabledTargetsPidAndSkipsGlobalPost() async throws {
+        var strategies = makeFailingUnicodeStrategies()
+        var pidCalls = 0
+        var globalCalls = 0
+        strategies.postCmdVToPid = { pid in
+            pidCalls += 1
+            XCTAssertEqual(pid, 99)
+            return true
+        }
+        strategies.postCmdV = { globalCalls += 1; return true }
+        let service = PasteService(strategies: strategies)
+        try await service.paste("hello", preferPid: 99, pidPostingEnabled: true)
+        XCTAssertEqual(pidCalls, 1)
+        XCTAssertEqual(globalCalls, 0)
+    }
+
+    func testFailedPidPostFallsBackToGlobalCmdV() async throws {
+        var strategies = makeFailingUnicodeStrategies()
+        var globalCalls = 0
+        strategies.postCmdVToPid = { _ in false }           // event creation/post refused
+        strategies.postCmdV = { globalCalls += 1; return true }
+        let service = PasteService(strategies: strategies)
+        try await service.paste("hello", preferPid: 99, pidPostingEnabled: true)
+        XCTAssertEqual(globalCalls, 1)                      // automatic fallback fired
+    }
+
+    func testNilPidFallsBackToGlobalCmdV() async throws {
+        var strategies = makeFailingUnicodeStrategies()
+        var pidCalls = 0
+        var globalCalls = 0
+        strategies.postCmdVToPid = { _ in pidCalls += 1; return true }
+        strategies.postCmdV = { globalCalls += 1; return true }
+        let service = PasteService(strategies: strategies)
+        try await service.paste("hello", preferPid: nil, pidPostingEnabled: true)
+        XCTAssertEqual(pidCalls, 0)
+        XCTAssertEqual(globalCalls, 1)
+    }
 }
 
 /// Mutable box so a Task closure can hand a result back to a sync test

@@ -52,6 +52,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         static let pasteDelayShortMsKey = "internal.latency.pasteDelayShortMs"
         static let pasteDelayLongMsKey = "internal.latency.pasteDelayLongMs"
         static let pasteFallbackTotalMsKey = "internal.latency.pasteFallbackTotalMs"
+        /// K-50 experiment kill switch (default OFF — ships dark).
+        static let pidPasteEnabledKey = "internal.latency.pidPasteEnabled"
         static let enableStageTimingKey = "internal.latency.enableStageTiming"
         static let startStageTimingKey = "internal.latency.startStageTiming"
 
@@ -1197,16 +1199,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 stageMark("cleanup+itn+dictionary")
                 self.logger.info("Transcription completed outputLength=\(post.text.count, privacy: .public) asrMs=\(Int((asrEnd - asrStart) * 1000), privacy: .public) cleanupEdits=\(post.stats.totalEdits, privacy: .public) cleanupMs=\(Int(post.stats.durationMs), privacy: .public) grammarEdits=\(post.stats.grammarEdits, privacy: .public) grammarAttempted=\(post.stats.grammarAttempted, privacy: .public) grammarTimedOut=\(post.stats.grammarTimedOut, privacy: .public) grammarSkippedForLength=\(post.stats.grammarSkippedForLength, privacy: .public) itnSpansMasked=\(post.itnSpansMasked, privacy: .public) itnEnabled=\(post.itnEnabled, privacy: .public) itnAvailable=\(post.itnAvailable, privacy: .public) itnChanged=\(post.itnChanged, privacy: .public) itnMs=\(post.itnMs, privacy: .public) replacements=\(post.replacements, privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public)")
 
-                // Adaptive paste delay: 50ms for short segments (<5s) or 80ms otherwise, to reduce end-to-end latency.
+                // K-50: route decided BEFORE the settle wait so only the
+                // frontmost route pays it. One frontmost read feeds decision
+                // AND logs (T14 invariant). Behavioral note (accepted): the
+                // routing/frontmost read now happens ~50–80 ms earlier than
+                // before; record-time capture semantics are unchanged.
+                let frontmostPIDAtDecision = NSWorkspace.shared.frontmostApplication?.processIdentifier
+                let route = PasteService.PasteRouting.target(
+                    capturedPID: self.dictationTargetPID,
+                    capturedElement: self.dictationTargetElement,
+                    frontmostPID: frontmostPIDAtDecision
+                )
+                let pidPostingEnabled = defaults.bool(forKey: LatencyTuningOptions.pidPasteEnabledKey)
+
+                // Adaptive paste delay for routes that depend on the frontmost
+                // app having settled: 50ms for short segments (<5s) or 80ms
+                // otherwise. Captured routes skip it entirely.
                 // Fallback on error: Retry after additional delay to approx. total 120ms.
                 let pasteDelayShortMs = max(20, min(300, defaults.integer(forKey: LatencyTuningOptions.pasteDelayShortMsKey)))
                 let pasteDelayLongMs = max(20, min(300, defaults.integer(forKey: LatencyTuningOptions.pasteDelayLongMsKey)))
-                let pasteDelayMs = Double(segmentEstimateMs) < 5000 ? Double(pasteDelayShortMs) : Double(pasteDelayLongMs)
+                let pasteDelayMs: Double
+                if PasteService.requiresFrontmostSettle(route) {
+                    pasteDelayMs = Double(segmentEstimateMs) < 5000 ? Double(pasteDelayShortMs) : Double(pasteDelayLongMs)
+                } else {
+                    pasteDelayMs = 0
+                    self.logger.info("Paste settle skipped for captured route")
+                }
                 let fallbackTotalMs = max(pasteDelayMs, Double(max(20, min(500, defaults.integer(forKey: LatencyTuningOptions.pasteFallbackTotalMsKey)))))
                 let pasteDelay = pasteDelayMs / 1000.0
                 let fallbackAdditionalDelay = (fallbackTotalMs - pasteDelayMs) / 1000.0
 
-                try await Task.sleep(nanoseconds: UInt64(pasteDelay * 1_000_000_000))
+                if pasteDelay > 0 {
+                    try await Task.sleep(nanoseconds: UInt64(pasteDelay * 1_000_000_000))
+                }
                 guard !Task.isCancelled else { return }
                 guard self.recordingSessions.isCurrent(generation) else {
                     self.logger.info("Paste suppressed: recording superseded by a newer session")
@@ -1215,19 +1240,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 stageMark("paste-wait")
 
                 do {
-                    // T14 diagnosis: record which branch fired and why. PIDs only,
-                    // never transcript text. Decision and log share one frontmost
-                    // read so they cannot disagree.
-                    let frontmostPIDAtDecision = NSWorkspace.shared.frontmostApplication?.processIdentifier
-                    let route = PasteService.PasteRouting.target(
-                        capturedPID: self.dictationTargetPID,
-                        capturedElement: self.dictationTargetElement,
-                        frontmostPID: frontmostPIDAtDecision
-                    )
                     switch route {
                     case .frontmost:
                         self.logger.info("Paste route=frontmost capturedPID=\(self.dictationTargetPID.map { String($0) } ?? "nil", privacy: .public) frontmostPIDAtDecision=\(frontmostPIDAtDecision.map { String($0) } ?? "nil", privacy: .public)")
-                        try await self.paster.paste(post.text)
+                        try await self.paster.paste(post.text, preferPid: self.dictationTargetPID, pidPostingEnabled: pidPostingEnabled)
                     case .capturedElement(let element):
                         // record-time paste target capture: the user switched apps while transcribing — insert into the
                         // record-time target (bypasses the pasteboard entirely).
