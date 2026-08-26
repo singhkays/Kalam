@@ -1191,17 +1191,26 @@ final class PillLevelGlyphView: NSView {
         didSet { needsDisplay = true }
     }
     private var levels: [CGFloat] = [0.3, 0.6, 0.45]
+    /// Running peak with decay — the deck's WaveformView applies AGC internally, but
+    /// raw mic samples peak around 0.02-0.05 in normal speech, which renders as dots
+    /// without normalization. This mirrors that AGC behavior for the compact glyph.
+    private var referencePeak: CGFloat = 0.08
 
     func update(samples: [Float]) {
         // ArraySlice keeps parent indices — index via startIndex offset.
         let values = samples.suffix(3)
         var next: [CGFloat] = []
+        var framePeak: CGFloat = 0
         for index in 0..<3 {
             guard !values.isEmpty else { next.append(0.15); continue }
             let v = values[values.startIndex + min(index, values.count - 1)]
+            framePeak = max(framePeak, CGFloat(v))
             next.append(CGFloat(max(0, min(1, v))))
         }
-        levels = next
+        // Decay toward the frame peak so loud phrases set the ceiling and quiet
+        // tails stay proportional; floor prevents divide-by-zero blowup.
+        referencePeak = max(framePeak, referencePeak * 0.92, 0.02)
+        levels = next.map { min(1, $0 / referencePeak) }
         needsDisplay = true
     }
 
