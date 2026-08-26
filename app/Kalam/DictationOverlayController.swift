@@ -615,10 +615,8 @@ private final class OverlayCapsuleView: NSView {
     // Waveform
     private let waveformView = WaveformView(frame: .zero)
 
-    // K-48 Task 5: whisper pill — three-bar level glyph + transcribing shimmer dots.
-    private let pillLevelBar0 = NSView()
-    private let pillLevelBar1 = NSView()
-    private let pillLevelBar2 = NSView()
+    // K-48 Task 5: whisper pill — drawn level glyph + transcribing shimmer dots.
+    private let pillLevelGlyph = PillLevelGlyphView(frame: NSRect(x: 0, y: 0, width: 14, height: 12))
     private let shimmerDot0 = NSView()
     private let shimmerDot1 = NSView()
     private let shimmerDot2 = NSView()
@@ -636,8 +634,6 @@ private final class OverlayCapsuleView: NSView {
     }
     private var usesDarkAppearanceForSession = true
     private var sessionReduceMotion = false
-    private var pillBarHeightConstraints: [NSLayoutConstraint] = []
-    private var pillLevelStack: NSStackView?
     private var shimmerStack: NSStackView?
     private var dots: [NSView] { [shimmerDot0, shimmerDot1, shimmerDot2] }
 
@@ -669,14 +665,14 @@ private final class OverlayCapsuleView: NSView {
             }
             appNameLabel.stringValue = presentation.targetAppName.isEmpty ? "App" : presentation.targetAppName
             timerLabel.stringValue = "00:00"
-            pillLevelStack?.isHidden = !isCompactSurface
+            pillLevelGlyph.isHidden = !isCompactSurface
         } else {
             // Standard compact row
             appIconView.isHidden = true
             appNameLabel.isHidden = true
             recordingDotView.isHidden = true
             timerLabel.isHidden = true
-            pillLevelStack?.isHidden = true
+            pillLevelGlyph.isHidden = true
             actionHandler = presentation.action
             let isTranscribingPill = isCompactSurface && presentation.message.hasPrefix("Transcribing")
             if isTranscribingPill {
@@ -860,45 +856,19 @@ private final class OverlayCapsuleView: NSView {
         setupPillChrome()
     }
 
-    /// K-48 Task 5: builds the pill-only chrome (level glyph bars, shimmer dots) and
+    /// K-48 Task 5: builds the pill-only chrome (drawn level glyph, shimmer dots) and
     /// pill-specific layout adjustments. Hidden by default; the machined deck stays
     /// the default surface until setCompactSurface(active:) flips the session style.
     private func setupPillChrome() {
-        let barViews = [pillLevelBar0, pillLevelBar1, pillLevelBar2]
-        for bar in barViews {
-            bar.wantsLayer = true
-            bar.layer?.cornerRadius = Metrics.pillBarWidth / 2
-            bar.layer?.masksToBounds = false
-            // Visibility is owned by pillLevelStack (toggled per surface); the bars
-            // themselves must stay visible or the stack renders an empty gap.
-            bar.isHidden = false
-            bar.translatesAutoresizingMaskIntoConstraints = false
-            blurView.addSubview(bar)
-        }
+        // Drawn glyph: one custom view, no per-bar constraints to churn.
+        pillLevelGlyph.translatesAutoresizingMaskIntoConstraints = false
+        blurView.addSubview(pillLevelGlyph)
         NSLayoutConstraint.activate([
-            pillLevelBar0.widthAnchor.constraint(equalToConstant: Metrics.pillBarWidth),
-            pillLevelBar1.widthAnchor.constraint(equalToConstant: Metrics.pillBarWidth),
-            pillLevelBar2.widthAnchor.constraint(equalToConstant: Metrics.pillBarWidth)
+            pillLevelGlyph.centerYAnchor.constraint(equalTo: blurView.centerYAnchor),
+            pillLevelGlyph.trailingAnchor.constraint(equalTo: timerLabel.leadingAnchor, constant: -8),
+            pillLevelGlyph.widthAnchor.constraint(equalToConstant: 14),
+            pillLevelGlyph.heightAnchor.constraint(equalToConstant: 12)
         ])
-        // Heights start pinned and are later replaced by updatePillLevel(sample:) —
-        // the active set is tracked in pillBarHeightConstraints so they swap cleanly.
-        pillBarHeightConstraints = [pillLevelBar0, pillLevelBar1, pillLevelBar2].map {
-            $0.heightAnchor.constraint(equalToConstant: Metrics.pillGlyphHeight)
-        }
-        NSLayoutConstraint.activate(pillBarHeightConstraints)
-        pillLevelStack = NSStackView(views: barViews)
-        if let stack = pillLevelStack {
-            stack.orientation = .horizontal
-            stack.alignment = .centerY
-            stack.spacing = 2.5
-            stack.translatesAutoresizingMaskIntoConstraints = false
-            stack.isHidden = true
-            blurView.addSubview(stack)
-            NSLayoutConstraint.activate([
-                stack.centerYAnchor.constraint(equalTo: blurView.centerYAnchor),
-                stack.trailingAnchor.constraint(equalTo: timerLabel.leadingAnchor, constant: -8)
-            ])
-        }
 
         let dots = [shimmerDot0, shimmerDot1, shimmerDot2]
         for (index, dot) in dots.enumerated() {
@@ -951,8 +921,7 @@ private final class OverlayCapsuleView: NSView {
             appNameLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
             timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
             appIconView.layer?.cornerRadius = 4
-            pillLevelStack?.isHidden = false
-            refreshPillBarColors()
+            pillLevelGlyph.isHidden = false
             // Review gap 4: light-appearance pill needs dark-on-light label ink.
             let nameInk = usesDarkAppearanceForSession ? NSColor.white : NSColor.black
             appNameLabel.textColor = nameInk
@@ -973,17 +942,15 @@ private final class OverlayCapsuleView: NSView {
             appNameLabel.textColor = .white
             timerLabel.textColor = NSColor.white.withAlphaComponent(0.55)
             messageLabel.textColor = .white
-            pillLevelStack?.isHidden = true
+            pillLevelGlyph.isHidden = true
+            pillLevelGlyph.ink = .white
             shimmerStack?.isHidden = true
         }
         // Recording dot color follows the surface ink in light appearance.
         recordingDotView.layer?.backgroundColor =
             isCompactSurface && !usesDarkAppearanceForSession ? NSColor.black.cgColor : indicatorBrandGreen.cgColor
-    }
-
-    private func refreshPillBarColors() {
-        let ink = usesDarkAppearanceForSession ? indicatorBrandGreen : NSColor.black
-        [pillLevelBar0, pillLevelBar1, pillLevelBar2].forEach { $0.layer?.backgroundColor = ink.cgColor }
+        // Glyph ink follows the surface too.
+        pillLevelGlyph.ink = isCompactSurface && !usesDarkAppearanceForSession ? NSColor.black : indicatorBrandGreen
     }
 
     /// K-48 review finding I-1: animations follow the PER-SESSION Reduce Motion value.
@@ -1032,18 +999,7 @@ private final class OverlayCapsuleView: NSView {
     /// K-48 Task 5: compact glyph bars track the last three waveform samples.
     func updatePillLevel(samples: [Float]) {
         guard isCompactSurface else { return }
-        // ArraySlice keeps parent indices — index via startIndex offset, never raw 0-based.
-        let values = samples.suffix(3)
-        let heights: [CGFloat] = (0..<3).map { index in
-            guard !values.isEmpty else { return 4 }
-            let v = values[values.startIndex + min(index, values.count - 1)]
-            return 4 + CGFloat(max(0, min(1, v))) * (Metrics.pillGlyphHeight - 4)
-        }
-        NSLayoutConstraint.deactivate(pillBarHeightConstraints)
-        pillBarHeightConstraints = zip([pillLevelBar0, pillLevelBar1, pillLevelBar2], heights).map { bar, height in
-            bar.heightAnchor.constraint(equalToConstant: height)
-        }
-        NSLayoutConstraint.activate(pillBarHeightConstraints)
+        pillLevelGlyph.update(samples: samples)
     }
 
     @objc private func didTapAction() {
@@ -1225,6 +1181,45 @@ private final class WaveformView: NSView {
         }
     }
 
+}
+
+/// K-48 Task 5: the whisper pill's three-bar level glyph, drawn in one view.
+/// Custom draw instead of constraint-swapped subviews: no layout churn at 30Hz,
+/// nothing to unhide, ink switchable per session appearance.
+final class PillLevelGlyphView: NSView {
+    var ink: NSColor = indicatorBrandGreen {
+        didSet { needsDisplay = true }
+    }
+    private var levels: [CGFloat] = [0.3, 0.6, 0.45]
+
+    func update(samples: [Float]) {
+        // ArraySlice keeps parent indices — index via startIndex offset.
+        let values = samples.suffix(3)
+        var next: [CGFloat] = []
+        for index in 0..<3 {
+            guard !values.isEmpty else { next.append(0.15); continue }
+            let v = values[values.startIndex + min(index, values.count - 1)]
+            next.append(CGFloat(max(0, min(1, v))))
+        }
+        levels = next
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let barWidth: CGFloat = 2.5
+        let gap: CGFloat = 2
+        let totalBarWidth = barWidth * 3 + gap * 2
+        let startX = (bounds.width - totalBarWidth) / 2
+        ctx.setFillColor(ink.cgColor)
+        for (index, level) in levels.enumerated() {
+            let h = max(3, bounds.height * max(0.18, level))
+            let x = startX + CGFloat(index) * (barWidth + gap)
+            let rect = CGRect(x: x, y: (bounds.height - h) / 2, width: barWidth, height: h)
+            let path = NSBezierPath(roundedRect: rect, xRadius: barWidth / 2, yRadius: barWidth / 2)
+            path.fill()
+        }
+    }
 }
 
 /// K-48 Task 7: the at-the-caret chip — 21pt-tall dark capsule with a green status dot,
