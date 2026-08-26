@@ -655,7 +655,7 @@ private final class OverlayCapsuleView: NSView {
             // Show recording-mode top row
             appIconView.isHidden = false
             appNameLabel.isHidden = false
-            recordingDotView.isHidden = false
+            recordingDotView.isHidden = !isCompactSurface
             timerLabel.isHidden = false
             messageLabel.isHidden = true
             actionButton.isHidden = true
@@ -869,7 +869,9 @@ private final class OverlayCapsuleView: NSView {
             bar.wantsLayer = true
             bar.layer?.cornerRadius = Metrics.pillBarWidth / 2
             bar.layer?.masksToBounds = false
-            bar.isHidden = true
+            // Visibility is owned by pillLevelStack (toggled per surface); the bars
+            // themselves must stay visible or the stack renders an empty gap.
+            bar.isHidden = false
             bar.translatesAutoresizingMaskIntoConstraints = false
             blurView.addSubview(bar)
         }
@@ -904,7 +906,8 @@ private final class OverlayCapsuleView: NSView {
             dot.layer?.backgroundColor = indicatorBrandGreen.cgColor
             dot.layer?.cornerRadius = Metrics.shimmerDotSize / 2
             dot.alphaValue = 0.35
-            dot.isHidden = true
+            // Visibility is owned by shimmerStack; dots must stay visible inside it.
+            dot.isHidden = false
             dot.translatesAutoresizingMaskIntoConstraints = false
             blurView.addSubview(dot)
         }
