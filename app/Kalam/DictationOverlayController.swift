@@ -1029,10 +1029,11 @@ private final class OverlayCapsuleView: NSView {
     /// K-48 Task 5: compact glyph bars track the last three waveform samples.
     func updatePillLevel(samples: [Float]) {
         guard isCompactSurface else { return }
+        // ArraySlice keeps parent indices — index via startIndex offset, never raw 0-based.
         let values = samples.suffix(3)
         let heights: [CGFloat] = (0..<3).map { index in
             guard !values.isEmpty else { return 4 }
-            let v = values[min(index, values.count - 1)]
+            let v = values[values.startIndex + min(index, values.count - 1)]
             return 4 + CGFloat(max(0, min(1, v))) * (Metrics.pillGlyphHeight - 4)
         }
         NSLayoutConstraint.deactivate(pillBarHeightConstraints)
@@ -1349,10 +1350,11 @@ private final class CaretChipView: NSView {
     }
 
     func updateLevel(samples: [Float]) {
+        // ArraySlice keeps parent indices — index via startIndex offset, never raw 0-based.
         let values = samples.suffix(3)
         let heights: [CGFloat] = (0..<3).map { index in
             guard !values.isEmpty else { return 3 }
-            let v = values[min(index, values.count - 1)]
+            let v = values[values.startIndex + min(index, values.count - 1)]
             return 3 + CGFloat(max(0, min(1, v))) * (ChipMetrics.glyphHeight - 3)
         }
         NSLayoutConstraint.deactivate(barHeightConstraints)
