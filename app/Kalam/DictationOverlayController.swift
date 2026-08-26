@@ -780,7 +780,10 @@ private final class OverlayCapsuleView: NSView {
     private func setup() {
         wantsLayer = true
         // Task 3: universal rim — elevation + double-stroke. Self hosts shadow/outer stroke, blurView clips inner.
+        // FIX: whisper pill square corners — self must not clip shadow, and must stay transparent (no square bg).
         layer?.masksToBounds = false
+        layer?.backgroundColor = nil
+        layer?.cornerCurve = .continuous
         layer?.shadowColor = NSColor.black.cgColor
         layer?.shadowOpacity = 0.28
         layer?.shadowRadius = 10
@@ -826,9 +829,11 @@ private final class OverlayCapsuleView: NSView {
         blurView.blendingMode = .behindWindow
         blurView.state = .active
         blurView.alphaValue = 1.0
+        // FIX: whisper pill square corners — wantsLayer BEFORE cornerRadius, with continuous curve and masksToBounds clip
         blurView.wantsLayer = true
         blurView.layer?.cornerRadius = Metrics.cornerRadius
         blurView.layer?.masksToBounds = true
+        blurView.layer?.cornerCurve = .continuous
         blurView.layer?.borderWidth = 1
         blurView.layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
         blurView.translatesAutoresizingMaskIntoConstraints = false
@@ -1145,6 +1150,18 @@ private final class OverlayCapsuleView: NSView {
 
     private func applySurfaceStyling() {
         guard let layer = blurView.layer else { return }
+        // FIX: whisper pill square corners — ensure blurView clips with rounded caps, self stays shadow-only
+        layer.masksToBounds = true
+        layer.cornerCurve = .continuous
+        self.layer?.masksToBounds = false
+        self.layer?.backgroundColor = nil
+        // outer stroke stays 1px clear-fill rounded
+        outerStrokeLayer.fillColor = NSColor.clear.cgColor
+        outerStrokeLayer.lineWidth = 1
+        // shadow spec: blur 18 + 0 10px 28px rgba(0,0,0,.28) => radius 10, offset (0,10)
+        self.layer?.shadowColor = NSColor.black.cgColor
+        self.layer?.shadowRadius = 10
+        self.layer?.shadowOffset = CGSize(width: 0, height: 10)
         if isCompactSurface {
             layer.cornerRadius = Metrics.pillCornerRadius
             layer.borderWidth = 1
@@ -1628,7 +1645,10 @@ private final class CaretChipView: NSView {
     private func setup() {
         wantsLayer = true
         // Task 3: universal rim — self hosts shadow/outer stroke (chip radius 15 pill / ~8 if compact)
+        // FIX: square corners — self transparent, no clipping, shadow spec rounded
         layer?.masksToBounds = false
+        layer?.backgroundColor = nil
+        layer?.cornerCurve = .continuous
         layer?.shadowColor = NSColor.black.cgColor
         layer?.shadowOpacity = 0.28
         layer?.shadowRadius = 10
@@ -1671,9 +1691,11 @@ private final class CaretChipView: NSView {
         blurView.material = .hudWindow
         blurView.blendingMode = .behindWindow
         blurView.state = .active
+        // FIX: square corners — wantsLayer BEFORE cornerRadius, continuous curve
         blurView.wantsLayer = true
         blurView.layer?.cornerRadius = 15
         blurView.layer?.masksToBounds = true
+        blurView.layer?.cornerCurve = .continuous
         blurView.layer?.borderWidth = 1
         blurView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(blurView)
@@ -1875,6 +1897,17 @@ private final class CaretChipView: NSView {
     func applySurfaceStylingForSession(dark: Bool, reduceMotion: Bool? = nil) {
         if let rm = reduceMotion { sessionReduceMotion = rm }
         guard let layer = blurView.layer else { return }
+        // FIX: square corners — blurView rounded clip + self shadow-only
+        layer.masksToBounds = true
+        layer.cornerCurve = .continuous
+        layer.cornerRadius = 15
+        self.layer?.masksToBounds = false
+        self.layer?.backgroundColor = nil
+        outerStrokeLayer.fillColor = NSColor.clear.cgColor
+        outerStrokeLayer.lineWidth = 1
+        self.layer?.shadowColor = NSColor.black.cgColor
+        self.layer?.shadowRadius = 10
+        self.layer?.shadowOffset = CGSize(width: 0, height: 10)
         layer.borderWidth = 1
         if dark {
             tintView.layer?.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 0.62).cgColor
