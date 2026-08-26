@@ -4,6 +4,11 @@ import ApplicationServices
 
 /// K-48 machined palette: brand green #52B788.
 private let indicatorBrandGreen = NSColor(srgbRed: 82/255.0, green: 183/255.0, blue: 136/255.0, alpha: 1.0)
+// Task 4: green clockwise arc — two speeds, no dwell
+private let ringListeningDuration: CFTimeInterval = 3.6
+private let ringTranscribingDuration: CFTimeInterval = 2.4
+private let ringLineWidth: CGFloat = 1.5
+private enum RingSpeed { case listening, transcribing }
 
 // MARK: - Dictation Overlay
 @MainActor
@@ -127,6 +132,9 @@ final class DictationOverlayController {
         // Quality review: strip infinite CAAnimations while hidden so nothing
         // renders in the background between sessions.
         contentView?.removeSessionAnimations()
+        contentView?.hideGreenRing()
+        caretChipContentView?.hideGreenRing()
+        caretChipContentView?.removeSessionAnimations()
         // placementScreen is deliberately PERSISTED across sessions: nil-ing it
         // here forced every session start to re-walk AX for placement before the
         // capsule could show. refinePlacementIfMoved corrects it if the user
@@ -539,7 +547,7 @@ final class DictationOverlayController {
         chipWindow.setFrame(
             NSRect(x: anchor.x, y: anchor.y, width: Metrics.caretChipWidth, height: Metrics.pillHeight),
             display: true)
-        chipView.applySurfaceStylingForSession(dark: sessionUsesDarkAppearance)
+        chipView.applySurfaceStylingForSession(dark: sessionUsesDarkAppearance, reduceMotion: sessionReduceMotion)
         // Review gap 1: the chip carries its own full visibility — ordered front here,
         // ordered out by hideCaretChip(). It must NOT mirror the corner window's alpha,
         // which is 0 while the chip owns feedback.
@@ -642,6 +650,10 @@ private final class OverlayCapsuleView: NSView {
     private let outerStrokeLayer = CAShapeLayer()
     private let innerStroke = CALayer() // kept for verifier parity: inner 1px is blurView.layer border
     private let outerStroke = CAShapeLayer() // alias for spec naming
+    // Task 4: green clockwise arc — conic gradient + glow, two speeds (3.6 listening, 2.4 transcribing), no dwell
+    private let ringLayer = CAGradientLayer()
+    private let ringGlowLayer = CAGradientLayer()
+    private var ringIsInstalled = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -732,6 +744,35 @@ private final class OverlayCapsuleView: NSView {
         outerStrokeLayer.lineWidth = 1
         outerStrokeLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
         layer?.addSublayer(outerStrokeLayer)
+        // Task 4: green clockwise arc — conic gradient ring + glow (configured here, installed in showGreenRing)
+        ringLayer.type = .conic
+        ringLayer.colors = [NSColor.clear.cgColor, NSColor.clear.cgColor, indicatorBrandGreen.cgColor]
+        ringLayer.locations = [0.0, 0.71, 1.0]
+        ringLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+        ringLayer.endPoint = CGPoint(x: 1, y: 0.5)
+        ringLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        let ringMask = CAShapeLayer()
+        ringMask.fillColor = NSColor.clear.cgColor
+        ringMask.strokeColor = NSColor.white.cgColor
+        ringMask.lineWidth = ringLineWidth
+        ringMask.lineCap = .round
+        ringMask.lineJoin = .round
+        ringLayer.mask = ringMask
+        ringGlowLayer.type = .conic
+        ringGlowLayer.colors = [NSColor.clear.cgColor, NSColor.clear.cgColor, indicatorBrandGreen.cgColor]
+        ringGlowLayer.locations = [0.0, 0.71, 1.0]
+        ringGlowLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+        ringGlowLayer.endPoint = CGPoint(x: 1, y: 0.5)
+        ringGlowLayer.opacity = 0.38
+        ringGlowLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        let glowMask = CAShapeLayer()
+        glowMask.fillColor = NSColor.clear.cgColor
+        glowMask.strokeColor = NSColor.white.cgColor
+        glowMask.lineWidth = 6
+        glowMask.lineCap = .round
+        glowMask.lineJoin = .round
+        glowMask.opacity = 0.38
+        ringGlowLayer.mask = glowMask
 
         // Blur background — dark material, higher translucency
         blurView.material = .hudWindow
@@ -929,6 +970,95 @@ private final class OverlayCapsuleView: NSView {
         layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
         outerStrokeLayer.frame = bounds
         outerStrokeLayer.path = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        layoutRing()
+    }
+
+    // MARK: - Task 4: green clockwise arc helpers
+
+    private func layoutRing() {
+        let radius: CGFloat = isCompactSurface ? Metrics.pillCornerRadius : Metrics.cornerRadius
+        ringLayer.frame = bounds
+        ringGlowLayer.frame = bounds
+        if let mask = ringLayer.mask as? CAShapeLayer {
+            mask.frame = bounds
+            mask.path = CGPath(roundedRect: bounds.insetBy(dx: ringLineWidth / 2, dy: ringLineWidth / 2), cornerWidth: radius, cornerHeight: radius, transform: nil)
+            mask.cornerRadius = radius
+        }
+        if let mask = ringGlowLayer.mask as? CAShapeLayer {
+            mask.frame = bounds
+            mask.path = CGPath(roundedRect: bounds.insetBy(dx: 3, dy: 3), cornerWidth: radius, cornerHeight: radius, transform: nil)
+            mask.cornerRadius = radius
+        }
+    }
+
+    func showGreenRing(speed: RingSpeed) {
+        guard !sessionReduceMotion else { showStaticGreenHairline(); return }
+        if ringIsInstalled {
+            updateRingSpeed(speed)
+            return
+        }
+        ringIsInstalled = true
+        layer?.addSublayer(ringGlowLayer)
+        layer?.addSublayer(ringLayer)
+        layoutRing()
+        let dur = speed == .listening ? ringListeningDuration : ringTranscribingDuration
+        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+        spin.fromValue = 0
+        spin.toValue = 2 * Double.pi
+        spin.duration = dur
+        spin.repeatCount = .infinity
+        spin.timingFunction = CAMediaTimingFunction(name: .linear)
+        ringLayer.add(spin, forKey: "spin")
+        ringGlowLayer.add(spin, forKey: "spin")
+    }
+
+    func hideGreenRing() {
+        ringLayer.removeAnimation(forKey: "spin")
+        ringGlowLayer.removeAnimation(forKey: "spin")
+        ringLayer.removeAnimation(forKey: "breathe")
+        ringGlowLayer.removeAnimation(forKey: "breathe")
+        ringLayer.removeFromSuperlayer()
+        ringGlowLayer.removeFromSuperlayer()
+        ringIsInstalled = false
+    }
+
+    func showStaticGreenHairline() {
+        if ringIsInstalled {
+            ringLayer.removeAnimation(forKey: "spin")
+            ringGlowLayer.removeAnimation(forKey: "spin")
+            // already showing static — keep breathing
+            return
+        }
+        ringIsInstalled = true
+        // Static 1px #52B788 at 48% + breathing 3.2s, no rotation
+        layer?.addSublayer(ringGlowLayer)
+        layer?.addSublayer(ringLayer)
+        layoutRing()
+        ringLayer.opacity = 0.48
+        ringGlowLayer.opacity = 0.38
+        let breathe = CABasicAnimation(keyPath: "opacity")
+        breathe.fromValue = 0.3
+        breathe.toValue = 0.6
+        breathe.duration = 3.2
+        breathe.autoreverses = true
+        breathe.repeatCount = .infinity
+        breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        ringLayer.add(breathe, forKey: "breathe")
+        ringGlowLayer.add(breathe, forKey: "breathe")
+    }
+
+    private func updateRingSpeed(_ speed: RingSpeed) {
+        let dur = speed == .listening ? ringListeningDuration : ringTranscribingDuration
+        ringLayer.removeAnimation(forKey: "spin")
+        ringGlowLayer.removeAnimation(forKey: "spin")
+        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+        spin.fromValue = 0
+        spin.toValue = 2 * Double.pi
+        spin.duration = dur
+        spin.repeatCount = .infinity
+        spin.timingFunction = CAMediaTimingFunction(name: .linear)
+        ringLayer.add(spin, forKey: "spin")
+        ringGlowLayer.add(spin, forKey: "spin")
     }
 
     /// K-48 Task 5 + review finding I-1: per-session surface switch. Called from
@@ -1046,6 +1176,7 @@ private final class OverlayCapsuleView: NSView {
     func removeSessionAnimations() {
         recordingDotView.layer?.removeAnimation(forKey: "breathe")
         dots.forEach { $0.layer?.removeAnimation(forKey: "shimmer") }
+        hideGreenRing()
     }
 
     /// K-48 Task 5: compact glyph bars track the last three waveform samples.
@@ -1363,6 +1494,11 @@ private final class CaretChipView: NSView {
     private let outerStrokeLayer = CAShapeLayer()
     private let innerStroke = CALayer()
     private let outerStroke = CAShapeLayer()
+    // Task 4: green clockwise arc — conic gradient + glow (mirrors OverlayCapsuleView)
+    private let ringLayer = CAGradientLayer()
+    private let ringGlowLayer = CAGradientLayer()
+    private var ringIsInstalled = false
+    private var sessionReduceMotion = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1386,6 +1522,35 @@ private final class CaretChipView: NSView {
         outerStrokeLayer.lineWidth = 1
         outerStrokeLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
         layer?.addSublayer(outerStrokeLayer)
+        // Task 4: green clockwise arc — conic gradient ring + glow (mirrors OverlayCapsuleView)
+        ringLayer.type = .conic
+        ringLayer.colors = [NSColor.clear.cgColor, NSColor.clear.cgColor, indicatorBrandGreen.cgColor]
+        ringLayer.locations = [0.0, 0.71, 1.0]
+        ringLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+        ringLayer.endPoint = CGPoint(x: 1, y: 0.5)
+        ringLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        let ringMask = CAShapeLayer()
+        ringMask.fillColor = NSColor.clear.cgColor
+        ringMask.strokeColor = NSColor.white.cgColor
+        ringMask.lineWidth = ringLineWidth
+        ringMask.lineCap = .round
+        ringMask.lineJoin = .round
+        ringLayer.mask = ringMask
+        ringGlowLayer.type = .conic
+        ringGlowLayer.colors = [NSColor.clear.cgColor, NSColor.clear.cgColor, indicatorBrandGreen.cgColor]
+        ringGlowLayer.locations = [0.0, 0.71, 1.0]
+        ringGlowLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+        ringGlowLayer.endPoint = CGPoint(x: 1, y: 0.5)
+        ringGlowLayer.opacity = 0.38
+        ringGlowLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        let glowMask = CAShapeLayer()
+        glowMask.fillColor = NSColor.clear.cgColor
+        glowMask.strokeColor = NSColor.white.cgColor
+        glowMask.lineWidth = 6
+        glowMask.lineCap = .round
+        glowMask.lineJoin = .round
+        glowMask.opacity = 0.38
+        ringGlowLayer.mask = glowMask
 
         blurView.material = .hudWindow
         blurView.blendingMode = .behindWindow
@@ -1464,10 +1629,102 @@ private final class CaretChipView: NSView {
         layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
         outerStrokeLayer.frame = bounds
         outerStrokeLayer.path = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        layoutRing()
+    }
+
+    // MARK: - Task 4: green clockwise arc helpers (mirrors OverlayCapsuleView)
+
+    private func layoutRing() {
+        let radius: CGFloat = 15
+        ringLayer.frame = bounds
+        ringGlowLayer.frame = bounds
+        if let mask = ringLayer.mask as? CAShapeLayer {
+            mask.frame = bounds
+            mask.path = CGPath(roundedRect: bounds.insetBy(dx: ringLineWidth / 2, dy: ringLineWidth / 2), cornerWidth: radius, cornerHeight: radius, transform: nil)
+            mask.cornerRadius = radius
+        }
+        if let mask = ringGlowLayer.mask as? CAShapeLayer {
+            mask.frame = bounds
+            mask.path = CGPath(roundedRect: bounds.insetBy(dx: 3, dy: 3), cornerWidth: radius, cornerHeight: radius, transform: nil)
+            mask.cornerRadius = radius
+        }
+    }
+
+    func showGreenRing(speed: RingSpeed) {
+        guard !sessionReduceMotion else { showStaticGreenHairline(); return }
+        if ringIsInstalled {
+            updateRingSpeed(speed)
+            return
+        }
+        ringIsInstalled = true
+        layer?.addSublayer(ringGlowLayer)
+        layer?.addSublayer(ringLayer)
+        layoutRing()
+        let dur = speed == .listening ? ringListeningDuration : ringTranscribingDuration
+        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+        spin.fromValue = 0
+        spin.toValue = 2 * Double.pi
+        spin.duration = dur
+        spin.repeatCount = .infinity
+        spin.timingFunction = CAMediaTimingFunction(name: .linear)
+        ringLayer.add(spin, forKey: "spin")
+        ringGlowLayer.add(spin, forKey: "spin")
+    }
+
+    func hideGreenRing() {
+        ringLayer.removeAnimation(forKey: "spin")
+        ringGlowLayer.removeAnimation(forKey: "spin")
+        ringLayer.removeAnimation(forKey: "breathe")
+        ringGlowLayer.removeAnimation(forKey: "breathe")
+        ringLayer.removeFromSuperlayer()
+        ringGlowLayer.removeFromSuperlayer()
+        ringIsInstalled = false
+    }
+
+    func showStaticGreenHairline() {
+        if ringIsInstalled {
+            ringLayer.removeAnimation(forKey: "spin")
+            ringGlowLayer.removeAnimation(forKey: "spin")
+            return
+        }
+        ringIsInstalled = true
+        layer?.addSublayer(ringGlowLayer)
+        layer?.addSublayer(ringLayer)
+        layoutRing()
+        ringLayer.opacity = 0.48
+        ringGlowLayer.opacity = 0.38
+        let breathe = CABasicAnimation(keyPath: "opacity")
+        breathe.fromValue = 0.3
+        breathe.toValue = 0.6
+        breathe.duration = 3.2
+        breathe.autoreverses = true
+        breathe.repeatCount = .infinity
+        breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        ringLayer.add(breathe, forKey: "breathe")
+        ringGlowLayer.add(breathe, forKey: "breathe")
+    }
+
+    private func updateRingSpeed(_ speed: RingSpeed) {
+        let dur = speed == .listening ? ringListeningDuration : ringTranscribingDuration
+        ringLayer.removeAnimation(forKey: "spin")
+        ringGlowLayer.removeAnimation(forKey: "spin")
+        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+        spin.fromValue = 0
+        spin.toValue = 2 * Double.pi
+        spin.duration = dur
+        spin.repeatCount = .infinity
+        spin.timingFunction = CAMediaTimingFunction(name: .linear)
+        ringLayer.add(spin, forKey: "spin")
+        ringGlowLayer.add(spin, forKey: "spin")
+    }
+
+    func removeSessionAnimations() {
+        hideGreenRing()
     }
 
     /// Per-session surface (mirrors the whisper pill tokens).
-    func applySurfaceStylingForSession(dark: Bool) {
+    func applySurfaceStylingForSession(dark: Bool, reduceMotion: Bool? = nil) {
+        if let rm = reduceMotion { sessionReduceMotion = rm }
         guard let layer = blurView.layer else { return }
         layer.borderWidth = 1
         if dark {
