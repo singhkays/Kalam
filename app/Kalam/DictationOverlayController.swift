@@ -781,6 +781,10 @@ private final class OverlayCapsuleView: NSView {
         recordingDotView.layer?.shadowRadius = 8
         recordingDotView.layer?.shadowOffset = .zero
         recordingDotView.isHidden = true
+        // Constraint-conflict fix: the dot is fully Auto Layout constrained (7x7);
+        // without this its zero-size autoresizing mask fights those constraints and
+        // Auto Layout breaks unrelated rows to recover.
+        recordingDotView.translatesAutoresizingMaskIntoConstraints = false
         blurView.addSubview(recordingDotView)
         // K-48 review finding I-1: Reduce Motion is evaluated PER SESSION (showRecording),
         // not here — updateBreatheAnimation() applies the session value whenever the surface flips.
@@ -866,6 +870,7 @@ private final class OverlayCapsuleView: NSView {
             bar.layer?.cornerRadius = Metrics.pillBarWidth / 2
             bar.layer?.masksToBounds = false
             bar.isHidden = true
+            bar.translatesAutoresizingMaskIntoConstraints = false
             blurView.addSubview(bar)
         }
         NSLayoutConstraint.activate([
@@ -900,6 +905,7 @@ private final class OverlayCapsuleView: NSView {
             dot.layer?.cornerRadius = Metrics.shimmerDotSize / 2
             dot.alphaValue = 0.35
             dot.isHidden = true
+            dot.translatesAutoresizingMaskIntoConstraints = false
             blurView.addSubview(dot)
         }
         let shimmerStack = NSStackView(views: dots)
