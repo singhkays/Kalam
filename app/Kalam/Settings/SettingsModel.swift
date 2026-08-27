@@ -332,6 +332,11 @@ final class SettingsModel {
         }
     }
 
+    var retentionEnabled: Bool {
+        get { _ = revision; return store.retentionEnabled }
+        set { store.retentionEnabled = newValue }
+    }
+
     func contentsState(for dest: Destination) -> String {
         switch dest {
         case .beingHeard:

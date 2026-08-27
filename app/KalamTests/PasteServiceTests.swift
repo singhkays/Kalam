@@ -28,6 +28,16 @@ final class PasteServiceTests: XCTestCase {
         strategies.insertTextViaAccessibility = { _ in "forced failure" } // AX insert fails
         strategies.pasteboard = pasteboard
         strategies.restoreDelay = 0.05
+        // Task 5: force Tier-1 to be skipped so the failure goes through the
+        // global pasteboard+CmdV path where the mocked insertTextViaAccessibility is the final fallback.
+        strategies.resolveFocusedElement = { _ in .failure(AccessibilityFocusResolutionError(reason: "test force fallback")) }
+        strategies.isSecureEventInputEnabled = { false }
+        strategies.secureInputOwnerPID = { nil }
+        strategies.frontmostPID = { nil }
+        strategies.axGetPid = { _ in nil }
+        strategies.getElementRole = { _ in nil }
+        strategies.getElementValue = { _ in nil }
+        strategies.axSetSelectedText = { _, _ in .cannotComplete }
         let service = PasteService(strategies: strategies)
 
         do {
@@ -154,17 +164,33 @@ final class PasteServiceTests: XCTestCase {
         pasteboard.clearContents()
         let original = "original-\(UUID().uuidString)"
         pasteboard.setString(original, forType: .string)
+        let transcript = "transcript-\(UUID().uuidString)"
 
         var strategies = PasteService.PasteStrategies()
         strategies.isProcessTrusted = { true }
         strategies.postUnicodeText = { _ in false }
         strategies.postCmdV = { false }                                    // Cmd+V fails
-        strategies.insertTextViaAccessibility = { _ in nil }               // AX succeeds
+        strategies.insertTextViaAccessibility = { _ in nil }               // AX succeeds (fallback)
         strategies.pasteboard = pasteboard
         strategies.restoreDelay = 0.3                                      // long grace — must NOT apply here
+        // Task 5: Tier-1 verified path is now primary; mock it to succeed directly.
+        let fakeElement = AXUIElementCreateSystemWide()
+        strategies.resolveFocusedElement = { _ in .success(AccessibilityFocusedElementResolution(element: fakeElement, appName: "TestApp", strategy: "test")) }
+        strategies.isSecureEventInputEnabled = { false }
+        strategies.secureInputOwnerPID = { nil }
+        strategies.frontmostPID = { nil }
+        strategies.axGetPid = { _ in nil }
+        strategies.getElementRole = { _ in "AXTextField" }
+        var verifiedValue: String? = nil
+        strategies.axSetSelectedText = { _, text in
+            verifiedValue = text
+            return .success
+        }
+        strategies.getElementValue = { _ in verifiedValue }
+        strategies.setMessagingTimeout = { _, _ in }
         let service = PasteService(strategies: strategies)
 
-        try await service.paste("transcript-\(UUID().uuidString)")
+        try await service.paste(transcript)
 
         // No runloop pumping: the restore must already be complete.
         XCTAssertEqual(
@@ -288,6 +314,19 @@ final class PasteServiceTests: XCTestCase {
         }
         strategies.pasteboard = pasteboard
         strategies.restoreDelay = 0.3
+        // Task 5: Tier-1 is now before pasteboard; ensure it is skipped so the
+        // cancel is reached before any AX/CmdV dispatch.
+        strategies.resolveFocusedElement = { _ in .failure(AccessibilityFocusResolutionError(reason: "test: skip Tier-1 for cancel")) }
+        strategies.isSecureEventInputEnabled = { false }
+        strategies.secureInputOwnerPID = { nil }
+        strategies.frontmostPID = { nil }
+        strategies.axSetSelectedText = { _, _ in
+            XCTFail("AX verified insert must not run after cancellation")
+            return .cannotComplete
+        }
+        strategies.getElementValue = { _ in nil }
+        strategies.getElementRole = { _ in nil }
+        strategies.axGetPid = { _ in nil }
         let service = PasteService(strategies: strategies)
 
         let errorBox = TestBox<Error>()
@@ -437,6 +476,18 @@ final class PasteServiceTests: XCTestCase {
         strategies.isProcessTrusted = { true }
         strategies.postUnicodeText = { _ in false }
         strategies.pasteboard = makeIsolatedPasteboard()
+        // Task 5: Tier-1 hardening adds a verified AX attempt before global legs.
+        // These tests are about the global Cmd+V/PID path, so force the resolver
+        // to fail so Tier-1 is skipped (otherwise real AX on the test runner would
+        // race the global path and flake). Also neutralize secure/PID checks.
+        strategies.resolveFocusedElement = { _ in .failure(AccessibilityFocusResolutionError(reason: "test: force global path")) }
+        strategies.isSecureEventInputEnabled = { false }
+        strategies.secureInputOwnerPID = { nil }
+        strategies.frontmostPID = { nil }
+        strategies.axGetPid = { _ in nil }
+        strategies.getElementRole = { _ in nil }
+        strategies.getElementValue = { _ in nil }
+        strategies.axSetSelectedText = { _, _ in .cannotComplete }
         return strategies
     }
 

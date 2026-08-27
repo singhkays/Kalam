@@ -56,6 +56,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         static let pidPasteEnabledKey = "internal.latency.pidPasteEnabled"
         static let enableStageTimingKey = "internal.latency.enableStageTiming"
         static let startStageTimingKey = "internal.latency.startStageTiming"
+        // Task 5 (K-56): Tier-1 SET+verify per-reference timeout override (default OFF, 0 = unset).
+        // Legal per AX law: non-system-wide set does NOT propagate.
+        static let pasteSetVerifyTimeoutOverrideMsKey = "internal.paste.setVerifyTimeoutOverrideMs"
         // Task 3 (K-54): SNR-aware extension kill switches + retune path.
         static let snrAwareEnabledKey = "internal.latency.snrAwareEnabled"
         static let snrTrustDbKey = "internal.latency.snrTrustDb"
@@ -156,6 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hotkeys = HotkeyListener()
     private let paster = PasteService()
     private let validationGateStore = ValidationGateTripStore()
+    private let retentionPolicy = RetentionPolicy()
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "DictationRuntime")
 
     // record-time paste target capture: record-time paste target (app PID + focused element), and a held transcript
@@ -265,6 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             LatencyTuningOptions.pasteFallbackTotalMsKey: LatencyTuningOptions.defaultPasteFallbackTotalMs,
             LatencyTuningOptions.enableStageTimingKey: LatencyTuningOptions.defaultEnableStageTiming,
             LatencyTuningOptions.startStageTimingKey: true,
+            LatencyTuningOptions.pasteSetVerifyTimeoutOverrideMsKey: 0,
             LatencyTuningOptions.snrAwareEnabledKey: LatencyTuningOptions.defaultSnrAwareEnabled,
             LatencyTuningOptions.snrTrustDbKey: LatencyTuningOptions.defaultSnrTrustDb,
             LatencyTuningOptions.snrAbsoluteCapMsKey: LatencyTuningOptions.defaultSnrAbsoluteCapMs,
@@ -448,6 +453,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         audioMonitor = monitor
 
+        // Task 6 (K-57): retention — opt-in, default OFF. When ON, sweep timer + reindex.
+        if UserDefaults.standard.bool(forKey: "retention.enabled") {
+            Task { @MainActor in
+                self.retentionPolicy.startSweeper()
+            }
+            let sessions = RecoveryScanner.reindex()
+            logger.info("Retention reindex count=\(sessions.count, privacy: .public)")
+            if let newest = sessions.first(where: { !$0.meta.isComplete }) {
+                logger.info("Retention newest interrupted session=\(newest.folder.lastPathComponent, privacy: .public) duration=\(newest.estimatedDuration?.description ?? "nil", privacy: .public)")
+                // TODO: auto-transcribe newest via ASRService ON-DEVICE (deferred — needs audio file read)
+            }
+        }
+
         applyGeneralSettings()
         installEscapeMonitor()
         refreshOnboardingState(reopenIfNeeded: false)
@@ -492,6 +510,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let validationGateObserver {
             NotificationCenter.default.removeObserver(validationGateObserver)
             self.validationGateObserver = nil
+        }
+        Task { @MainActor in
+            self.retentionPolicy.stopSweeper()
         }
         audioMonitor?.stop()
         audioMonitor = nil
@@ -1014,7 +1035,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Pin the teardown to the session being torn down on wake.
             let audioGeneration = audio.captureGeneration
             let stopTask = Task(priority: .userInitiated) { [audio, audioGeneration] in
-                return audio.finishStop(expectedGeneration: audioGeneration)
+                let samples = audio.finishStop(expectedGeneration: audioGeneration)
+                audio.endRetention(markComplete: true)
+                return samples
             }
             recordingStopTask = stopTask
             overlay.hide()
@@ -1132,12 +1155,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // K-52: identity for every lifecycle event of this session; minted
         // before the async legs so stale completions name their session.
         let sessionID = recordingSessions.currentSessionID ?? UUID()
+        // Task 6 (K-57): retention — per-session folder + streaming CAF + meta (isComplete=false).
+        // When OFF, no-ops (zero disk writes).
+        _ = audio.beginRetentionIfEnabled(sessionID: sessionID, deviceUID: selectedInputUID)
 
         do {
             try audio.startCollecting()
         } catch {
             logger.warning("Audio collection start failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             overlay.showError("Microphone unavailable", action: .openMicrophoneSettings, autoHideAfter: 4.0)
+            // Retention started but engine failed — mark incomplete and close.
+            audio.endRetention(markComplete: false)
             return false
         }
         startLatencyProbe?.mark(.engineStarted)
@@ -1202,6 +1230,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dictationTargetPID = nil
             dictationTargetElement = nil
             logger.warning("Dictation target capture SKIPPED: no frontmost application")
+        }
+        // Task 5 (K-56): AX wake prefetch while the user is still speaking (not after transcript lands).
+        // Lightweight, best-effort — warms the AX connection for the later Tier-1 SET.
+        if let pid = dictationTargetPID {
+            let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            // Fire and forget; no await, no log of transcript.
+            _ = AccessibilityWaker.wakeIfNeeded(bundleID: bundleID, pid: pid)
         }
         return true
     }
@@ -1289,6 +1324,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             
             let keyUpToStopStart = CFAbsoluteTimeGetCurrent()
             let samples = await stopTask.value
+            // Task 6 (K-57): retention — streaming CAF already closed via exchange sink;
+            // mark the session complete now that audio is durably captured.
+            // When OFF, no-ops. For superseded (empty) stops, still close the writer for that generation.
+            self.audio.endRetention(markComplete: true)
             guard !Task.isCancelled else { return }
             // A stale stop (superseded by a rapid re-record) returns no audio;
             // the newer session's overlay state owns the indicator from here.
@@ -1552,6 +1591,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                     self.logger.info("Paste dispatched via initial path delayMs=\(Int(pasteDelay * 1000), privacy: .public)")
                 } catch {
+                    // Task 5 (K-56): Tier-1 hard refusals never blind-paste or fallback — hold.
+                    if let pasteError = error as? PasteServiceError {
+                        switch pasteError {
+                        case .secureField, .secureInputActive, .pidMismatch, .frontmostChanged:
+                            self.heldTranscript = post.text
+                            self.heldTranscriptTargetPID = self.dictationTargetPID
+                            self.heldTranscriptSession = stopSessionID
+                            self.dictationTargetElement = nil
+                            self.dictationTargetPID = nil
+                            let reason: String
+                            switch pasteError {
+                            case .secureField: reason = "Secure field"
+                            case .secureInputActive: reason = "Secure input active"
+                            case .pidMismatch: reason = "PID mismatch"
+                            case .frontmostChanged: reason = "Frontmost changed"
+                            default: reason = "Hold"
+                            }
+                            let promisedName = NSRunningApplication(processIdentifier: self.heldTranscriptTargetPID ?? 0)?.localizedName ?? NSWorkspace.shared.frontmostApplication?.localizedName ?? "the frontmost app"
+                            await MainActor.run {
+                                self.overlay.showHeldTranscript(message: "\(reason) — transcript ready. Paste into \(promisedName)?")
+                            }
+                            self.logger.warning("Tier-1 hard refusal hold reason=\(reason, privacy: .public) errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
+                            self.dispatchLifecycle(.insertSucceeded(session: stopSessionID, outcome: .held), context: "tier1-hold")
+                            return
+                        default: break
+                        }
+                    }
                     self.logger.warning("Initial paste failed delayMs=\(Int(pasteDelay * 1000), privacy: .public) errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
                     try await Task.sleep(nanoseconds: UInt64(max(0, fallbackAdditionalDelay) * 1_000_000_000))
                     guard !Task.isCancelled else { return }
@@ -1623,7 +1689,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // cancel must never kill a newer session that started in between.
         let audioGeneration = audio.captureGeneration
         let stopTask = Task(priority: .userInitiated) { [audio, audioGeneration] in
-            return audio.finishStop(expectedGeneration: audioGeneration)
+            let samples = audio.finishStop(expectedGeneration: audioGeneration)
+            // Task 6: retention — even a canceled session was durably captured up to cancel.
+            audio.endRetention(markComplete: true)
+            return samples
         }
         recordingStopTask = stopTask
         transcriptionTask = Task(priority: .userInitiated) { [weak self, stopTask] in

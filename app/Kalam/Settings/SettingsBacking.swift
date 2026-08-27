@@ -50,6 +50,9 @@ protocol SettingsBacking: AnyObject {
     func rescanEngine()
     var installCommand: String { get }
 
+    // Retention — Task 6 (K-57) opt-in crash recovery, default OFF
+    var retentionEnabled: Bool { get set }
+
     // Meta
     var releaseURL: URL { get }
     var onChange: AsyncStream<Void> { get }

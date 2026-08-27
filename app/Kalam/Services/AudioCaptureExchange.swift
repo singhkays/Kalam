@@ -41,6 +41,11 @@ final class AudioCaptureExchange: @unchecked Sendable {
     /// Drop counter for buffers lost to lock contention. Guarded by its own lock
     /// because the drop path is exactly the path where `lock` is unavailable.
     private let dropCounter = OSAllocatedUnfairLock(initialState: 0)
+    /// Task 6 (K-57): incremental retention sink — when retention is enabled,
+    /// the converted Float32 mono 16kHz chunk is also forwarded to the CAF writer
+    /// without blocking the render thread (try-lock, drop on contention).
+    private var retentionSink: (@Sendable ([Float]) -> Void)?
+    private let retentionSinkLock = OSAllocatedUnfairLock(initialState: (@Sendable ([Float]) -> Void)?(nil))
 
     let recentWaveformCapacity = 4096
     let targetFormat = AVAudioFormat(
@@ -58,22 +63,36 @@ final class AudioCaptureExchange: @unchecked Sendable {
     ///   `collecting == false` are skipped but return `true` (not a drop).
     @discardableResult
     func publish(_ buffer: AVAudioPCMBuffer) -> Bool {
-        guard let processed = lock.withLockIfAvailable({ state -> Bool in
-            guard state.collecting else { return true }
+        guard let chunkOpt = lock.withLockIfAvailable({ state -> [Float]? in
+            guard state.collecting else { return nil }
             state.callbackCount += 1
-            processLocked(buffer, into: &state)
-            return true
+            return processLocked(buffer, into: &state)
         }) else {
             dropCounter.withLockIfAvailable { $0 += 1 }
             return false
         }
-        return processed
+        // Task 6: stream to retention CAF without blocking the render thread.
+        if let chunk = chunkOpt, !chunk.isEmpty, let sink = retentionSinkLock.withLock({ $0 }) {
+            // Dispatch to utility queue to avoid stalling audio; sink handles thread-safety.
+            DispatchQueue.global(qos: .utility).async { sink(chunk) }
+        }
+        return true
     }
 
     // MARK: - Consumer side (may block)
 
     func withExclusiveAccess<R: Sendable>(_ body: @Sendable (inout State) throws -> R) rethrows -> R {
         try lock.withLock(body)
+    }
+
+    // MARK: Task 6 retention sink
+
+    func setRetentionSink(_ sink: (@Sendable ([Float]) -> Void)?) {
+        retentionSinkLock.withLock { $0 = sink }
+    }
+
+    private func retentionSinkIfAvailable() -> (@Sendable ([Float]) -> Void)? {
+        retentionSinkLock.withLock { $0 }
     }
 
     func resetForNewSession() {
@@ -211,9 +230,9 @@ final class AudioCaptureExchange: @unchecked Sendable {
 
     // MARK: - Conversion (moved verbatim from AudioRecorder.process; runs under the lock)
 
-    private func processLocked(_ buffer: AVAudioPCMBuffer, into state: inout State) {
+    private func processLocked(_ buffer: AVAudioPCMBuffer, into state: inout State) -> [Float]? {
         let inputFormat = buffer.format
-        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else { return }
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else { return nil }
         let needsConverterRebuild =
             state.converter == nil
             || state.converterInputSampleRate != inputFormat.sampleRate
@@ -222,20 +241,20 @@ final class AudioCaptureExchange: @unchecked Sendable {
         if needsConverterRebuild {
             guard let rebuilt = AVAudioConverter(from: inputFormat, to: targetFormat) else {
                 logger.warning("Failed to create AVAudioConverter inputSampleRate=\(inputFormat.sampleRate, privacy: .public) channels=\(inputFormat.channelCount, privacy: .public)")
-                return
+                return nil
             }
             state.converter = rebuilt
             state.converterInputSampleRate = inputFormat.sampleRate
             state.converterInputChannelCount = inputFormat.channelCount
         }
-        guard let converter = state.converter else { return }
+        guard let converter = state.converter else { return nil }
 
         let ratio = targetFormat.sampleRate / inputFormat.sampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 64.0)
 
         guard let outBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else {
             logger.warning("Failed to create output buffer")
-            return
+            return nil
         }
 
         var convError: NSError?
@@ -252,16 +271,14 @@ final class AudioCaptureExchange: @unchecked Sendable {
             } else {
                 logger.warning("Conversion error unknown; using PCM fallback")
             }
-            appendPCMBufferFallback(buffer, into: &state)
-            return
+            return appendPCMBufferFallback(buffer, into: &state)
         }
 
         let frames = Int(outBuffer.frameLength)
         if frames > 0 {
             guard let channel = outBuffer.floatChannelData?[0] else {
                 logger.warning("No float channel data available; using PCM fallback")
-                appendPCMBufferFallback(buffer, into: &state)
-                return
+                return appendPCMBufferFallback(buffer, into: &state)
             }
             let samples = Array(UnsafeBufferPointer(start: channel, count: frames))
             state.sampleBuffer.append(contentsOf: samples)
@@ -270,22 +287,25 @@ final class AudioCaptureExchange: @unchecked Sendable {
             if overflow > 0 {
                 state.recentWaveformSamples.removeFirst(overflow)
             }
+            return samples
         } else {
-            appendPCMBufferFallback(buffer, into: &state)
+            return appendPCMBufferFallback(buffer, into: &state)
         }
     }
 
-    private func appendPCMBufferFallback(_ buffer: AVAudioPCMBuffer, into state: inout State) {
+    @discardableResult
+    private func appendPCMBufferFallback(_ buffer: AVAudioPCMBuffer, into state: inout State) -> [Float]? {
         let mono = extractMonoFloatSamples(from: buffer)
-        guard !mono.isEmpty else { return }
+        guard !mono.isEmpty else { return nil }
         let resampled = resampleLinear(mono, from: buffer.format.sampleRate, to: targetFormat.sampleRate)
-        guard !resampled.isEmpty else { return }
+        guard !resampled.isEmpty else { return nil }
         state.sampleBuffer.append(contentsOf: resampled)
         state.recentWaveformSamples.append(contentsOf: resampled)
         let overflow = state.recentWaveformSamples.count - recentWaveformCapacity
         if overflow > 0 {
             state.recentWaveformSamples.removeFirst(overflow)
         }
+        return resampled
     }
 
     private func extractMonoFloatSamples(from buffer: AVAudioPCMBuffer) -> [Float] {

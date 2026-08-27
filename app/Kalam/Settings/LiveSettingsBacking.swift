@@ -411,6 +411,17 @@ final class LiveSettingsBacking: SettingsBacking {
         "cp ~/Downloads/Parakeet* \(modelFolder.path)/"
     }
 
+    // MARK: - Retention (Task 6)
+
+    var retentionEnabled: Bool {
+        get { defaults.bool(forKey: "retention.enabled") }
+        set {
+            defaults.set(newValue, forKey: "retention.enabled")
+            // No notification needed beyond ping — UI reads revision.
+            ping()
+        }
+    }
+
     /// Short map title ("Parakeet v3") — the live displayName is too long for the card.
     private static func shortName(for version: ASRModelVersion) -> String {
         switch version {

@@ -103,6 +103,96 @@ final class AudioRecorder: @unchecked Sendable {
         lastSNRlock.lock(); _lastPostRollSNR = v; lastSNRlock.unlock()
     }
 
+    // MARK: Task 6 (K-57) — opt-in retention, default OFF, byte-identical when OFF
+    private var retentionWriter: CAFStreamWriter?
+    private var retentionFolder: URL?
+    private var retentionSessionID: UUID?
+    private let retentionLock = NSLock()
+
+    /// Starts per-session retention if the toggle is ON. Creates
+    /// `<timestamp>-<uuid>/audio.caf` (streaming CAF, -1 header) + `meta.json`
+    /// (isComplete=false). When OFF, no-ops and returns nil (zero disk writes).
+    /// Must be called on MainActor before `startCollecting` for the same session.
+    @discardableResult
+    func beginRetentionIfEnabled(sessionID: UUID, timestamp: Date = Date(), deviceUID: String? = nil) -> URL? {
+        guard UserDefaults.standard.bool(forKey: "retention.enabled") else { return nil }
+        retentionLock.lock()
+        // If a previous session's writer is still open (rapid re-record), close it as incomplete
+        // (it was superseded, not crash, but marking incomplete is safe — it will be swept as interrupted).
+        if let prevWriter = retentionWriter, let prevFolder = retentionFolder {
+            // Close outside the lock to avoid deadlock with sink, but we already hold lock.
+            // Capture and clear first, then close after unlock.
+            retentionWriter = nil
+            retentionFolder = nil
+            retentionSessionID = nil
+            retentionLock.unlock()
+            exchange.setRetentionSink(nil)
+            try? prevWriter.close()
+            logger.info("Retention superseded close prev folder=\(prevFolder.lastPathComponent, privacy: .public)")
+            retentionLock.lock()
+        }
+        defer { retentionLock.unlock() }
+        let folder = FileLayout.sessionFolder(sessionID: sessionID, timestamp: timestamp)
+        do {
+            try FileLayout.ensureSessionFolder(folder)
+            let audioURL = FileLayout.audioURL(for: folder)
+            let writer = try CAFStreamWriter(url: audioURL, sampleRate: 16_000, channels: 1)
+            retentionWriter = writer
+            retentionFolder = folder
+            retentionSessionID = sessionID
+            // Stream converted chunks via exchange sink (utility queue, never blocks render thread)
+            // Capture writer directly to avoid Sendable capture of self.
+            let capturedWriter = writer
+            exchange.setRetentionSink { @Sendable chunk in
+                try? capturedWriter.append(chunk)
+            }
+            let meta = SessionMeta(sessionID: sessionID, deviceUID: deviceUID, deviceName: nil, sampleRate: 16_000, timestamp: timestamp, segmentEstimateMs: nil, isComplete: false)
+            let data = try JSONEncoder().encode(meta)
+            try data.write(to: FileLayout.metaURL(for: folder), options: .atomic)
+            logger.info("Retention begin folder=\(folder.lastPathComponent, privacy: .public) session=\(sessionID.uuidString.prefix(8), privacy: .public)")
+            return folder
+        } catch {
+            logger.warning("Retention begin failed error=\(error.localizedDescription, privacy: .public)")
+            retentionWriter = nil
+            retentionFolder = nil
+            retentionSessionID = nil
+            exchange.setRetentionSink(nil)
+            return nil
+        }
+    }
+
+    /// Ends retention for the current session, optionally marking complete.
+    /// Closes the CAF writer (no header rewrite needed for streaming CAF).
+    func endRetention(markComplete: Bool) {
+        retentionLock.lock()
+        let folder = retentionFolder
+        let writer = retentionWriter
+        retentionWriter = nil
+        retentionFolder = nil
+        retentionSessionID = nil
+        retentionLock.unlock()
+        exchange.setRetentionSink(nil)
+        if let folder, markComplete {
+            let metaURL = FileLayout.metaURL(for: folder)
+            if let data = try? Data(contentsOf: metaURL),
+               var meta = try? JSONDecoder().decode(SessionMeta.self, from: data) {
+                meta.isComplete = true
+                if let out = try? JSONEncoder().encode(meta) {
+                    try? out.write(to: metaURL, options: .atomic)
+                }
+            }
+        }
+        if let writer {
+            try? writer.close()
+            logger.info("Retention end markComplete=\(markComplete, privacy: .public) folder=\(folder?.lastPathComponent ?? "nil", privacy: .public)")
+        }
+    }
+
+    /// Test seam: current retention folder if enabled.
+    var retentionFolderForTesting: URL? {
+        retentionLock.lock(); defer { retentionLock.unlock() }; return retentionFolder
+    }
+
     /// The generation of the capture session this recorder most recently
     /// started. Callers capture this synchronously at stop-decision time and
     /// pass it into `stopAndFetchSamples` — the stop must never adopt a newer

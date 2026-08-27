@@ -38,6 +38,7 @@ final class InMemorySettingsStore: SettingsBacking {
     var grammarPass: GrammarPass = .light { didSet { ping() } }
 
     var rules: [ReplacementRule] = [] { didSet { ping() } }
+    var retentionEnabled: Bool = false { didSet { ping() } }
 
     private(set) var modelFolder: URL
     private(set) var engine: EnginePresence = .verified(

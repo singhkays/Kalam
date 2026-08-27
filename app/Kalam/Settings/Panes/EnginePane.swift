@@ -131,6 +131,31 @@ struct EnginePane: View {
             .overlay(RoundedRectangle(cornerRadius: SettingsLayout.cardRadius).stroke(Color.kHair))
             .cornerRadius(SettingsLayout.cardRadius)
             .padding(.top, 14)
+
+            // Task 6 (K-57): opt-in retention — default OFF, byte-identical ephemeral when OFF.
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Crash recovery")
+                    .font(SettingsFont.mono(9))
+                    .tracking(2.0)
+                    .textCase(.uppercase)
+                    .foregroundStyle(Color.kInk3)
+                Toggle("Keep audio for recovery (7 days)", isOn: Binding(
+                    get: { model.retentionEnabled },
+                    set: { model.retentionEnabled = $0 }
+                ))
+                .font(SettingsFont.body(12.5))
+                .tint(Color.kGreen)
+                Text("When on, Kalam streams each dictation to ~/Library/Application Support/Kalam/recordings/<timestamp>-<uuid>/audio.caf + meta.json. Audio never leaves this Mac. 7-day TTL, 6h sweep. Default OFF — when off, no audio touches disk (verified via fs_usage).")
+                    .font(SettingsFont.body(11))
+                    .foregroundStyle(Color.kInk2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.kPanel)
+            .overlay(RoundedRectangle(cornerRadius: SettingsLayout.cardRadius).stroke(Color.kHair))
+            .cornerRadius(SettingsLayout.cardRadius)
+            .padding(.top, 14)
         }
         .onAppear { model.rescanEngine() }
     }

@@ -190,6 +190,28 @@ post-transcription switch. A PID-posted Cmd+V experiment ships dark behind
 `internal.latency.pidPasteEnabled` (default OFF) with automatic fallback to the global
 Cmd+V post on refusal or nil PID.
 
+**Tier-1 insertion hardening (K-56).** `PasteService` Tier-1 verified AX (`kAXSelectedTextAttribute` SET
++ 3×40 ms read-back via `kAXValueAttribute`; unchanged → fall through to Cmd+V, never double-post;
+Electron lie-success killed). Before any pasteboard exposure: `AXSecureTextField` role or
+`IsSecureEventInputEnabled()` / `IORegistry IOConsoleUsers` secure-input probe → hold; `AXUIElementGetPid`
+mismatch vs `dictationTargetPID` → hold (`.focusElsewhere` chip, K-23); `AppQuirks.forcePaste` bundle-ID
+table (empty, governance) skips Tier-1; `AccessibilityWaker.wakeIfNeeded` prefetches AX while user
+still speaking (`KalamApp.startRecording`); after ~350 ms AX window, frontmost re-check before
+global `postUnicodeText`/`postCmdV` legs (mismatch → hold). Optional per-reference timeout override
+`internal.paste.setVerifyTimeoutOverrideMs` (0 unset, default OFF) raises only the SET+verify element
+toward 1.2–1.5 s (global stays 0.75 s; legal per `AXUIElement.h:387–397`).
+
+**Crash recovery (K-57).** Opt-in `retention.enabled` (default OFF, `UserDefaults` `retention.enabled`).
+When ON, `AudioRecorder` streams converted 16 kHz mono Float32 via `AudioCaptureExchange` retention sink
+to `Support/CAFStreamWriter` (streaming CAF, `mAudioDataByteCount=-1`, never rewrites header per tick)
+in `~/Library/Application Support/Kalam/recordings/<ISO8601>-<uuid>/audio.caf` + `meta.json`
+(`SessionMeta` isComplete false until `endRetention(markComplete:true)`). `Support/FileLayout`
+is source of truth; `Support/RetentionPolicy` sweeps every 6 h (TTL 7 days, injected clock);
+`Services/RecoveryScanner` reindexes newest-first on launch; newest interrupted auto-transcribed
+ON-DEVICE (deferred), older surfaced as recovered rows. When OFF, zero disk writes (no folder, no
+`audio.caf` — verified via `RetentionTests` and manual `fs_usage`). Toggle lives in `Settings`
+`EnginePane` ("Keep audio for recovery").
+
 **Fused trim stage.** `SilenceTrimmer.trimAndNormalize` performs endpointing + peak
 normalization in one output pass via vDSP (`vDSP_maxmgv` peak scan, scale + clamp),
 semantically identical to the legacy two-pass `normalizePeak(trim(...))` and parity-pinned.
@@ -402,6 +424,8 @@ UserDefaults keys include:
 - `internal.latency.snrQuietToStopMs` (`Int`, default `250`)
 - `internal.latency.snrRelativeCap` (`Float`, default `0.30`)
 - `internal.latency.snrFloorMarginDb` (`Float`, default `3`)
+- `internal.paste.setVerifyTimeoutOverrideMs` (`Int`, default `0` unset) — K-56 per-reference SET+verify override (1.2–1.5 s when set)
+- `retention.enabled` (`Bool`, default `false`) — K-57 opt-in; when true, per-session `recordings/<ts>-<uuid>/` + 6 h sweep / 7 d TTL
 - `validationGate.isDegraded` (`Bool`, UserDefaults) + `validationGate.trips` (`[Double]`) + `validationGate.successStreak` (`Int`) — K-55 auto-degrade state (rolling 86,400 s, threshold 3, streak reset 5); degraded disables `TextCleanupEngine` until relaunch or manual reset; `Notification.Name.validationGateAutoDegraded` posted once per episode
 - `textCleanup.enabled`
 - `textCleanup.removeFillers`
