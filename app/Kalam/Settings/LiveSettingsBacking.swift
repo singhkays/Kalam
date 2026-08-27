@@ -19,8 +19,20 @@ final class LiveSettingsBacking: SettingsBacking {
     private var notificationObservers: [NSObjectProtocol] = []
     private var dictionarySink: AnyCancellable?
     private var cachedMics: [Microphone] = []
+    private let wakeExecutor: @Sendable (_ uid: String) async -> Bool
+    private var wakingUIDs: Set<String> = []
+    private var audioRefreshTask: Task<Void, Never>?
 
-    init(manager: CustomDictionaryManager = .shared, defaults: UserDefaults = .standard) {
+    /// `wakeExecutor` injection seam: unit tests stub the HFP-forcing capture so
+    /// no CoreAudio work happens off-main during test runs.
+    init(
+        manager: CustomDictionaryManager = .shared,
+        defaults: UserDefaults = .standard,
+        wakeExecutor: @escaping @Sendable (_ uid: String) async -> Bool = {
+            await BluetoothMicWaker.openMicStream(forUID: $0)
+        }
+    ) {
+        self.wakeExecutor = wakeExecutor
         self.manager = manager
         self.defaults = defaults
         // The old settings shell seeded the dictionary on appear; the new shell owns it here
@@ -46,6 +58,17 @@ final class LiveSettingsBacking: SettingsBacking {
                 }
             )
         }
+        // Audio topology changes must RE-ENUMERATE, not just ping: `microphones`
+        // serves a cached one-shot CoreAudio enumeration, so a device connecting
+        // while settings is open would otherwise show OFFLINE until the window
+        // was closed and reopened. Posted by KalamApp's AudioDeviceMonitor path.
+        notificationObservers.append(
+            center.addObserver(forName: Notification.Name.audioDevicesDidChange, object: nil, queue: .main) { [weak self] _ in
+                // Topology storms (diagnostic log showed ~10 rapid re-enumeration
+                // events per device swap): coalesce into one trailing refresh.
+                self?.scheduleAudioRefresh()
+            }
+        )
     }
 
     // No deinit: observers and the $entries sink capture `self` weakly, so a released
@@ -152,9 +175,35 @@ final class LiveSettingsBacking: SettingsBacking {
         let config = MicrophonePriorityConfiguration.load(from: defaults)
         let merged = MicrophoneDeviceService.mergedPriorityList(config: config)
         cachedMics = merged.map {
-            Microphone(id: $0.uid, name: $0.name, isConnected: $0.isAvailable)
+            Microphone(id: $0.uid, name: $0.name, isConnected: $0.isAvailable, isWakeable: $0.isWakeable)
         }
         ping()
+    }
+
+    /// Trailing-edge coalescing for `.audioDevicesDidChange`: each event alone
+    /// triggers a full CoreAudio enumeration, and swap storms fire several in a
+    /// row — waiting a beat merges them into one refresh (250 ms imperceptible).
+    private func scheduleAudioRefresh() {
+        audioRefreshTask?.cancel()
+        audioRefreshTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            self?.refreshMicrophones()
+        }
+    }
+
+    /// TAP TO WAKE (follow-up to the A2DP-idle diagnosis): opening a brief
+    /// capture stream bound to the headset engages HFP; CoreAudio then posts
+    /// device-change(s) which coalesce into a re-enumeration flipping the row
+    /// to READY. The explicit trailing refresh covers HAL-listener lag.
+    func wakeMicrophone(uid: String) {
+        guard !wakingUIDs.contains(uid) else { return } // swallow rapid double taps
+        wakingUIDs.insert(uid)
+        Task { @MainActor [weak self] in
+            _ = await self?.wakeExecutor(uid)
+            self?.wakingUIDs.remove(uid)
+            self?.refreshMicrophones()
+        }
     }
 
     // MARK: - Trigger

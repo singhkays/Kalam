@@ -886,6 +886,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// device death, dock reconnect) — rebuild the audio graph against the
     /// fresh topology and re-select the priority-ordered microphone.
     private func refreshAudioInputAfterDeviceChange() {
+        // Settings "Being heard" mic list live-refresh: the pane renders a cached
+        // one-shot enumeration, so a device that connects while settings is open
+        // (AirPods' input side registers seconds after Control Center says
+        // "connected") would stay OFFLINE until the window was closed and
+        // reopened. handleSystemWake delegates here, so wake is covered too.
+        NotificationCenter.default.post(name: .audioDevicesDidChange, object: nil)
         invalidateOnboardingSnapshot()
         audio.invalidatePreparedState()
         do {

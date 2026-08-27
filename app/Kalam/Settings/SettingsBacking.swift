@@ -21,6 +21,10 @@ protocol SettingsBacking: AnyObject {
     var microphonePermission: MicrophonePermission { get }
     func moveMicrophone(from: IndexSet, to: Int)
     func refreshMicrophones()
+    /// Forces HFP/mic-stream activation for an idle Bluetooth headset that is
+    /// physically connected but exposes no input stream yet (`isWakeable` rows).
+    /// No-op for absent devices or stores without wake support.
+    func wakeMicrophone(uid: String)
 
     // Trigger
     var activation: ActivationMode { get set }
@@ -273,6 +277,10 @@ struct Microphone: Identifiable, Hashable, Sendable {
     var id: String
     var name: String
     var isConnected: Bool
+    /// Hardware object is present but macOS hasn't opened its input stream yet
+    /// (Bluetooth headset parked in A2DP). Rendered "TAP TO WAKE"; tapping asks
+    /// the store to engage the mic-side (HFP) profile.
+    var isWakeable: Bool = false
 }
 
 struct ReplacementRule: Identifiable, Hashable, Codable, Sendable {

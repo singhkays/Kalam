@@ -72,6 +72,18 @@ final class InMemorySettingsStore: SettingsBacking {
         ping()
     }
 
+    func wakeMicrophone(uid: String) {
+        // Preview fixture: simulate macOS engaging the HFP profile after a tap.
+        microphones = microphones.map { mic in
+            guard mic.id == uid, mic.isWakeable else { return mic }
+            var woken = mic
+            woken.isWakeable = false
+            woken.isConnected = true
+            return woken
+        }
+        ping()
+    }
+
     func chooseModelFolder() async -> URL? {
         // Live: NSOpenPanel + security-scoped bookmark.
         nil

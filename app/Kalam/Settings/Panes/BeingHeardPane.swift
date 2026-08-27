@@ -34,6 +34,12 @@ struct BeingHeardPane: View {
             stylePreviewStrip
             microphoneCard
         }
+        .onAppear {
+            // Live check on landing: statuses come from a cached enumeration and
+            // the backing may have been created before a device finished
+            // connecting (AirPods input side registers late). Cheap one-shot query.
+            model.refreshMicrophones()
+        }
     }
 
     private var lede: String {
@@ -334,6 +340,7 @@ struct BeingHeardPane: View {
                     let status = model.microphoneStatus(for: mic)
                     let inUse = status == "IN USE"
                     let offline = status == "OFFLINE"
+                    let ready = status == "READY"
                     HStack(spacing: 12) {
                         Text("\(index + 1)")
                             .font(SettingsType.styleMicRank)
@@ -346,10 +353,23 @@ struct BeingHeardPane: View {
                             .foregroundStyle(offline ? Color.kInk2 : Color.kInk)
                             .frame(maxWidth: .infinity, alignment: .leading)
 
-                        Text(status)
+                        if mic.isWakeable {
+                            // Present-but-idle Bluetooth (A2DP): offer an explicit
+                            // one-tap HFP engagement instead of a dead OFFLINE badge.
+                            Button(status) {
+                                model.wakeMicrophone(uid: mic.id)
+                            }
+                            .buttonStyle(.plain)
                             .font(SettingsType.styleStatusTag)
                             .compassTracking(SettingsType.trackStatusTag)
-                            .foregroundStyle(inUse ? Color.kGreen : Color.kInk3)
+                            .foregroundStyle(Color.kGreen)
+                            .accessibilityLabel("Wake Bluetooth microphone \(mic.name)")
+                        } else {
+                            Text(status)
+                                .font(SettingsType.styleStatusTag)
+                                .compassTracking(SettingsType.trackStatusTag)
+                                .foregroundStyle(inUse ? Color.kGreen : ready ? Color.kInk : Color.kInk3)
+                        }
 
                         VStack(spacing: 2) {
                             Button {

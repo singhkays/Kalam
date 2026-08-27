@@ -141,7 +141,9 @@ final class SettingsModel {
 
     func microphoneStatus(for mic: Microphone) -> String {
         if microphonePermission == .denied || !mic.isConnected {
-            return "OFFLINE"
+            // Present-but-idle Bluetooth (A2DP) offers a wake action instead of
+            // a dead-end OFFLINE; the pane turns this tag into a button.
+            return mic.isWakeable ? "TAP TO WAKE" : "OFFLINE"
         }
         if let connected = connectedMicrophone, connected.id == mic.id {
             return "IN USE"
@@ -149,7 +151,11 @@ final class SettingsModel {
         if lastUsedID == mic.id {
             return "LAST USED"
         }
-        return "OFFLINE"
+        // Connected but not the priority winner - previously rendered as
+        // indistinguishable OFFLINE, which hid that an AirPods-class device
+        // at rank 4 was actually live 1ch and usable (user report 2026-08-27:
+        // AirPods always OFFLINE while C920 at rank 1 was IN USE).
+        return "READY"
     }
 
     func moveMicrophone(from source: IndexSet, to destination: Int) {
@@ -168,6 +174,10 @@ final class SettingsModel {
     }
 
     func refreshMicrophones() { store.refreshMicrophones() }
+
+    /// TAP TO WAKE — forwarded to the store; the live store opens a brief
+    /// capture stream bound to the idle headset so macOS engages HFP.
+    func wakeMicrophone(uid: String) { store.wakeMicrophone(uid: uid) }
 
     func chooseModelFolder() async {
         if let url = await store.chooseModelFolder() {

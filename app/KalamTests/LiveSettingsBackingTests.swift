@@ -237,6 +237,139 @@ final class LiveSettingsBackingTests: XCTestCase {
         XCTAssertEqual(backing.microphones.first?.id, ids[1])
     }
 
+    /// Being-heard mic list live refresh: a CoreAudio topology change posted by
+    /// KalamApp's AudioDeviceMonitor path must re-enumerate the cached list (and
+    /// yield onChange) while the settings window is open — otherwise a device
+    /// connecting mid-session shows OFFLINE until the window is reopened.
+    func testAudioDevicesDidChangeRefreshesMicrophonesAndPings() async {
+        let backing = makeBacking()
+        var iterator = backing.onChange.makeAsyncIterator()
+        await Task.yield() // let the subscription settle before posting
+        NotificationCenter.default.post(name: .audioDevicesDidChange, object: nil)
+        let yielded = await iterator.next()
+        XCTAssertNotNil(yielded, "device-change notification must refresh the mic list")
+        // The refreshed cache must equal a fresh enumeration over the same defaults.
+        let fresh = MicrophoneDeviceService
+            .mergedPriorityList(config: MicrophonePriorityConfiguration.load(from: suite))
+        XCTAssertEqual(backing.microphones.map(\.id), fresh.map(\.uid))
+        XCTAssertEqual(backing.microphones.map(\.isConnected), fresh.map(\.isAvailable))
+    }
+
+    // MARK: - A2DP-idle wakeability
+
+    private final class WakeCallRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var calls: [String] = []
+        func record(_ uid: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            calls.append(uid)
+        }
+        func recordedCalls() -> [String] {
+            lock.lock()
+            defer { lock.unlock() }
+            return calls
+        }
+    }
+
+    private func fallbackConfig(priorities: [(uid: String, name: String)]) -> MicrophonePriorityConfiguration {
+        MicrophonePriorityConfiguration(
+            priorityUIDs: priorities.map(\.uid),
+            knownDeviceNames: Dictionary(uniqueKeysWithValues: priorities.map { ($0.uid, $0.name) })
+        )
+    }
+
+    /// Log-diagnosis regression: AirPods stay enumerated as hardware objects
+    /// while parked in A2DP (zero input channels). The merged list must surface
+    /// them wakeable rather than indistinguishable from unplugged devices.
+    func testMergedPriorityListMarksPresentIdleBluetoothAsWakeable() throws {
+        let merged = MicrophoneDeviceService.mergedPriorityList(
+            config: fallbackConfig(priorities: [("airpods", "k’s AirPods Pro")]),
+            liveTransportTagsByUID: ["airpods": "bluetooth"]
+        )
+        let row = try XCTUnwrap(merged.first)
+        XCTAssertEqual(row.uid, "airpods")
+        XCTAssertFalse(row.isAvailable, "idle headset is still not usable for capture")
+        XCTAssertTrue(row.isWakeable, "present BT without input stream must be wakeable")
+        XCTAssertEqual(row.transportTag, "bluetooth")
+    }
+
+    func testMergedPriorityListKeepsGoneDevicePlainOffline() throws {
+        let merged = MicrophoneDeviceService.mergedPriorityList(
+            config: fallbackConfig(priorities: [("usb-codec", "USB audio CODEC")]),
+            liveTransportTagsByUID: [:]
+        )
+        let row = try XCTUnwrap(merged.first)
+        XCTAssertFalse(row.isAvailable)
+        XCTAssertFalse(row.isWakeable, "no hardware object ⇒ genuinely gone, not wakeable")
+        XCTAssertEqual(row.transportTag, "unknown")
+    }
+
+    func testMergedPriorityListDoesNotWakeNonBluetoothDrops() throws {
+        let merged = MicrophoneDeviceService.mergedPriorityList(
+            config: fallbackConfig(priorities: [("webcam", "HD Webcam C920")]),
+            liveTransportTagsByUID: ["webcam": "usb"]
+        )
+        let row = try XCTUnwrap(merged.first)
+        XCTAssertFalse(row.isAvailable)
+        XCTAssertFalse(row.isWakeable)
+    }
+
+    /// 2026-08-27 live regression: the stored priority UID is the HFP-live
+    /// form "<base>:input", but the parked A2DP object enumerates under the
+    /// bare base UID — the exact-key presence lookup missed it, so the row
+    /// stayed dead OFFLINE and TAP TO WAKE never appeared.
+    func testMergedPriorityListMarksIdleBluetoothUnderSiblingUIDWakeable() throws {
+        let merged = MicrophoneDeviceService.mergedPriorityList(
+            config: fallbackConfig(priorities: [("3C-4D-BE-8E-5D-7A:input", "k’s AirPods Pro")]),
+            liveTransportTagsByUID: ["3C-4D-BE-8E-5D-7A": "bluetooth"]
+        )
+        let row = try XCTUnwrap(merged.first)
+        XCTAssertFalse(row.isAvailable)
+        XCTAssertTrue(row.isWakeable, "presence under a sibling UID must still offer wake")
+        XCTAssertEqual(row.transportTag, "bluetooth")
+    }
+
+    /// A non-bluetooth object under the sibling UID is a different device, not
+    /// a parked mic — never offer wake for it.
+    func testSiblingUIDPresenceOnlyWakesBluetoothTransport() throws {
+        let merged = MicrophoneDeviceService.mergedPriorityList(
+            config: fallbackConfig(priorities: [("3C-4D-BE-8E-5D-7A:input", "k’s AirPods Pro")]),
+            liveTransportTagsByUID: ["3C-4D-BE-8E-5D-7A": "usb"]
+        )
+        let row = try XCTUnwrap(merged.first)
+        XCTAssertFalse(row.isWakeable)
+    }
+
+    /// Drift detector for the sibling-UID heuristic itself.
+    func testCandidateUIDsCoverBaseAndOutputSiblingsExactFirst() {
+        XCTAssertEqual(
+            AudioDeviceDebug.candidateUIDs(forStoredUID: "3C-4D-BE-8E-5D-7A:input"),
+            ["3C-4D-BE-8E-5D-7A:input", "3C-4D-BE-8E-5D-7A", "3C-4D-BE-8E-5D-7A:output"]
+        )
+        // USB-style UIDs (final segment not an input/output side) stay single-candidate.
+        XCTAssertEqual(
+            AudioDeviceDebug.candidateUIDs(forStoredUID: "AppleUSBAudioEngine:HD Pro Webcam C920:35C379AF:3"),
+            ["AppleUSBAudioEngine:HD Pro Webcam C920:35C379AF:3"]
+        )
+    }
+
+    /// TAP TO WAKE end-to-end over the store contract: delegate to the injected
+    /// waker exactly once per tap, then refresh (+ping onChange).
+    func testWakeMicrophoneDelegatesAndRefreshesWithPing() async throws {
+        let recorder = WakeCallRecorder()
+        let backing = LiveSettingsBacking(manager: manager, defaults: suite) { uid in
+            recorder.record(uid)
+            return true
+        }
+        var iterator = backing.onChange.makeAsyncIterator()
+        await Task.yield() // let the subscription settle before invoking
+        backing.wakeMicrophone(uid: "airpods")
+        let yielded = await iterator.next()
+        XCTAssertNotNil(yielded, "wake completion must refresh the mic list")
+        XCTAssertEqual(recorder.recordedCalls(), ["airpods"])
+    }
+
     // MARK: - Engine
 
     func testEngineMissingWhenLibraryNotConfigured() {

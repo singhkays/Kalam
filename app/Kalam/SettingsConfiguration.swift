@@ -3,6 +3,7 @@ import AppKit
 import CoreAudio
 import AudioToolbox
 import OSLog
+import AVFoundation
 
 enum GeneralSettingsKeys {
     static let launchAtLogin = "general.launchAtLogin"
@@ -101,9 +102,17 @@ struct MicrophoneDeviceDescriptor: Identifiable, Equatable {
     let deviceID: AudioDeviceID
     let isAvailable: Bool
     let channelCount: UInt32
+    /// AudioTransportTag bucket ("builtin"/"usb"/"bluetooth"/…); "unknown" when
+    /// only a remembered-but-absent fallback is constructible.
+    var transportTag: String = "unknown"
+    /// True when the hardware object IS present yet exposes no input stream —
+    /// Bluetooth parked in A2DP. Renders TAP TO WAKE instead of dead OFFLINE.
+    var isWakeable: Bool = false
 }
 
 enum MicrophoneDeviceService {
+    private static let logger = Logger(subsystem: "singhkays.Kalam", category: "MicPriority")
+
     static func availableInputDevices() -> [MicrophoneDeviceDescriptor] {
         let infos = (try? AudioDeviceDebug.allInputDeviceInfos()) ?? []
         return infos
@@ -115,15 +124,32 @@ enum MicrophoneDeviceService {
                 name: $0.name,
                 deviceID: $0.id,
                 isAvailable: true,
-                channelCount: $0.inputChannels
+                channelCount: $0.inputChannels,
+                transportTag: AudioTransportTag.label(forTransportType: $0.transportType)
             )
         }
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    static func mergedPriorityList(config: MicrophonePriorityConfiguration) -> [MicrophoneDeviceDescriptor] {
+    ///
+    /// - Parameter liveTransportTagsByUID: Test seam — UID→AudioTransportTag for
+    ///   devices physically present NOW, including zero-input-channel objects.
+    ///   Nil = query CoreAudio (only done when a fallback actually needs classifying).
+    static func mergedPriorityList(
+        config: MicrophonePriorityConfiguration,
+        liveTransportTagsByUID: [String: String]? = nil
+    ) -> [MicrophoneDeviceDescriptor] {
         let available = availableInputDevices()
         let availableByUID = Dictionary(uniqueKeysWithValues: available.map { ($0.uid, $0) })
+
+        // Presence sweep runs ONLY when some priority UID fell out of the live
+        // usable list: it separates truly-gone devices (no hardware object at
+        // all) from A2DP-idle Bluetooth headsets (object present, zero input
+        // channels) which become wakeable rather than OFFLINE.
+        let pendingFallbackUIDs = config.priorityUIDs.filter { !availableByUID.keys.contains($0) }
+        let presentTransportTags = liveTransportTagsByUID
+            ?? (pendingFallbackUIDs.isEmpty ? [:] : AudioDeviceDebug.presentDeviceTransportTags())
+
         var result: [MicrophoneDeviceDescriptor] = []
         var seen = Set<String>()
 
@@ -136,6 +162,19 @@ enum MicrophoneDeviceService {
                     seen.insert(uid)
                     continue
                 }
+                logger.info("Mic priority: uid=\(uid, privacy: .public) ('\("\(fallbackName)", privacy: .public)') not in live enumeration — showing OFFLINE fallback")
+                // Idle-BT presence can hide under a sibling UID: the stored
+                // priority UID is the HFP-live "<base>:input" form, while the
+                // parked A2DP object enumerates as "<base>"/"<base>:output".
+                // Exact-miss must not kill wakeability (2026-08-27 live log:
+                // the probe never showed for the AirPods row).
+                let uidCandidates = AudioDeviceDebug.candidateUIDs(forStoredUID: uid)
+                let presentTag = presentTransportTags[uid]
+                    ?? uidCandidates.dropFirst().compactMap { presentTransportTags[$0] }.first
+                let isWakeable = uidCandidates.contains { presentTransportTags[$0] == "bluetooth" }
+                if isWakeable, presentTransportTags[uid] == nil {
+                    logger.info("Mic priority: uid=\(uid, privacy: .public) idle Bluetooth present under a sibling UID — offering wake")
+                }
                 result.append(
                     MicrophoneDeviceDescriptor(
                         id: uid,
@@ -143,7 +182,9 @@ enum MicrophoneDeviceService {
                         name: fallbackName,
                         deviceID: 0,
                         isAvailable: false,
-                        channelCount: 0
+                        channelCount: 0,
+                        transportTag: presentTag ?? "unknown",
+                        isWakeable: isWakeable
                     )
                 )
             }
@@ -180,6 +221,10 @@ enum MicrophoneDeviceService {
 extension Notification.Name {
     static let generalSettingsConfigurationDidChange = Notification.Name("generalSettingsConfigurationDidChange")
     static let microphonePriorityDidChange = Notification.Name("microphonePriorityDidChange")
+    /// CoreAudio topology changed (device plug/unplug, default-input switch, wake).
+    /// Posted by KalamApp's AudioDeviceMonitor path so open settings UI re-enumerates
+    /// the mic list instead of rendering a stale one-shot snapshot.
+    static let audioDevicesDidChange = Notification.Name("audioDevicesDidChange")
     static let openSetupFlow = Notification.Name("openSetupFlow")
     /// settings deep link: open settings at the Engine dive (settings redesign; formerly the Models tab).
     static let selectModelsSettingsTab = Notification.Name("selectModelsSettingsTab")
@@ -252,11 +297,81 @@ enum AudioDeviceDebug {
         )
     }
 
+    /// UID→AudioTransportTag for EVERY audio object currently attached,
+    /// regardless of channel layout. Used by settings-time fallback
+    /// classification; deliberately bypasses the zero-input-channel drop so
+    /// A2DP-idle Bluetooth headsets are visible here while staying out of the
+    /// recording path.
+    static func presentDeviceTransportTags() -> [String: String] {
+        let ids = (try? allDeviceIDs()) ?? []
+        var tags: [String: String] = [:]
+        for id in ids {
+            guard let uid = try? getCFString(id, selector: kAudioDevicePropertyDeviceUID),
+                  tags[uid] == nil else { continue }
+            let transportType = try? getUInt32(id, selector: kAudioDevicePropertyTransportType, scope: kAudioObjectPropertyScopeGlobal)
+            tags[uid] = AudioTransportTag.label(forTransportType: transportType)
+        }
+        return tags
+    }
+
+    /// Sibling UIDs that may denote the same physical headset. The stored
+    /// priority UID is captured from the HFP-live input object ("<base>:input");
+    /// while parked in A2DP the surviving object can carry "<base>" or
+    /// "<base>:output", so exact-key presence lookups miss and an idle headset
+    /// renders dead OFFLINE instead of TAP TO WAKE. Ordered exact-first so the
+    /// known-good path is never perturbed. UIDs whose final colon segment is
+    /// not an input/output side (USB webcam-style) are their own single
+    /// candidate.
+    static func candidateUIDs(forStoredUID uid: String) -> [String] {
+        guard let sideColon = uid.range(of: ":", options: .backwards)?.lowerBound,
+              uid[sideColon...].hasSuffix(":input") || uid[sideColon...].hasSuffix(":output")
+        else { return [uid] }
+        let base = String(uid[..<sideColon])
+        var candidates = [uid, base, base + ":output", base + ":input"]
+        var seen = Set<String>()
+        return candidates.filter { seen.insert($0).inserted }
+    }
+
+    /// Resolves a device UID to its current `AudioDeviceID`; nil when macOS no
+    /// longer knows such a device (translate fails or yields the null object).
+    static func deviceID(forUID uid: String) -> AudioDeviceID? {
+        // Translate-UID convention: the CFString rides as QUALIFIER data
+        // (qualifier size = sizeof a reference), the AudioDeviceID comes back
+        // through the out-buffer.
+        var cfUID = uid as CFString
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyTranslateUIDToDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var deviceID = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &addr,
+            UInt32(MemoryLayout<UnsafeRawPointer>.size),
+            &cfUID,
+            &size,
+            &deviceID
+        )
+        guard status == noErr, deviceID != 0 else { return nil }
+        return deviceID
+    }
+
     static func allInputDeviceInfos() throws -> [DeviceInfo] {
-        try allDeviceIDs().compactMap { id in
+        let ids = try allDeviceIDs()
+        let infos = ids.compactMap { id -> DeviceInfo? in
             do {
                 let channels = try getInputChannelCount(id)
-                guard channels > 0 else { return nil }
+                guard channels > 0 else {
+                    // Drop-reason diagnostics: Bluetooth headsets idle in A2DP expose
+                    // NO input stream (mic not live) even though System Settings
+                    // lists them as a selectable input. This is the branch that
+                    // fires for them — confirmable via Console.app filter.
+                    let transport = try? getUInt32(id, selector: kAudioDevicePropertyTransportType, scope: kAudioObjectPropertyScopeGlobal)
+                    logger.info("Input enumeration: dropped id=\(id, privacy: .public) — 0 input channels (output-only or Bluetooth A2DP-idle) transport=\(transport ?? 0, privacy: .public)")
+                    return nil
+                }
                 let name = try getCFString(id, selector: kAudioObjectPropertyName)
                 let uid = try getCFString(id, selector: kAudioDevicePropertyDeviceUID)
                 let sampleRate = (try? getDouble(id, selector: kAudioDevicePropertyNominalSampleRate, scope: kAudioDevicePropertyScopeInput)) ?? 0
@@ -276,9 +391,12 @@ enum AudioDeviceDebug {
                     isVirtualLike: isVirtualLike
                 )
             } catch {
+                logger.warning("Input enumeration: dropped id=\(id, privacy: .public) status=\((error as NSError).code, privacy: .public)")
                 return nil
             }
         }
+        logger.info("Input enumeration: \(ids.count) CoreAudio devices → \(infos.count) usable inputs [\(infos.map { "\($0.name)/\($0.inputChannels)ch" }.joined(separator: ", "), privacy: .public)]")
+        return infos
     }
 
     static func isLikelyVirtualOrAggregate(uid: String, name: String?, transportType: UInt32?) -> Bool {
@@ -405,5 +523,84 @@ enum AudioDeviceDebug {
     
     private static func error(_ status: OSStatus) -> NSError {
         NSError(domain: "Kalam.AudioDeviceDebug", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "OSStatus \(status)"])
+    }
+}
+
+// MARK: - Bluetooth mic wake
+
+/// Engages the HFP/mic side of an idle Bluetooth headset by opening a short
+/// capture stream bound to it — precisely what the user's first PTT would
+/// force implicitly, but explicit (settings TAP TO WAKE) and off the recording
+/// latency path. Best-effort: any failure simply leaves the row offline.
+enum BluetoothMicWaker {
+    private static let logger = Logger(subsystem: "singhkays.Kalam", category: "BTMicWake")
+
+    /// Opens the input stream for `holdSeconds` (~0.8 s is enough for macOS to
+    /// switch profiles and post device-change notifications).
+    @discardableResult
+    static func openMicStream(forUID uid: String, holdSeconds: Double = 0.8) async -> Bool {
+        await withCheckedContinuation { continuation in
+            Task.detached(priority: .userInitiated) {
+                continuation.resume(returning: openStreamSync(uid: uid, holdSeconds: holdSeconds))
+            }
+        }
+    }
+
+    private static func openStreamSync(uid: String, holdSeconds: Double) -> Bool {
+        // Exact-or-sibling resolution (candidateUIDs): the parked A2DP object
+        // can enumerate as "<base>"/"<base>:output" while the stored priority
+        // UID is the HFP-live "<base>:input" form.
+        var resolvedDeviceID = AudioDeviceID(0)
+        for candidate in AudioDeviceDebug.candidateUIDs(forStoredUID: uid) {
+            if let id = AudioDeviceDebug.deviceID(forUID: candidate) {
+                resolvedDeviceID = id
+                if candidate != uid {
+                    logger.info("BT wake uid=\(uid, privacy: .public) resolved via sibling UID=\(candidate, privacy: .public)")
+                }
+                break
+            }
+        }
+        guard resolvedDeviceID != 0 else {
+            logger.info("BT wake skipped: uid=\(uid, privacy: .public) no longer present")
+            return false
+        }
+        let deviceID = resolvedDeviceID
+        let engine = AVAudioEngine()
+        let input = engine.inputNode
+        do {
+            // Bind the I/O unit to the headset's input side; mirrors the
+            // technique AudioRecorder.prepare uses when a preferred device is set.
+            guard let audioUnit = input.audioUnit else {
+                logger.error("BT wake skipped: no audio unit uidPrefix=\(String(uid.prefix(24)), privacy: .public)")
+                return false
+            }
+            var boundDeviceID = deviceID
+            let bindStatus = AudioUnitSetProperty(
+                audioUnit,
+                kAudioOutputUnitProperty_CurrentDevice,
+                kAudioUnitScope_Global,
+                0,
+                &boundDeviceID,
+                UInt32(MemoryLayout<AudioDeviceID>.size)
+            )
+            guard bindStatus == noErr else {
+                logger.error("BT wake bind failed osStatus=\(Int(bindStatus)) uidPrefix=\(String(uid.prefix(24)), privacy: .public)")
+                return false
+            }
+
+            input.installTap(onBus: 0, bufferSize: 4096, format: input.outputFormat(forBus: 0)) { _, _ in }
+            try engine.start()
+            Thread.sleep(forTimeInterval: holdSeconds)
+            engine.stop()
+            input.removeTap(onBus: 0)
+            logger.info("BT wake opened mic stream uidPrefix=\(String(uid.prefix(24)), privacy: .public) heldMs=\(Int(holdSeconds * 1000))")
+            return true
+        } catch {
+            engine.stop()
+            input.removeTap(onBus: 0)
+            let nsError = error as NSError
+            logger.error("BT wake failed domain=\(nsError.domain, privacy: .public) code=\(nsError.code) uidPrefix=\(String(uid.prefix(24)), privacy: .public)")
+            return false
+        }
     }
 }
