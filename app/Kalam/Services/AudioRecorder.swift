@@ -91,6 +91,18 @@ final class AudioRecorder: @unchecked Sendable {
     // Tap buffer size reduced to lower tail latency at key-up
     private let tapBufferSizeFrames: AVAudioFrameCount = 1024
 
+    /// Last SNR-aware post-roll SNR (dB) read back from the waveform ring at
+    /// key-up. Written only in the SNR-aware stop path; read by KalamApp's
+    /// latency summary to tag `roomSNR=` without re-estimating.
+    private var _lastPostRollSNR: Float = 0
+    private let lastSNRlock = NSLock()
+    var lastPostRollSNR: Float {
+        lastSNRlock.lock(); defer { lastSNRlock.unlock() }; return _lastPostRollSNR
+    }
+    private func setLastPostRollSNR(_ v: Float) {
+        lastSNRlock.lock(); _lastPostRollSNR = v; lastSNRlock.unlock()
+    }
+
     /// The generation of the capture session this recorder most recently
     /// started. Callers capture this synchronously at stop-decision time and
     /// pass it into `stopAndFetchSamples` — the stop must never adopt a newer
@@ -416,6 +428,18 @@ final class AudioRecorder: @unchecked Sendable {
         exchange.waveform(sampleCount: count)
     }
 
+    /// Ring read-back helper: estimate room SNR from the recent waveform
+    /// ring (256 ms capacity). Best-effort: empty ring → 0 dB. Pure via
+    /// `PostRollDecision.estimatedSNR`. Never logs content.
+    func estimateRoomSNR() -> Float {
+        let cap = exchange.recentWaveformCapacity
+        let snapshot = recentCaptureSamples(count: cap)
+        // Ring read-back: cap (4096) is 256 ms at 16 kHz — enough windows for
+        // stable p05/p95. Falls back to whatever is available early.
+        guard !snapshot.isEmpty else { return 0 }
+        return PostRollDecision.estimatedSNR(samples: snapshot, sampleRate: 16_000)
+    }
+
     /// K-49: adaptive post-roll with energy-polled early exit. Polls the
     /// trailing buffer every `config.pollIntervalMs`; finishes as soon as the
     /// tail reads silent for `requiredSilentPolls` consecutive polls AND the
@@ -423,30 +447,97 @@ final class AudioRecorder: @unchecked Sendable {
     /// generation was pinned by the CALLER before the first suspension; the
     /// final teardown is the same `finishStop` critical section the fixed
     /// sleep used, so rapid-re-record staleness semantics are unchanged.
+    ///
+    /// Task 3 (K-54): when `config.extensionPolicy == .snrAware`, the ceiling
+    /// and quiet gate extend per estimated room SNR and segment duration.
+    /// `segmentEstimateMs` is required for the relative cap; when nil the
+    /// policy falls back to the fixed path (backward compat for tests).
     func stopWithEarlyExit(pinnedGeneration: Int, config: PostRollDecision.Config) async -> [Float] {
+        return await stopWithEarlyExit(pinnedGeneration: pinnedGeneration, config: config, segmentEstimateMs: nil)
+    }
+
+    func stopWithEarlyExit(pinnedGeneration: Int, config: PostRollDecision.Config, segmentEstimateMs: Int?) async -> [Float] {
+        // SNR-aware path needs both a policy and a segment estimate to compute
+        // the per-segment relative cap. Fall back to the fixed loop otherwise.
+        let usesSNRPolicy: Bool = {
+            if case .snrAware = config.extensionPolicy, segmentEstimateMs != nil { return true }
+            return false
+        }()
+        if !usesSNRPolicy {
+            setLastPostRollSNR(0)
+            let start = CFAbsoluteTimeGetCurrent()
+            var consecutiveSilent = 0
+            while true {
+                try? await Task.sleep(nanoseconds: config.minIntervalNanos)
+                if Task.isCancelled { break }
+                let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
+                if PostRollDecision.tailIsSilent(
+                    samples: recentCaptureSamples(count: 960),
+                    sampleRate: 16_000
+                ) {
+                    consecutiveSilent += 1
+                } else {
+                    consecutiveSilent = 0
+                }
+                if PostRollDecision.shouldFinish(
+                    config: config,
+                    elapsedMs: elapsedMs,
+                    consecutiveSilentPolls: consecutiveSilent
+                ) {
+                    break
+                }
+            }
+            return finishStop(expectedGeneration: pinnedGeneration)
+        }
+
+        // SNR-aware: capture SNR once at key-up from the ring read-back
+        // (stable for the stop duration; avoids re-estimating on every poll).
+        let snrDb = estimateRoomSNR()
+        setLastPostRollSNR(snrDb)
+        let segmentMs = segmentEstimateMs ?? 0
+        let mode: String = {
+            switch config.extensionPolicy {
+            case .snrAware(let c):
+                return snrDb < c.trustSnrDb ? "snrAware-low" : "snrAware-trusted"
+            case .fixed:
+                return "fixed"
+            }
+        }()
+        logger.info("PostRoll SNR-aware start snrDb=\(snrDb, privacy: .public) mode=\(mode, privacy: .public) segmentEstimateMs=\(segmentMs, privacy: .public) minMs=\(config.minMs, privacy: .public) maxMs=\(config.maxMs, privacy: .public) effectiveMaxMs=\(PostRollDecision.effectiveMaxMs(config: config, segmentEstimateMs: segmentMs, snrDb: snrDb), privacy: .public)")
         let start = CFAbsoluteTimeGetCurrent()
         var consecutiveSilent = 0
-        // ~60 ms slice = three 20 ms analysis windows for the tail verdict.
         while true {
             try? await Task.sleep(nanoseconds: config.minIntervalNanos)
             if Task.isCancelled { break }
             let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
-            if PostRollDecision.tailIsSilent(
-                samples: recentCaptureSamples(count: 960),
-                sampleRate: 16_000
-            ) {
+            let tail = recentCaptureSamples(count: 960)
+            let isSilent = PostRollDecision.tailIsSilent(samples: tail, sampleRate: 16_000)
+            let isSpeechLike: Bool = {
+                switch config.extensionPolicy {
+                case .snrAware(let c):
+                    return PostRollDecision.tailIsSpeechLike(samples: tail, sampleRate: 16_000, floorMarginDb: c.floorMarginDb)
+                case .fixed:
+                    return !isSilent
+                }
+            }()
+            if isSilent {
                 consecutiveSilent += 1
             } else {
                 consecutiveSilent = 0
             }
-            if PostRollDecision.shouldFinish(
+            if PostRollDecision.shouldFinishExtended(
                 config: config,
+                segmentEstimateMs: segmentMs,
+                snrDb: snrDb,
                 elapsedMs: elapsedMs,
-                consecutiveSilentPolls: consecutiveSilent
+                consecutiveSilentPolls: consecutiveSilent,
+                tailIsSpeechLike: isSpeechLike
             ) {
                 break
             }
         }
+        let totalMs = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
+        logger.info("PostRoll SNR-aware done totalMs=\(totalMs, privacy: .public) snrDb=\(snrDb, privacy: .public) mode=\(mode, privacy: .public)")
         return finishStop(expectedGeneration: pinnedGeneration)
     }
 

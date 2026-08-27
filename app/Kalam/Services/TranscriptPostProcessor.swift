@@ -17,6 +17,10 @@ struct TranscriptPostProcessor: Sendable {
         let itnChanged: Bool
         let itnSpansMasked: Int
         let itnMs: Int
+        // K-55 ValidationGate: raw vs cleaned divergence
+        let gateVerdict: GateVerdict
+        let gateMetrics: GateMetrics
+        let gateRawFallback: Bool
     }
 
     private let cleanupConfig: TextCleanupConfiguration
@@ -28,25 +32,50 @@ struct TranscriptPostProcessor: Sendable {
     }
 
     func process(_ input: String) -> Output {
+        let rawInput = input
         let cleanupResult = TextCleanupEngine().clean(input, configuration: cleanupConfig)
-        // cleanup master toggle gating ITN: ITN answers to the same master switch as the cleanup rules.
-        // It previously keyed off the orphaned private default
-        // `internal.itn.enabled` (default true, written by nothing since settings redesign
-        // removed the old settings UI), so Cleanup OFF still normalized
-        // numbers behind the pane's promise. The dictionary stays independent
-        // of the master by design (scoped 2026-08-24).
-        let itnResult = Self.applyITN(to: cleanupResult.text, masterEnabled: cleanupConfig.enabled)
-        let compiled = ReplacementCompiler.compile(entries: dictionaryEntries)
-        let (postProcessed, replaceCount) = compiled.apply(to: itnResult.text)
+        // K-55 ValidationGate: raw (ASR) vs *cleanup* output only.
+        // ITN/dictionary are curated and legitimately change tokens (e.g. "fifty dollars" -> "$50.20",
+        // "open ai" -> "OpenAI"), so they must not be counted as divergence.
+        // The gate therefore validates TextCleanupEngine's deterministic transforms
+        // in isolation; on reject we fall back to raw and skip ITN/dictionary entirely
+        // (high-quality fallback, never empty).
+        let gateMetrics = ValidationGate.metrics(raw: rawInput, cleaned: cleanupResult.text)
+        let gateVerdict = ValidationGate.verdict(raw: rawInput, cleaned: cleanupResult.text, metrics: gateMetrics)
+        let gateRawFallback: Bool
+        let finalText: String
+        let itnResult: (text: String, changed: Bool, durationMs: Double, available: Bool, enabled: Bool, spanTokens: Int, spansMasked: Int)
+        let replacements: Int
+        if case .reject = gateVerdict {
+            gateRawFallback = true
+            // Fallback to raw ASR, bypassing ITN/dictionary to preserve the user's words.
+            // Dictionary is deliberately not applied on fallback — the gate's trip will
+            // auto-degrade the next dictation to raw anyway (Task 3 wiring).
+            itnResult = (text: rawInput, changed: false, durationMs: 0, available: NemoTextProcessing.isAvailable, enabled: false, spanTokens: 0, spansMasked: 0)
+            replacements = 0
+            finalText = rawInput
+        } else {
+            gateRawFallback = false
+            // Normal path: ITN (gated by cleanup master) → dictionary
+            let itn = Self.applyITN(to: cleanupResult.text, masterEnabled: cleanupConfig.enabled)
+            itnResult = itn
+            let compiled = ReplacementCompiler.compile(entries: dictionaryEntries)
+            let (postProcessed, replaceCount) = compiled.apply(to: itn.text)
+            replacements = replaceCount
+            finalText = postProcessed
+        }
         return Output(
-            text: postProcessed,
-            replacements: replaceCount,
+            text: finalText,
+            replacements: replacements,
             stats: cleanupResult.stats,
             itnEnabled: itnResult.enabled,
             itnAvailable: itnResult.available,
             itnChanged: itnResult.changed,
             itnSpansMasked: itnResult.spansMasked,
-            itnMs: Int(itnResult.durationMs)
+            itnMs: Int(itnResult.durationMs),
+            gateVerdict: gateVerdict,
+            gateMetrics: gateMetrics,
+            gateRawFallback: gateRawFallback
         )
     }
 

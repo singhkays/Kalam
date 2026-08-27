@@ -56,6 +56,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         static let pidPasteEnabledKey = "internal.latency.pidPasteEnabled"
         static let enableStageTimingKey = "internal.latency.enableStageTiming"
         static let startStageTimingKey = "internal.latency.startStageTiming"
+        // Task 3 (K-54): SNR-aware extension kill switches + retune path.
+        static let snrAwareEnabledKey = "internal.latency.snrAwareEnabled"
+        static let snrTrustDbKey = "internal.latency.snrTrustDb"
+        static let snrAbsoluteCapMsKey = "internal.latency.snrAbsoluteCapMs"
+        static let snrQuietToStopMsKey = "internal.latency.snrQuietToStopMs"
+        static let snrRelativeCapKey = "internal.latency.snrRelativeCap"
+        static let snrFloorMarginDbKey = "internal.latency.snrFloorMarginDb"
 
         static let defaultPostRollMinMs = 100
         static let defaultPostRollMaxMs = 150
@@ -63,12 +70,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         static let defaultPasteDelayLongMs = 80
         static let defaultPasteFallbackTotalMs = 120
         static let defaultEnableStageTiming = true
+        static let defaultSnrAwareEnabled = true
+        static let defaultSnrTrustDb: Float = 12
+        static let defaultSnrAbsoluteCapMs = 1500
+        static let defaultSnrQuietToStopMs = 250
+        static let defaultSnrRelativeCap: Float = 0.30
+        static let defaultSnrFloorMarginDb: Float = 3
+
+        /// Build the Task-3 config from defaults. When the kill switch is OFF,
+        /// returns a `.fixed` config identical to the K-49 behavior. When ON,
+        /// returns `.snrAware` with per-key overrides (missing keys fall back
+        /// to the Jot-derived constants). Documented retune path: write the
+        /// `internal.latency.snr*` keys and restart; no code change required.
+        nonisolated static func snrConstants(from defaults: UserDefaults) -> PostRollDecision.ExtensionConstants {
+            var c = PostRollDecision.ExtensionConstants()
+            // Each key may be absent (0 sentinel) — only override when
+            // explicitly set. Float keys require object check to disambiguate
+            // "not set" (0.0) from intentional 0; use object(forKey:) presence.
+            if defaults.object(forKey: snrTrustDbKey) != nil {
+                c.trustSnrDb = defaults.float(forKey: snrTrustDbKey)
+            }
+            if defaults.object(forKey: snrAbsoluteCapMsKey) != nil {
+                let v = defaults.integer(forKey: snrAbsoluteCapMsKey)
+                if v > 0 { c.absoluteCapMs = v }
+            }
+            if defaults.object(forKey: snrQuietToStopMsKey) != nil {
+                let v = defaults.integer(forKey: snrQuietToStopMsKey)
+                if v > 0 { c.quietToStopMs = v }
+            }
+            if defaults.object(forKey: snrRelativeCapKey) != nil {
+                c.relativeCap = defaults.float(forKey: snrRelativeCapKey)
+            }
+            if defaults.object(forKey: snrFloorMarginDbKey) != nil {
+                c.floorMarginDb = defaults.float(forKey: snrFloorMarginDbKey)
+            }
+            return c
+        }
+
+        nonisolated static func postRollConfig(postRollMs: Int, defaults: UserDefaults) -> PostRollDecision.Config {
+            if defaults.object(forKey: snrAwareEnabledKey) != nil {
+                if !defaults.bool(forKey: snrAwareEnabledKey) {
+                    return PostRollDecision.Config(minMs: AppDelegate.postRollEarlyExitMinMs, maxMs: postRollMs)
+                }
+            } else if !defaultSnrAwareEnabled {
+                return PostRollDecision.Config(minMs: AppDelegate.postRollEarlyExitMinMs, maxMs: postRollMs)
+            }
+            // Enabled (default ON after Task 3)
+            let constants = snrConstants(from: defaults)
+            return PostRollDecision.Config(
+                minMs: AppDelegate.postRollEarlyExitMinMs,
+                maxMs: postRollMs,
+                extensionPolicy: .snrAware(constants)
+            )
+        }
     }
 
     /// K-49: small safety floor for the early-exit stop. The trailing-phoneme
     /// protection comes from the 3-consecutive-silent-polls rule; this floor
     /// just avoids finishing on the very first polls after key-up.
-    static let postRollEarlyExitMinMs = 60
+    nonisolated static let postRollEarlyExitMinMs = 60
 
     /// Adaptive post-roll for the audio stop pipeline: estimate segment duration
     /// from PTT hold time, clamp to the configured 100–150 ms range (50–400/500
@@ -95,6 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let overlay = DictationOverlayController()
     private let hotkeys = HotkeyListener()
     private let paster = PasteService()
+    private let validationGateStore = ValidationGateTripStore()
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "DictationRuntime")
 
     // record-time paste target capture: record-time paste target (app PID + focused element), and a held transcript
@@ -168,6 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var microphonePriorityObserver: NSObjectProtocol?
     private var openSetupObserver: NSObjectProtocol?
     private var appDidBecomeActiveObserver: NSObjectProtocol?
+    private var validationGateObserver: NSObjectProtocol?
     private var localKeyDownMonitor: Any?
     private var globalKeyDownMonitor: Any?
     private var audioMonitor: AudioDeviceMonitor?
@@ -185,7 +247,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(generalSettings.showInDock ? .regular : .accessory)
         prepareRecordingChime()
         
-        // Register user defaults for ducking
+        // Register user defaults for ducking + Task-3 SNR tuning (retune path:
+        // `defaults write singhkays.Kalam internal.latency.snr* …` then restart)
         UserDefaults.standard.register(defaults: [
             "duckEnabled": true,
             "duckFactor": 0.1,
@@ -201,7 +264,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             LatencyTuningOptions.pasteDelayLongMsKey: LatencyTuningOptions.defaultPasteDelayLongMs,
             LatencyTuningOptions.pasteFallbackTotalMsKey: LatencyTuningOptions.defaultPasteFallbackTotalMs,
             LatencyTuningOptions.enableStageTimingKey: LatencyTuningOptions.defaultEnableStageTiming,
-            LatencyTuningOptions.startStageTimingKey: true
+            LatencyTuningOptions.startStageTimingKey: true,
+            LatencyTuningOptions.snrAwareEnabledKey: LatencyTuningOptions.defaultSnrAwareEnabled,
+            LatencyTuningOptions.snrTrustDbKey: LatencyTuningOptions.defaultSnrTrustDb,
+            LatencyTuningOptions.snrAbsoluteCapMsKey: LatencyTuningOptions.defaultSnrAbsoluteCapMs,
+            LatencyTuningOptions.snrQuietToStopMsKey: LatencyTuningOptions.defaultSnrQuietToStopMs,
+            LatencyTuningOptions.snrRelativeCapKey: LatencyTuningOptions.defaultSnrRelativeCap,
+            LatencyTuningOptions.snrFloorMarginDbKey: LatencyTuningOptions.defaultSnrFloorMarginDb
         ])
 
         // App Nap guard: defeats timer coalescing so hotkey handling stays
@@ -346,6 +415,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        validationGateObserver = NotificationCenter.default.addObserver(
+            forName: ValidationGateTripStore.didAutoDegrade,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.overlay.showError("Cleanup auto-paused — last 3 pastes had formatting issues.", action: nil, autoHideAfter: 5.0)
+                self.logger.warning("ValidationGate auto-degraded; cleanup will be bypassed until relaunch or manual reset")
+            }
+        }
+
         // microphone recovery after sleep or device change: react to audio-topology changes (dock reconnects, device
         // death) and system wake — the audio graph must be re-prepared
         // against the fresh device list instead of staying bound to a
@@ -407,6 +488,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let openSetupObserver {
             NotificationCenter.default.removeObserver(openSetupObserver)
             self.openSetupObserver = nil
+        }
+        if let validationGateObserver {
+            NotificationCenter.default.removeObserver(validationGateObserver)
+            self.validationGateObserver = nil
         }
         audioMonitor?.stop()
         audioMonitor = nil
@@ -1171,13 +1256,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             // K-49: the tail-silence poll is the trailing-phoneme protection
             // (3 consecutive silent 20 ms windows + a small safety floor). The
-            // old adaptive post-roll value is now the CEILING, so the stop can
-            // only finish EARLIER than the old fixed sleep, never later.
-            let config = PostRollDecision.Config(
-                minMs: Self.postRollEarlyExitMinMs,
-                maxMs: postRollMs
+            // old adaptive post-roll value is now the CEILING for the fixed
+            // path; the SNR-aware policy (Task 3) extends it per room SNR.
+            let segmentEstimateMs = Int((pttUp - pttDown) * 1000)
+            let config = LatencyTuningOptions.postRollConfig(postRollMs: postRollMs, defaults: .standard)
+            return await self.audio.stopWithEarlyExit(
+                pinnedGeneration: audioGeneration,
+                config: config,
+                segmentEstimateMs: segmentEstimateMs
             )
-            return await self.audio.stopWithEarlyExit(pinnedGeneration: audioGeneration, config: config)
         }
         recordingStopTask = stopTask
         
@@ -1231,8 +1318,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
                 sessionTimingExtras += " transport=\(st.transportTag)"
+                // Task 3: tag post-roll mode + room SNR with the latency summary
+                // (ring read-back SNR estimated at key-up; still 0 if fixed path).
+                let snr = self.audio.lastPostRollSNR
+                sessionTimingExtras += String(format: " roomSNR=%.1f", snr)
+                // Derive mode from the last config's policy + SNR trust gate for
+                // human-readable logs; exact effectiveMax is in the PostRoll log.
+                let trustDb = LatencyTuningOptions.snrConstants(from: defaults).trustSnrDb
+                let mode: String
+                let awareEnabled: Bool = {
+                    if UserDefaults.standard.object(forKey: LatencyTuningOptions.snrAwareEnabledKey) != nil {
+                        return UserDefaults.standard.bool(forKey: LatencyTuningOptions.snrAwareEnabledKey)
+                    }
+                    return LatencyTuningOptions.defaultSnrAwareEnabled
+                }()
+                if !awareEnabled {
+                    mode = "fixed"
+                } else {
+                    mode = snr < trustDb ? "snrAware-low" : "snrAware-trusted"
+                }
+                sessionTimingExtras += " postRollMode=\(mode)"
             }
-            self.logger.info("Recording timing holdMs=\(Int(keyDownToUp * 1000), privacy: .public) keyUpToSamplesMs=\(Int(upToSamples * 1000), privacy: .public)\(sessionTimingExtras, privacy: .public)")
+            self.logger.info("Recording timing holdMs=\(Int(keyDownToUp * 1000), privacy: .public) keyUpToSamplesMs=\(Int(upToSamples * 1000), privacy: .public) postRollMs=\(postRollMs, privacy: .public)\(sessionTimingExtras, privacy: .public)")
             stageMark("audio-stop+fetch")
             
             // Trim with hysteresis/hangover/padding + conservative fallback
@@ -1308,13 +1415,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 
                 // off-main post-processing: snapshot Sendable inputs on-main, run cleanup+ITN+
                 // dictionary OFF the main actor, keep only counts in logs.
+                // K-55 ValidationGate: check degraded flag before snapshot so the next
+                // dictation bypasses cleanup when auto-degraded; the gate itself validates
+                // TextCleanupEngine output only (ITN/dictionary are curated).
+                let baseCleanupConfig = ModelsConfiguration.load().textCleanup
+                let isDegradedBefore = self.validationGateStore.isDegraded
+                let effectiveCleanupConfig: TextCleanupConfiguration = {
+                    if isDegradedBefore {
+                        var c = baseCleanupConfig
+                        c.enabled = false
+                        return c
+                    }
+                    return baseCleanupConfig
+                }()
                 let processor = TranscriptPostProcessor(
-                    cleanupConfig: ModelsConfiguration.load().textCleanup,
+                    cleanupConfig: effectiveCleanupConfig,
                     dictionaryEntries: CustomDictionaryManager.shared.entries
                 )
                 let post = await Self.postProcessTranscript(processor, trimmedText)
                 stageMark("cleanup+itn+dictionary")
-                self.logger.info("Transcription completed outputLength=\(post.text.count, privacy: .public) asrMs=\(Int((asrEnd - asrStart) * 1000), privacy: .public) cleanupEdits=\(post.stats.totalEdits, privacy: .public) cleanupMs=\(Int(post.stats.durationMs), privacy: .public) grammarEdits=\(post.stats.grammarEdits, privacy: .public) grammarAttempted=\(post.stats.grammarAttempted, privacy: .public) grammarTimedOut=\(post.stats.grammarTimedOut, privacy: .public) grammarSkippedForLength=\(post.stats.grammarSkippedForLength, privacy: .public) itnSpansMasked=\(post.itnSpansMasked, privacy: .public) itnEnabled=\(post.itnEnabled, privacy: .public) itnAvailable=\(post.itnAvailable, privacy: .public) itnChanged=\(post.itnChanged, privacy: .public) itnMs=\(post.itnMs, privacy: .public) replacements=\(post.replacements, privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public)")
+                // K-55: record verdict and surface degraded banner exactly once
+                self.validationGateStore.record(post.gateVerdict)
+                let gateReason: String
+                switch post.gateVerdict {
+                case .accept: gateReason = "accept"
+                case .reject(let r): gateReason = r
+                }
+                self.logger.info("ValidationGate verdict=\(gateReason, privacy: .public) fallback=\(post.gateRawFallback, privacy: .public) lengthRatio=\(String(format: "%.2f", post.gateMetrics.lengthRatio), privacy: .public) containment=\(String(format: "%.2f", post.gateMetrics.tokenContainment), privacy: .public) trigram=\(post.gateMetrics.trigramOverlap.map { String(format: "%.2f", $0) } ?? "nil", privacy: .public) rawLen=\(trimmedText.count, privacy: .public) cleanedLen=\(post.text.count, privacy: .public) degradedBefore=\(isDegradedBefore, privacy: .public) degradedNow=\(self.validationGateStore.isDegraded, privacy: .public)")
+                self.logger.info("Transcription completed outputLength=\(post.text.count, privacy: .public) asrMs=\(Int((asrEnd - asrStart) * 1000), privacy: .public) cleanupEdits=\(post.stats.totalEdits, privacy: .public) cleanupMs=\(Int(post.stats.durationMs), privacy: .public) grammarEdits=\(post.stats.grammarEdits, privacy: .public) grammarAttempted=\(post.stats.grammarAttempted, privacy: .public) grammarTimedOut=\(post.stats.grammarTimedOut, privacy: .public) grammarSkippedForLength=\(post.stats.grammarSkippedForLength, privacy: .public) itnSpansMasked=\(post.itnSpansMasked, privacy: .public) itnEnabled=\(post.itnEnabled, privacy: .public) itnAvailable=\(post.itnAvailable, privacy: .public) itnChanged=\(post.itnChanged, privacy: .public) itnMs=\(post.itnMs, privacy: .public) replacements=\(post.replacements, privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public) gateFallback=\(post.gateRawFallback, privacy: .public)")
 
                 // K-50: route decided BEFORE the settle wait so only the
                 // frontmost route pays it. One frontmost read feeds decision

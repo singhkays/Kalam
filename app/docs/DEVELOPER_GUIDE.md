@@ -168,6 +168,19 @@ so a uniformly loud tail can never self-classify as silent. The generation contr
 unchanged — pin before the first suspension and finish via `finishStop(expectedGeneration:)`
 — and `cancelRecording()` still tears down immediately.
 
+**SNR-aware carry-over (K-54).** When `internal.latency.snrAwareEnabled` (default ON)
+the ceiling and quiet gate extend per estimated room SNR and segment duration
+(`PostRollDecision.ExtensionPolicy.snrAware`): room SNR from the recent waveform ring's
+p95–p05 windowed energies; SNR < `trustSnrDb` (12 dB default) extends toward the 1.5 s
+absolute backstop and never clips; trusted rooms (≥12 dB) extend while the tail is
+speech-like (`floor+3 dB` sensitive threshold) and stop after ≥250 ms quiet, capped at
+0.30× segment estimate. The 60 ms floor + 3-poll rule stay in ALL modes. The active mode,
+room SNR, and configured `postRollMs` are appended to the `Recording timing` info log
+(`postRollMode=`, `roomSNR=`) together with `PostRoll SNR-aware start/done` lines;
+kill-switch OFF sets `postRollMode=fixed` + `roomSNR=0.0`. Per-key retune via
+`internal.latency.snrTrustDb` / `snrAbsoluteCapMs` / `snrQuietToStopMs` / `snrRelativeCap` /
+`snrFloorMarginDb` (restart required).
+
 **Route-conditional paste settle.** Only the `.frontmost` CGEvent route pays the settle wait
 (50/80 ms defaults, `internal.latency.pasteDelayShortMs`/`LongMs`); captured-element routes
 paste focus-independently via AX set-value and captured-app does its own activate+settle
@@ -198,7 +211,16 @@ offset-invariant, so normalization cannot change its verdict.
 
 ## Text Cleanup Behavior
 
-`TextCleanupEngine` runs deterministic, local-only text transforms with feature flags:
+`TextCleanupEngine` runs deterministic, local-only text transforms with feature flags;
+`ValidationGate` (K-55) validates raw-vs-cleaned divergence inside `KalamTextEngine` (length
+0.18…1.65, containment ≥0.30, trigram ≥0.05; all 13 goldens accept). On `.reject` the
+pipeline falls back to raw ASR text (skips ITN/dictionary), counts a trip in
+`ValidationGateTripStore` (rolling 24 h window, ≥3 trips → auto-degrades cleanup to
+bypass until relaunch or `CleanupPane` Re-enable; `Notification.Name.validationGateAutoDegraded`;
+success streak 5 resets). `TranscriptPostProcessor` exposes `gateVerdict`/`gateMetrics`/`gateRawFallback`
+and logs `ValidationGate verdict=` with the transcription summary.
+
+`TextCleanupEngine` flags:
 
 - `removeFillers`
   - Removes common fillers and elongated variants (`ummm`, `uhhh`)
@@ -368,11 +390,19 @@ UserDefaults keys include:
 - `models.asrVersion`
 - `models.modelLibraryBookmark` (security-scoped bookmark for local model library folder)
 - `internal.latency.enableStageTiming` (`Bool`, default `true`)
+- `internal.latency.startStageTiming` (`Bool`, default `true`)
 - `internal.latency.postRollMinMs` (`Int`, default `100`)
 - `internal.latency.postRollMaxMs` (`Int`, default `150`)
 - `internal.latency.pasteDelayShortMs` (`Int`, default `50`)
 - `internal.latency.pasteDelayLongMs` (`Int`, default `80`)
 - `internal.latency.pasteFallbackTotalMs` (`Int`, default `120`)
+- `internal.latency.snrAwareEnabled` (`Bool`, default `true`) — kill-switch for K-54
+- `internal.latency.snrTrustDb` (`Float`, default `12`)
+- `internal.latency.snrAbsoluteCapMs` (`Int`, default `1500`)
+- `internal.latency.snrQuietToStopMs` (`Int`, default `250`)
+- `internal.latency.snrRelativeCap` (`Float`, default `0.30`)
+- `internal.latency.snrFloorMarginDb` (`Float`, default `3`)
+- `validationGate.isDegraded` (`Bool`, UserDefaults) + `validationGate.trips` (`[Double]`) + `validationGate.successStreak` (`Int`) — K-55 auto-degrade state (rolling 86,400 s, threshold 3, streak reset 5); degraded disables `TextCleanupEngine` until relaunch or manual reset; `Notification.Name.validationGateAutoDegraded` posted once per episode
 - `textCleanup.enabled`
 - `textCleanup.removeFillers`
 - `textCleanup.backtrack`

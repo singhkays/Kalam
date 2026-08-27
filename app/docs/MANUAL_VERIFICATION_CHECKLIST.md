@@ -626,3 +626,136 @@ Rapid re-record + Esc behavior after the DictationStateMachine wiring (plan Task
 - [x] 🧑 **Esc after text delivered** — N/A (with reason, not a pass-by-proxy): the paste leg completes faster than a human can press Esc — which is itself the desired latency outcome. The machine policy for this path is exhaustively pinned headlessly (`testEscIsLiveInEveryActiveState`).
 - [x] 🧑 **K-01 toggle regression** — PASS (round 1): three normal toggle dictations started, stopped, transcribed, and pasted as before Task 2.
 
+
+## K-53 WarmEnginePool — device-warm prepared graph (Task 1) 🧑 60 s glyph + device-change first dictation
+
+Device-warm pool holds ONE spare `AVAudioEngine` keyed by input-device UID. Idle is `construct + prepare()` ONLY (never `start()`/tap — mic glyph must not appear). Permission-gated, 250 ms trailing-debounce coalescing (composes with TAP-TO-WAKE `audioDevicesDidChange` burst, commit `be99b81`). Recalibrated gates (Task-0 data, 2026-08-27): `engineStart→firstBuffer` 91–106 ms is irreducible (mic-indicator law, K-47 already removed the inline graph-build cost) — real wins are device-CHANGE first dictation and freshness.
+
+**Pre-steps (once, ~2 min, host Mac only — VM has no mic):**
+```bash
+cd "/Volumes/My Shared Files/GitHub/Kalam"
+# docs are gitignored -- verify local flips already applied:
+grep -n "K-53" app/docs/IMPROVEMENT_PLAN.md
+# expected: | K-53 | ✅ |
+grep -n -E "^- \[x\] (Build pool|Gate prewarm|Invalidate \+ rebuild|AudioPrepareDecision|Tests \(WarmEngine)" app/docs/dev-design/2026-08-26-k52-k58-jot-adoption-plan.md
+
+# enable stage-timing so toPreparedMs / transport appear
+defaults write singhkays.Kalam internal.latency.enableStageTiming -bool true
+defaults write singhkays.Kalam internal.latency.startStageTiming -bool true
+# quit + relaunch Kalam (Xcode run or /Applications/Kalam.app)
+```
+
+**Log stream (keep this tab open for all gates below):**
+```bash
+log stream --style compact --predicate 'subsystem == "singhkays.Kalam"' --level info 2>&1 | grep --line-buffered -E "WarmEnginePool|AudioRecorder|Recording start latency"
+# WarmEnginePool categories:
+#   WarmEnginePool prewarm ok uid=...
+#   WarmEnginePool take consumed uid=... -- scheduling refill
+#   WarmEnginePool invalidated reason=...
+# AudioRecorder: Adopted warm pool graph / Audio graph already prepared
+# Recording start latency ... transport=... toPreparedMs=... engineStartToFirstBufferMs=...
+```
+
+- [ ] 🧑 **60 s mic-glyph gate (mic-indicator invariant):** Quit Kalam, relaunch, leave **idle 60 s** with the `log stream` tab running. The menu-bar mic glyph (Control Center) must stay **off** the entire window. Logs must show `WarmEnginePool prewarm ok` but **never** an idle `engine.start()` / tap-install. If you see `WarmEnginePool factory returned a RUNNING engine -- stopped (invariant violation)` mark **FAIL**.
+
+- [ ] 🧑 **Built-in device-change first dictation:** With the stream still running:
+  1. Change default input: `System Settings -> Sound -> Input` (Built-in <-> USB) or unplug/plug a USB mic.
+  2. Logs within ~250 ms: `WarmEnginePool invalidated reason=deviceChange` then one `WarmEnginePool prewarm ok` (exactly one, even though CoreAudio posts a burst -- coalescing gate).
+  3. Immediately do one dictation (hold hotkey 2 s, release). Check the `Recording start latency ... transport=builtin ...` line:
+     * `toPreparedMs <=5` (pool hit; stale inline rebuild would be 19-26, seen in baseline `toPrepared 19` vs `1-3`)
+     * overall `pttDown->firstBuffer <=185 ms` (warm p95 175 +10). `engineStart->firstBuffer` stays 91-106 (irreducible, not a failure).
+
+- [ ] 🧑 **Bluetooth (AirPods) device-change first dictation:** Connect AirPods (A2DP-idle), wait for the TAP-TO-WAKE `audioDevicesDidChange` burst (`be99b81`), then check logs show **exactly one** `prewarm ok` after the burst (250 ms coalescing). Do one dictation on AirPods; check `transport=bluetooth` line: `toPreparedMs <=5` and `pttDown->firstBuffer <=155 ms` (warm p95 144 +10). Same vanishing `engineStart->firstBuffer` 91-106 is expected.
+
+- [ ] 🧑 **Permission gate (optional, 1 min):** `System Settings -> Privacy & Security -> Microphone` -> deny Kalam, relaunch. Pool must no-op silently (no log `prewarm ok`, no prompt). Re-grant afterwards and relaunch -- one `prewarm ok` should appear again.
+
+**Post-checks (prove after the sweep):**
+```bash
+# last 5 min of Kalam info logs (host):
+log show --predicate 'subsystem == "singhkays.Kalam"' --info --last 5m 2>&1 | grep -E "WarmEnginePool|AudioRecorder|Recording start latency|toPreparedMs|transport=" | tail -n 80
+log show --predicate 'subsystem == "singhkays.Kalam" AND category == "WarmEnginePool"' --info --last 10m 2>&1 | grep -E "take consumed|invalidated|prewarm|stale"
+log show --predicate 'subsystem == "singhkays.Kalam" AND category == "WarmEnginePool"' --info --last 10m 2>&1 | grep -c "prewarm ok"
+# the last count: burst -> 1, two separate bursts -> 2, etc.
+# full suite gate (VM or host):
+xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO 2>&1 | tail -n 20
+# expected: ** TEST SUCCEEDED ** (ignore *testFailed* in test names, final line wins)
+```
+
+**Fail signals to attach (screenshot + 10-line snippet from the log stream above):** glyph appears while idle; `toPreparedMs` >5 after device-change; burst produces >1 `prewarm ok` in 250 ms; `RUNNING engine` warning.
+
+*Commit `f44d4bd` (local, not pushed) -- leave `K-53 ✅` local; do not push until release tag.*
+
+---
+
+## K-54 — SNR-aware post-roll carry-over (Task 3) — trailing-phoneme + logs
+
+**What this proves:** Task 3 extends the K-49 early-exit ceiling per room SNR so the trailing phoneme is not clipped when the hand anticipates the mouth. `PostRollDecision` now has a pure `ExtensionPolicy` (`.fixed` vs `.snrAware(ExtensionConstants)`) fed by a ring read-back SNR estimated from the recent waveform (4096-sample ring, `windowedEnergiesDb` p95-p05) and the segment estimate. Low SNR (<12 dB) stretches toward the 1.5 s backstop and never clips; trusted rooms (≥12 dB) stretch while the tail is speech-like (`floor+3 dB` sensitive threshold, 0.08 linear ratio mapped) and stop after quiet ≥250 ms, capped at 0.30× segment duration. The 60 ms floor + 3-poll rule stays in ALL modes. Device HAL ring shrink read-back is unchanged (see Gate B) but is now compositionally part of the same tail-latency budget.
+
+**Pre-steps (host Mac only — VM has no mic; reuse the Part 1 prep if already running):**
+```bash
+# 1. Enable stage timing + SNR-aware (default ON after Task 3, but confirm):
+defaults read singhkays.Kalam-test internal.latency.snrAwareEnabled  # → 1
+# If 0, flip it: defaults write singhkays.Kalam-test internal.latency.snrAwareEnabled -bool true
+# Retune path (no code change): any of
+#   internal.latency.snrTrustDb (default 12), internal.latency.snrAbsoluteCapMs (1500),
+#   internal.latency.snrQuietToStopMs (250), internal.latency.snrRelativeCap (0.30),
+#   internal.latency.snrFloorMarginDb (3)
+# Example: defaults write singhkays.Kalam-test internal.latency.snrTrustDb -float 10
+
+# 2. Quit + relaunch Kalam (debug build Kalam-test), grant mic, ensure Compass → Engine ready.
+# 3. Start log stream BEFORE dictating (keep tab open):
+log stream --style compact --predicate 'subsystem == "singhkays.Kalam"' --level info 2>&1 | grep --line-buffered -E "PostRoll SNR-aware|Recording timing|Latency stage label=audio-stop\+fetch|Device ring buffer"
+# Expected at launch: one WarmEnginePool prewarm ok (K-53) — ignore for this gate.
+```
+
+**Gate G1 — trusted-room trailing syllable survives (built-in mic):**
+1. Select **Built-in Microphone** as top priority in Compass → Being Heard (or System Settings → Sound → Input).
+2. Dictate 5 short sentences where the last word ends on a soft stop, e.g.:
+   - "Meeting at ten thirty."
+   - "Call me at five five five one two three four."
+   - "The version is two point five."
+   - "We need a two to three pager."
+   - "One of us should go."
+   Note the exact last word you spoke for each.
+3. After each paste, confirm the last word is present (no truncation). One clipped trailing phoneme = **FAIL**.
+
+**Gate G2 — low-SNR backstop (no clipping is the PASS):**
+1. Create a low-SNR environment: run a quiet fan / white-noise app at low volume ~1 m away, or cup your hand loosely around the mic to raise the noise floor without shouting. The log's `roomSNR=` should read **<12 dB** (see capture below) — that is the low-SNR branch.
+2. Dictate 3 longer sentences (8–12 words) holding the PTT ~0.5 s past your last word (mimics hand-early release). Example: "The quarterly report is ready for review and needs approval."
+3. Confirm every paste is complete (no truncated final word). Low SNR **must run longer** — it is REQUIRED to stretch toward 1.5 s and never clip; a short `audio-stop+fetch` that truncates here is the old bug, not a win. Check the log: `mode=snrAware-low` and `effectiveMaxMs=1500`.
+
+**Gate G3 — Bluetooth (AirPods) word-ending:**
+1. Put AirPods in, select them as top device in Compass (row should flip from OFFLINE → TAP TO WAKE → READY after the ~0.8 s HFP wake; see K-53). Confirm `transport=bluetooth` on the next `Recording timing` line.
+2. Repeat G1's 5 sentences on AirPods. Same pass criterion: last word present on every paste. HFP mics have shorter tail energy — this is the transport that most often exposed the 150 ms truncation.
+
+**Gate G4 — logs carry postRollMs + mode + roomSNR (proof of wiring):**
+```bash
+# While the stream is still running, in a second terminal:
+log show --predicate 'subsystem == "singhkays.Kalam"' --info --last 10m 2>&1 | grep -E "PostRoll SNR-aware start|Recording timing.*roomSNR|Latency stage label=audio-stop\+fetch"
+```
+Expected per dictation (2 lines):
+- `PostRoll SNR-aware start snrDb=… mode=snrAware-trusted|snrAware-low segmentEstimateMs=… minMs=60 maxMs=… effectiveMaxMs=…`
+- `Recording timing holdMs=… keyUpToSamplesMs=… … transport=… roomSNR=… postRollMode=… postRollMs=…`
+And `Latency stage label=audio-stop+fetch deltaMs=…` still appears (K-49 labeling unchanged). **FAIL if** `roomSNR` missing, `mode` missing, or `effectiveMaxMs` never exceeds the old 150 ms on a trusted dictation with a long segment (e.g., segment 2000 → effective 600).
+
+**Gate G5 — kill-switch + goldens (regression guard):**
+1. Disable SNR-aware: `defaults write singhkays.Kalam-test internal.latency.snrAwareEnabled -bool false` → quit + relaunch.
+2. Dictate one G1 sentence. Log should show `mode=fixed` (or no `PostRoll SNR-aware` line) and `roomSNR=0.0`. Paste must still be correct (fixed path unchanged).
+3. Re-enable: `defaults write singhkays.Kalam-test internal.latency.snrAwareEnabled -bool true` → relaunch. Confirm `mode=snrAware-…` returns.
+4. Headless: `xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/PostRollDecisionTests` must still report `testGoldensUnchanged_FixedConfigMatchesLegacy` PASS (proves fixed policy not regressed).
+
+**Post-checks (attach to handoff):**
+```bash
+log show --predicate 'subsystem == "singhkays.Kalam"' --info --last 15m 2>&1 | grep -E "PostRoll SNR-aware|Recording timing.*roomSNR|Device ring buffer" | tail -n 40
+xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/PostRollDecisionTests 2>&1 | tail -n 30
+# Expected: PostRoll lines with both modes observed across built-in/bluetooth; roomSNR varies (≈ 5–25 dB across environments); all PostRollDecisionTests 22/22 pass.
+```
+
+**Result:** ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes (attach 10-line log snippet + per-sentence last-word checklist):
+- Built-in G1 last words: _____
+- Low-SNR G2 mode/roomSNR: _____
+- AirPods G3 last words: _____
+- G4 log sample: _____
+- G5 kill-switch flip: _____
+
+*Commit for Task 3: local (not pushed) — leave `K-54 🔄→✅` local until G1–G5 all PASS; do not push until release tag.*
