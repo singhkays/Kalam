@@ -104,6 +104,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// partial-AX target capture no-op: the app the hold capsule promised (pid), so the Paste button
     /// delivers THERE instead of whatever is frontmost when clicked.
     private var heldTranscriptTargetPID: pid_t?
+    /// K-52: which session the hold slot belongs to. Cleanup is scoped by
+    /// OWNERSHIP — a session's success path may only clear its own slot, so a
+    /// preserved transcript from a superseded session survives (the wipe found
+    /// in manual round 2: B's `heldTranscript = nil` destroyed A's preserved
+    /// text because the slot was shared and the cleanup unconditional).
+    private var heldTranscriptSession: SessionID?
+
+    // K-52: pure lifecycle decision state (DictationStateMachine). Mutated
+    // only through dispatchLifecycle, which realizes the machine's ordered
+    // effects against app state.
+    private var lifecycle: DictationState = .idle
+    /// App-side record of the committed text for the most recent session (the
+    /// machine deliberately carries no payload). Preserve effects copy this
+    /// into the hold chip; a newer session's commit overwrites it. The target
+    /// PID is snapshotted at stop time — by the time the text lands, a newer
+    /// session may have re-captured the target.
+    private struct CommittedTranscript {
+        let session: SessionID
+        let text: String
+        let targetPID: pid_t?
+    }
+    private var committedTranscript: CommittedTranscript?
+    /// A preserved transcript's hold chip is deferred while a newer session
+    /// owns the capsule; surfaced the moment the machine rests.
+    private var pendingHeldNotice = false
+    /// Preserve effect fired BEFORE the text existed (interrupt during the
+    /// ASR await): remember whose transcript to materialize when the task
+    /// returns with text — even though the task was cancelled meanwhile.
+    private var pendingPreserveSession: SessionID?
 
     private var isRecording: Bool { pttState.isRecording }
     private var isASRReady = false
@@ -187,6 +216,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         overlay.setPasteHeldTranscriptAction { [weak self] in
             self?.pasteHeldTranscript()
+        }
+        // K-52 discard: clear the held-transcript slot without delivering.
+        overlay.setDestroyHeldTranscriptAction { [weak self] in
+            self?.discardHeldTranscript()
         }
         overlay.prewarm()
 
@@ -720,6 +753,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard isRecording else { return }
         let settings = GeneralSettingsConfiguration.load()
         guard settings.escapeCancelsRecording else { return }
+        // K-52: policy FIRST — the machine records the cancel for whatever is
+        // live (P0 #2: Esc is no longer a silent no-op during transcription;
+        // its cancelWork effect kills the in-flight ASR task) and, if text was
+        // already delivered, parks it in the hold chip instead of destroying.
+        dispatchLifecycle(.escPressed, context: "esc")
         cancelRecording()
     }
 
@@ -874,7 +912,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             transcriptionTask = nil
             dictationTargetPID = nil
             dictationTargetElement = nil
-            heldTranscript = nil
+            // K-52: heldTranscript survives — same never-destroyed policy as
+            // cancelRecording (a parked transcript is a settled session's).
             let audio = self.audio
             // Pin the teardown to the session being torn down on wake.
             let audioGeneration = audio.captureGeneration
@@ -884,6 +923,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             recordingStopTask = stopTask
             overlay.hide()
         }
+        // K-52: out-of-band reset — system wake tore the session down with no
+        // lifecycle event in the vocabulary. The one sanctioned bypass of
+        // dispatchLifecycle (logged alongside the wake line above).
+        lifecycle = .idle
+        pendingHeldNotice = false
         // wake handler PTT field reset: abandon (recordingDidStop + flag clear), NOT
         // resetForConfigurationChange — the latter keeps isRecording == true,
         // so the first post-wake keypress acted as a STOP on a junk clip.
@@ -943,10 +987,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @discardableResult
     private func startRecording(triggerMode: PTTStateMachine.TriggerMode) -> Bool {
-        // stale-recording paste guard: a new recording supersedes any in-flight transcription/paste from
-        // the previous session — abort it so stale text is never pasted.
-        transcriptionTask?.cancel()
         guard !isRecording else { return false }
+        // K-52: superseding an in-flight transcription/paste is decided by the
+        // lifecycle machine, not by an unconditional cancel here — the old
+        // unconditional cancel vaporized a COMPLETED transcript in the rapid
+        // re-record window (P0 #1). The machine's keyDown effect runs only if
+        // the start below actually commits (dispatch after startCollecting).
         // failed-start hardening: never leave a previous session's paste target alive
         dictationTargetPID = nil
         dictationTargetElement = nil
@@ -987,6 +1033,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // microphone recovery after sleep or device change: the state sync happens only after startCollecting succeeds —
         // a failed start must leave the PTT machine idle (PTT state machine test coverage invariant).
         _ = recordingSessions.beginNewRecording()
+        // K-52: identity for every lifecycle event of this session; minted
+        // before the async legs so stale completions name their session.
+        let sessionID = recordingSessions.currentSessionID ?? UUID()
 
         do {
             try audio.startCollecting()
@@ -998,10 +1047,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startLatencyProbe?.mark(.engineStarted)
         pttState.recordingDidStart(triggerMode)
         overlay.showRecording(isHoldMode: triggerMode == .hold)
+        // K-52: the start committed — advance the machine (this is where a
+        // superseded session's transcript gets preserved / its tasks killed).
+        dispatchLifecycle(.keyDown(session: sessionID), context: "start")
+        // Credit-on-start approximation: the recorder exposes no main-thread
+        // first-buffer hook, so `warming` collapses here. The warming-state
+        // policy (abandon / Esc) stays exercised headlessly in the machine
+        // tests; `locked` mirrors the PTT trigger mode (toggle = latched).
+        dispatchLifecycle(.captureStarted(session: sessionID, locked: triggerMode == .toggle), context: "capture")
         startLatencyProbe?.mark(.indicatorShown)
         if UserDefaults.standard.bool(forKey: LatencyTuningOptions.startStageTimingKey),
            let line = startLatencyProbe?.summaryLine() {
-            logger.info("Recording start latency \(line, privacy: .public)")
+            // Task 0: route tag lets Appendix-B baseline rows filter by mic transport.
+            logger.info("Recording start latency \(line, privacy: .public) transport=\(self.audio.lastSessionTiming.transportTag, privacy: .public)")
         }
         startLatencyProbe = nil
 
@@ -1070,12 +1128,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let pttDown = self.pttDownTime
         let pttUp = self.pttUpTime
         let generation = recordingSessions.currentGeneration()
+        // K-52: identity of the session being stopped — carried into the
+        // transcription task so every pipeline callback names its session.
+        let stopSessionID = recordingSessions.currentSessionID ?? UUID()
         // Pin the audio stop to the capture session being stopped NOW, before
         // any suspension. A rapid re-record bumps this id; the stale stop will
         // then no-op instead of draining the new session.
         let audioGeneration = audio.captureGeneration
 
-        transcriptionTask?.cancel()
+        // K-52: the unconditional cancels that lived here (and in
+        // startRecording) are replaced by machine policy — a superseded
+        // session's COMMITTED transcript is preserved, not vaporized (P0 #1);
+        // an ASR-unfinished one is cancelled with its bytes discarded.
+        dispatchLifecycle(.keyUp(session: stopSessionID), context: "stop")
+        // K-52 (manual-gate finding): snapshot THIS session's paste target
+        // now — a re-record re-captures the target before the interrupted
+        // ASR returns, and the preserved text must promise the ORIGINAL app.
+        let pasteTargetPID = self.dictationTargetPID
 
         // Audio teardown lives in its own task: the transcription task is
         // cancelled by the next session's start (stale-recording paste guard) and must NOT own the
@@ -1103,7 +1172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Run as an actor-inherited task instead of Task.detached so Swift 6 does not
         // send MainActor app state into an unisolated closure. Add post-roll to preserve trailing phonemes.
-        transcriptionTask = Task(priority: .userInitiated) { [weak self, pttDown, pttUp, generation, stopTask] in
+        transcriptionTask = Task(priority: .userInitiated) { [weak self, pttDown, pttUp, generation, stopTask, stopSessionID, pasteTargetPID] in
             guard let self = self else { return }
             guard !Task.isCancelled else { return }
             let defaults = UserDefaults.standard
@@ -1141,7 +1210,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 defaults: defaults,
                 logger: self.logger
             )
-            self.logger.info("Recording timing holdMs=\(Int(keyDownToUp * 1000), privacy: .public) keyUpToSamplesMs=\(Int(upToSamples * 1000), privacy: .public)")
+            var sessionTimingExtras = ""
+            if stageTimingEnabled {
+                let st = self.audio.lastSessionTiming
+                if let fb = st.firstBufferAt {
+                    sessionTimingExtras += " pttDownToFirstBufferMs=\(max(0, Int((fb - pttDown) * 1000)))"
+                    if let es = st.engineStartAt {
+                        sessionTimingExtras += " engineStartToFirstBufferMs=\(max(0, Int((fb - es) * 1000)))"
+                    }
+                }
+                sessionTimingExtras += " transport=\(st.transportTag)"
+            }
+            self.logger.info("Recording timing holdMs=\(Int(keyDownToUp * 1000), privacy: .public) keyUpToSamplesMs=\(Int(upToSamples * 1000), privacy: .public)\(sessionTimingExtras, privacy: .public)")
             stageMark("audio-stop+fetch")
             
             // Trim with hysteresis/hangover/padding + conservative fallback
@@ -1151,6 +1231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard !trimmed.isEmpty else {
                 self.logger.info("No speech detected after trimming")
                 await MainActor.run {
+                    self.dispatchLifecycle(.captureEnded(session: stopSessionID, result: .noSpeech), context: "trim-empty")
                     self.overlay.showInfoAndAutoHide("No speech detected")
                 }
                 return
@@ -1161,12 +1242,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard SpeechQualityGuard.isSpeechLike(samples: trimmed, sampleRate: 16_000) else {
                 self.logger.info("Clip rejected by speech-quality guard")
                 await MainActor.run {
+                    self.dispatchLifecycle(.captureEnded(session: stopSessionID, result: .noSpeech), context: "quality-reject")
                     self.overlay.showInfoAndAutoHide("No speech detected")
                 }
                 return
             }
             
             do {
+                // K-52: capture delivered → transcribing, then the ASR marker.
+                await MainActor.run {
+                    self.dispatchLifecycle(.captureEnded(session: stopSessionID, result: .delivered), context: "asr-in")
+                    self.dispatchLifecycle(.asrStarted(session: stopSessionID), context: "asr-start")
+                }
                 // Normalize before ASR without spawning an extra child task; this keeps the
                 // transcription flow inside one actor-inherited task for Swift 6 safety.
                 let asrStart = CFAbsoluteTimeGetCurrent()
@@ -1178,8 +1265,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 
                 let text = try await self.asr.transcribe(samples: normalized)
-                guard !Task.isCancelled else { return }
                 let asrEnd = CFAbsoluteTimeGetCurrent()
+                // K-52 P0 #1 (manual-gate finding): text is COMMITTED the
+                // moment ASR returns it — even if the task was cancelled
+                // during the await. The old `guard !Task.isCancelled` here
+                // discarded finished ASR output, which was the exact
+                // destruction this machine exists to prevent. Cancellation
+                // now only stops the paste leg, never the record of text.
+                await MainActor.run {
+                    self.committedTranscript = CommittedTranscript(session: stopSessionID, text: text, targetPID: pasteTargetPID)
+                    self.dispatchLifecycle(.asrFinished(session: stopSessionID, result: .text(text)), context: "asr-done")
+                    self.fulfillPendingPreservation(session: stopSessionID)
+                }
+                // K-52 (round-3 finding): the PASTE leg dies here, never the
+                // record of text. Esc cancels the task (guard below stops
+                // the leg); a re-record supersession no longer cancels —
+                // instead the session-currency check diverts this stale leg
+                // to the hold already fulfilled above.
+                guard !Task.isCancelled,
+                      recordingSessions.isCurrentSession(stopSessionID) else { return }
                 stageMark("asr")
                 let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 
@@ -1257,17 +1361,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             // transcript with a notice instead of pasting into the wrong app.
                             self.heldTranscript = post.text
                             self.heldTranscriptTargetPID = self.dictationTargetPID
+                            self.heldTranscriptSession = stopSessionID
                             self.dictationTargetElement = nil
                             self.dictationTargetPID = nil
                             let promisedName = NSRunningApplication(processIdentifier: self.heldTranscriptTargetPID ?? 0)?.localizedName ?? NSWorkspace.shared.frontmostApplication?.localizedName ?? "the frontmost app"
                             await MainActor.run {
-                                self.overlay.showError(
-                                    "Transcript ready — paste into \(promisedName)?",
-                                    action: .pasteHeldTranscript,
-                                    autoHideAfter: nil
-                                )
+                                self.overlay.showHeldTranscript(message: "Transcript ready. Paste into \(promisedName)?")
                             }
                             self.logger.info("Captured-target paste failed; transcript held errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
+                            self.dispatchLifecycle(.insertSucceeded(session: stopSessionID, outcome: .held), context: "captured-element-held")
                             return
                         }
                     case .capturedApp(let capturedPid):
@@ -1281,24 +1383,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                               await self.waitForFrontmost(pid: capturedPid) else {
                             self.heldTranscript = post.text
                             self.heldTranscriptTargetPID = capturedPid
+                            self.heldTranscriptSession = stopSessionID
                             let appName = NSRunningApplication(processIdentifier: capturedPid)?.localizedName ?? "the original app"
                             await MainActor.run {
-                                self.overlay.showError(
-                                    "Transcript ready — paste into \(appName)?",
-                                    action: .pasteHeldTranscript,
-                                    autoHideAfter: nil
-                                )
+                                self.overlay.showHeldTranscript(message: "Transcript ready. Paste into \(appName)?")
                             }
                             self.logger.warning("Captured-app activation failed; transcript held pid=\(capturedPid, privacy: .public)")
+                            self.dispatchLifecycle(.insertSucceeded(session: stopSessionID, outcome: .held), context: "captured-app-held")
                             return
                         }
                         try await self.paster.paste(post.text)
                     }
-                    self.heldTranscript = nil
-                    self.heldTranscriptTargetPID = nil
+                    if self.heldTranscriptSession == stopSessionID {
+                        // Ownership-scoped cleanup: clear only THIS session's
+                        // hold slot. A preserved transcript from a superseded
+                        // session (different tag) survives — never-destroyed.
+                        self.heldTranscript = nil
+                        self.heldTranscriptTargetPID = nil
+                        self.heldTranscriptSession = nil
+                    }
                     self.dictationTargetElement = nil
                     self.dictationTargetPID = nil
                     self.overlay.showSuccessAndAutoHide()
+                    self.dispatchLifecycle(.insertSucceeded(session: stopSessionID, outcome: .pasted), context: "paste-ok")
                     stageMark("paste-dispatch")
                     if stageTimingEnabled {
                         let totalMs = (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000.0
@@ -1314,6 +1421,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     do {
                         try await self.paster.paste(post.text)
                         self.overlay.showSuccessAndAutoHide()
+                        self.dispatchLifecycle(.insertSucceeded(session: stopSessionID, outcome: .pasted), context: "paste-fallback-ok")
                         stageMark("paste-fallback-dispatch")
                         if stageTimingEnabled {
                             let totalMs = (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000.0
@@ -1326,6 +1434,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             self.overlay.showError("Enable Accessibility to paste", action: .openAccessibilitySettings, autoHideAfter: 4.0)
                             AccessibilityHelper.explainAccessibilityIfNeeded()
                         }
+                        // K-52: paste failed — park the committed transcript via
+                        // the machine (inserting → done(.held), notice .never:
+                        // the accessibility surface owns the user's attention).
+                        dispatchLifecycle(.insertFailed(session: stopSessionID), context: "paste-fallback-fail")
                     }
                 }
             } catch is CancellationError {
@@ -1333,6 +1445,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch {
                 self.logger.warning("Transcription failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
                 await MainActor.run {
+                    // K-52: failure routed by phase — ASR-unfinished maps to
+                    // asrFailed (no transcript existed); a paste-stage failure
+                    // parks the committed transcript instead of dropping it.
+                    if case .transcribing = self.lifecycle {
+                        self.dispatchLifecycle(.asrFinished(session: stopSessionID, result: .failed), context: "asr-fail")
+                    } else {
+                        self.dispatchLifecycle(.insertFailed(session: stopSessionID), context: "insert-fail")
+                    }
                     self.overlay.showError("Transcription failed", action: nil, autoHideAfter: 4.0)
                 }
             }
@@ -1343,11 +1463,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard isRecording else { return }
         pttState.recordingDidStop()
 
-        // record-time paste target capture: a canceled session must not retain its paste target or held transcript.
+        // record-time paste target capture: a canceled session must not retain its paste target.
+        // K-52: heldTranscript is deliberately NOT cleared here — a preserved
+        // transcript from a superseded session must survive a later cancel
+        // (the machine's never-destroyed policy).
         dictationTargetPID = nil
         dictationTargetElement = nil
-        heldTranscript = nil
-        heldTranscriptTargetPID = nil
 
         if UserDefaults.standard.bool(forKey: "duckEnabled") {
             duckingStartWorkItem?.cancel()
@@ -1373,6 +1494,93 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.overlay.showInfoAndAutoHide("Recording canceled")
             }
         }
+    }
+
+    // MARK: - K-52 lifecycle plumbing
+
+    /// Single mutation point for the dictation lifecycle: applies the pure
+    /// machine, then realizes its ordered effects against app state. Illegal
+    /// and stale events change nothing (machine contract).
+    private func dispatchLifecycle(_ event: DictationEvent, context: String) {
+        let diagnostics = UserDefaults.standard.bool(forKey: LatencyTuningOptions.enableStageTimingKey)
+        let before = lifecycle
+        guard let transition = DictationStateMachine.transition(lifecycle, event) else {
+            if diagnostics {
+                logger.debug("Lifecycle drop ctx=\(context, privacy: .public) state=\(before, privacy: .public) event=\(event, privacy: .public)")
+            }
+            return
+        }
+        lifecycle = transition.next
+
+        for effect in transition.effects {
+            switch effect {
+            case .preserveTranscript(let session, let notice):
+                // Materialize the committed text into the hold chip — never
+                // destroy. Text lives app-side (`committedTranscript`); if it
+                // has not landed yet (interrupt during the ASR await), record
+                // the intent — `fulfillPendingPreservation` completes it when
+                // the task returns with text despite being cancelled.
+                if let committed = committedTranscript, committed.session == session {
+                    heldTranscript = committed.text
+                    heldTranscriptTargetPID = committed.targetPID
+                    heldTranscriptSession = session
+                } else {
+                    pendingPreserveSession = session
+                }
+                switch notice {
+                case .now, .deferredUntilSettled:
+                    pendingHeldNotice = true
+                case .never:
+                    break
+                }
+            case .cancelWork:
+                transcriptionTask?.cancel()
+            case .discardAudio:
+                // Buffers are session-scoped inside the recorder and never
+                // persisted; nothing is retained across sessions to wipe.
+                break
+            }
+        }
+
+        settlePendingHeldNotice()
+
+        if diagnostics {
+            logger.info("Lifecycle ctx=\(context, privacy: .public) \(before, privacy: .public) -> \(self.lifecycle, privacy: .public) effects=\(transition.effects.count, privacy: .public)")
+        }
+    }
+
+    /// Completes a deferred preserve: the interrupted task's ASR returned
+    /// text after the preserve effect already fired. Runs on MainActor.
+    private func fulfillPendingPreservation(session: SessionID) {
+        guard pendingPreserveSession == session,
+              let committed = committedTranscript, committed.session == session else { return }
+        pendingPreserveSession = nil
+        heldTranscript = committed.text
+        heldTranscriptTargetPID = committed.targetPID
+        heldTranscriptSession = session
+        logger.info("Lifecycle deferred preserve fulfilled session=\(String(session.uuidString.prefix(8)), privacy: .public)")
+        // Surface the chip now if the machine is at rest; otherwise defer to
+        // the next settle (a newer session may still own the overlay — its
+        // settle pass picks the notice up once it rests).
+        if lifecycle.phase == nil {
+            let promisedName = NSRunningApplication(processIdentifier: heldTranscriptTargetPID ?? 0)?.localizedName
+                ?? NSWorkspace.shared.frontmostApplication?.localizedName
+                ?? "the frontmost app"
+            overlay.showHeldTranscript(message: "Earlier transcript ready. Paste into \(promisedName)?")
+        } else {
+            pendingHeldNotice = true
+        }
+    }
+
+    /// Surfaces a deferred hold chip the moment the machine rests.
+    private func settlePendingHeldNotice() {
+        guard pendingHeldNotice, lifecycle.phase == nil else { return }
+        pendingHeldNotice = false
+        guard heldTranscript != nil else { return }
+        let promisedName = NSRunningApplication(processIdentifier: heldTranscriptTargetPID ?? 0)?.localizedName
+            ?? NSWorkspace.shared.frontmostApplication?.localizedName
+            ?? "the frontmost app"
+        overlay.showHeldTranscript(message: "Earlier transcript ready. Paste into \(promisedName)?")
     }
 
     /// partial-AX target capture no-op: activate another app from a background/menu-bar context. Plain
@@ -1412,8 +1620,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func pasteHeldTranscript() {
         guard let text = heldTranscript else { return }
         let promisedPID = heldTranscriptTargetPID
+        let ownerSession = heldTranscriptSession
         heldTranscript = nil
         heldTranscriptTargetPID = nil
+        heldTranscriptSession = nil
         Task { @MainActor [weak self] in
             guard let self else { return }
             if let promisedPID, NSRunningApplication(processIdentifier: promisedPID) != nil {
@@ -1422,6 +1632,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let appName = NSRunningApplication(processIdentifier: promisedPID)?.localizedName ?? "the app"
                     self.logger.warning("Held-transcript reactivation failed pid=\(promisedPID, privacy: .public)")
                     self.overlay.showError("Could not bring \(appName) to front", action: nil, autoHideAfter: 4.0)
+                    // Never-destroyed: restore the slot so Paste can be retried.
+                    self.heldTranscript = text
+                    self.heldTranscriptTargetPID = promisedPID
+                    self.heldTranscriptSession = ownerSession
                     return
                 }
             }
@@ -1455,6 +1669,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSSound.beep()
         return 0.12
+    }
+
+    /// K-52 discard: clear the held-transcript slot WITHOUT delivering it. The
+    /// user chose not to paste the preserved (earlier) transcript. Leaves no
+    /// trace, consistent with the zero-retention posture for discarded text.
+    private func discardHeldTranscript() {
+        heldTranscript = nil
+        heldTranscriptTargetPID = nil
+        heldTranscriptSession = nil
+        pendingPreserveSession = nil
+        pendingHeldNotice = false
     }
 
     private func prepareRecordingChime() {

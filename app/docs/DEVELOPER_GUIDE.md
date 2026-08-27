@@ -148,7 +148,10 @@ The keydown-to-indicator path is latency-sensitive; keep it ordered mic-first:
    including returned elements) and a silent `refinePlacementIfMoved` correction.
 
 Stage timing logs one line per successful start (`Recording start latency …`, info level,
-timings only), gated by `LatencyTuningOptions.startStageTimingKey`. The engine-start floor
+timings only), gated by `LatencyTuningOptions.startStageTimingKey` and now appends a
+`transport=` classification (see `AudioTransportTag`) plus cross-leg
+`pttDownToFirstBufferMs` / `engineStartToFirstBufferMs` fields on the paired
+`Recording timing` line (`SessionTimingMarks`). The engine-start floor
 (~85-110 ms measured) is HAL spin-up and stays by design: the engine stops after each
 session so the macOS mic indicator turns off.
 

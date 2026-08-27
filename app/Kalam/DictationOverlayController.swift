@@ -30,6 +30,8 @@ final class DictationOverlayController {
         case openMicrophoneSettings
         /// record-time paste target capture: paste a held transcript into the current frontmost app (explicit user action).
         case pasteHeldTranscript
+        /// K-52 discard: drop a held transcript without delivering it.
+        case destroyHeldTranscript
     }
 
     private enum OverlayState {
@@ -50,6 +52,8 @@ final class DictationOverlayController {
     private var waveformProvider: (() -> [Float])?
     /// record-time paste target capture: injected by the app — pastes a held transcript into the current frontmost app.
     private var pasteHeldTranscriptAction: (() -> Void)?
+    /// K-52 discard: injected by the app — clears the held transcript slot.
+    private var destroyHeldTranscriptAction: (() -> Void)?
     private var recordingStartTime: CFAbsoluteTime = 0
     private var currentStateSetTime: CFAbsoluteTime = 0
     private let minStateDwellSeconds: Double = 0.25
@@ -79,6 +83,12 @@ final class DictationOverlayController {
     /// record-time paste target capture: wire the held-transcript "Paste" action to the app (which owns the paste pipeline).
     func setPasteHeldTranscriptAction(_ action: @escaping () -> Void) {
         pasteHeldTranscriptAction = action
+    }
+
+    /// K-52 discard: wire the held-chip "Discard" action to the app, which
+    /// clears the held-transcript slot (never delivers it).
+    func setDestroyHeldTranscriptAction(_ action: @escaping () -> Void) {
+        destroyHeldTranscriptAction = action
     }
 
     /// Builds the overlay window once at launch so the first recording start
@@ -121,6 +131,33 @@ final class DictationOverlayController {
         transition(to: .error(message: message, action: action), autoHideAfter: autoHideAfter)
     }
 
+    /// K-52 discard: surface a held transcript with a primary Paste button and a
+    /// secondary Discard link. Called when a superseded session's committed text
+    /// is preserved (or parked by a same-session paste failure). The window is
+    /// sized to fit the full message + Paste + Discard row (never clips).
+    func showHeldTranscript(message: String, targetAppName: String = "", targetAppIcon: NSImage? = nil) {
+        transition(to: .error(message: message, action: .pasteHeldTranscript),
+                   autoHideAfter: nil,
+                   targetAppName: targetAppName,
+                   targetAppIcon: targetAppIcon)
+        contentView?.setHeldChipSecondaryAction(
+            title: "Discard",
+            handler: { [weak self] in self?.handle(action: .destroyHeldTranscript) }
+        )
+        // The transition sized the frame for message + Paste. Add the Discard
+        // link's contribution so the row is never clipped. Widths are already
+        // measured by Auto Layout now that Discard is shown.
+        if let w = window, let view = contentView {
+            view.layoutSubtreeIfNeeded()
+            let intended = view.fittingSize.width
+            guard intended > w.frame.width else { return }
+            let screen = placementScreen ?? fallbackScreen()
+            let maxW = (screen?.visibleFrame.width ?? Metrics.overlayWidth) * 0.7
+            let width = min(max(intended, Metrics.overlayWidth), maxW)
+            w.setContentSize(NSSize(width: width, height: Metrics.compactHeight))
+            if let s = screen { positionWindow(on: s) }
+        }
+    }
 
     func hide() {
         stateTask?.cancel()
@@ -160,11 +197,33 @@ final class DictationOverlayController {
         let showsWaveform = isRecordingState(state)
         // K-48 Task 5: whisper/caret shrink listening+transcribing to the pill; everything else keeps the deck.
         let compact = usesCompactSurface(for: state)
+        // Hoisted: the K-52 hold notice must be measured for width before the
+        // window frame is applied, and reused below for the label/button.
+        let presentation = presentation(for: state, targetAppName: targetAppName, targetAppIcon: targetAppIcon)
         if compact {
             let mapped = indicatorState(for: state) ?? .listening
             currentWindowSize = NSSize(width: IndicatorStateModel.compactWidth(state: mapped), height: Metrics.pillHeight)
         } else {
             currentWindowSize = showsWaveform ? recordingWindowSize : compactWindowSize
+            // K-52 UX: the held-transcript notice must show its full line, app
+            // name included. Grow the deck to fit message + Paste button
+            // (capped to the screen) instead of clipping the tail. Recording
+            // surfaces keep the canonical machined width.
+            if !showsWaveform, presentation.actionTitle != nil {
+                let messageFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
+                let textWidth = (presentation.message as NSString)
+                    .size(withAttributes: [.font: messageFont]).width
+                let buttonFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
+                let buttonWidth = ((presentation.actionTitle ?? "") as NSString)
+                    .size(withAttributes: [.font: buttonFont]).width + 28
+                let needed = ceil(textWidth) + ceil(buttonWidth)
+                    + 12 + 10 + 8 + 12 // label padding + button gap + capsule hPadding (OverlayCapsuleView.Metrics.hPadding)
+                let maxWidth = ((placementScreen ?? fallbackScreen())?.visibleFrame.width ?? Metrics.overlayWidth) * 0.7
+                let width = min(max(needed, Metrics.overlayWidth), maxWidth)
+                if width > Metrics.overlayWidth {
+                    currentWindowSize = NSSize(width: width, height: Metrics.compactHeight)
+                }
+            }
         }
         if placementScreen == nil {
             placementScreen = resolvePlacementScreen(from: nil) ?? fallbackScreen()
@@ -226,7 +285,6 @@ final class DictationOverlayController {
             }
         }
         currentStateSetTime = CFAbsoluteTimeGetCurrent()
-        let presentation = presentation(for: state, targetAppName: targetAppName, targetAppIcon: targetAppIcon)
         // overlay action buttons unclickable: the overlay is click-through EXCEPT while an actionable state
         // (held-transcript "Paste", error "Open") is presented — with
         // ignoresMouseEvents stuck on, those buttons can never be clicked.
@@ -334,6 +392,8 @@ final class DictationOverlayController {
             return "Open"
         case .pasteHeldTranscript:
             return "Paste"
+        case .destroyHeldTranscript:
+            return "Discard"
         case .none:
             return nil
         }
@@ -346,8 +406,10 @@ final class DictationOverlayController {
             _ = SystemSettingsNavigator.open(.accessibility)
         case .openMicrophoneSettings:
             _ = SystemSettingsNavigator.open(.microphone)
-        case .pasteHeldTranscript:
+                case .pasteHeldTranscript:
             pasteHeldTranscriptAction?()
+        case .destroyHeldTranscript:
+            destroyHeldTranscriptAction?()
         }
         hide()
     }
@@ -644,10 +706,15 @@ private final class OverlayCapsuleView: NSView {
         static let hPadding: CGFloat = 12
     }
 
-    struct Presentation {
+        struct Presentation {
         let message: String
         let actionTitle: String?
         let action: (() -> Void)?
+        /// K-52 discard: a secondary link-style button shown on the held
+        /// chip so a user can clear a preserved transcript instead of
+        /// pasting it. Nil for every surface except the held chip.
+        var secondaryActionTitle: String? = nil
+        var secondaryAction: (() -> Void)? = nil
         var targetAppName: String = ""
         var targetAppIcon: NSImage? = nil
         var isRecording: Bool = false
@@ -660,9 +727,11 @@ private final class OverlayCapsuleView: NSView {
     private let blurView = NSVisualEffectView()
     private let tintView = NSView()
 
-    // Non-recording row
+        // Non-recording row
     private let messageLabel = NSTextField(labelWithString: "")
     private let actionButton = NSButton(title: "", target: nil, action: nil)
+    /// K-52 discard: secondary button beside the primary Paste on the held chip.
+    private let secondaryButton = NSButton(title: "", target: nil, action: nil)
 
     // Recording-mode top row
     private let appIconView = NSImageView()
@@ -679,7 +748,9 @@ private final class OverlayCapsuleView: NSView {
     private let shimmerDot1 = NSView()
     private let shimmerDot2 = NSView()
 
-    private var actionHandler: (() -> Void)?
+        private var actionHandler: (() -> Void)?
+    /// K-52 discard: callback for the secondary link-style button on the held chip.
+    private var secondaryActionHandler: (() -> Void)?
     private var waveformTopConstraint: NSLayoutConstraint?
     private var waveformHeightConstraint: NSLayoutConstraint?
     private var appIconTopConstraint: NSLayoutConstraint?
@@ -754,11 +825,22 @@ private final class OverlayCapsuleView: NSView {
                 shimmerStack?.isHidden = true
                 messageLabel.stringValue = presentation.message
                 messageLabel.isHidden = false
+                secondaryActionHandler = presentation.secondaryAction
                 if let title = presentation.actionTitle {
                     actionButton.title = title
                     actionButton.isHidden = false
                 } else {
                     actionButton.isHidden = true
+                }
+                if let secondaryTitle = presentation.secondaryActionTitle {
+                    secondaryButton.title = secondaryTitle
+                    secondaryButton.isHidden = false
+                } else {
+                    // Zero-width when hidden: the label's cap at the discard
+                    // leading collapses to nothing, so non-held messages keep
+                    // their full width.
+                    secondaryButton.title = ""
+                    secondaryButton.isHidden = true
                 }
             }
         }
@@ -885,6 +967,19 @@ private final class OverlayCapsuleView: NSView {
         actionButton.translatesAutoresizingMaskIntoConstraints = false
         blurView.addSubview(actionButton)
 
+        // K-52 discard: link-style secondary button (Discard) on the held chip.
+        secondaryButton.bezelStyle = .regularSquare
+        secondaryButton.isBordered = false
+        secondaryButton.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        secondaryButton.alignment = .center
+        secondaryButton.contentTintColor = NSColor.white.withAlphaComponent(0.7)
+        secondaryButton.target = self
+        secondaryButton.action = #selector(didTapSecondaryAction)
+        secondaryButton.isHidden = true
+        secondaryButton.translatesAutoresizingMaskIntoConstraints = false
+        secondaryButton.setContentHuggingPriority(.required, for: .horizontal)
+        blurView.addSubview(secondaryButton)
+
         // ── Recording-mode top row ──
         // App icon
         appIconView.translatesAutoresizingMaskIntoConstraints = false
@@ -969,6 +1064,12 @@ private final class OverlayCapsuleView: NSView {
             actionButton.trailingAnchor.constraint(equalTo: blurView.trailingAnchor, constant: -10),
             actionButton.centerYAnchor.constraint(equalTo: messageLabel.centerYAnchor),
             messageLabel.trailingAnchor.constraint(lessThanOrEqualTo: actionButton.leadingAnchor, constant: -8),
+            // K-52 discard: the message must stop before the Discard link, not
+            // just before Paste — otherwise the line overlays "Discard".
+            messageLabel.trailingAnchor.constraint(lessThanOrEqualTo: secondaryButton.leadingAnchor, constant: -8),
+            // K-52 discard: Discard link sits between message and action button.
+            secondaryButton.trailingAnchor.constraint(equalTo: actionButton.leadingAnchor, constant: -10),
+            secondaryButton.centerYAnchor.constraint(equalTo: messageLabel.centerYAnchor),
 
             // Recording top row — icon
             appIconView.leadingAnchor.constraint(equalTo: blurView.leadingAnchor, constant: Metrics.hPadding),
@@ -1372,8 +1473,22 @@ private final class OverlayCapsuleView: NSView {
         pillLevelGlyph.update(samples: samples)
     }
 
+    /// K-52 discard: configure the secondary Discard button shown alongside
+    /// the primary Paste on the held-transcript chip. The handler routes
+    /// through `handle(action:)` on click.
+    func setHeldChipSecondaryAction(title: String, handler: @escaping () -> Void) {
+        secondaryButton.title = title
+        secondaryButton.isHidden = false
+        secondaryActionHandler = handler
+    }
+
     @objc private func didTapAction() {
         actionHandler?()
+    }
+
+    /// K-52 discard: tap the secondary "Discard" link on the held chip.
+    @objc private func didTapSecondaryAction() {
+        secondaryActionHandler?()
     }
 }
 

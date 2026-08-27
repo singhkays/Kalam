@@ -69,6 +69,11 @@ final class AudioRecorder: @unchecked Sendable {
     private let exchange = AudioCaptureExchange()
     /// Generation of the capture session this recorder most recently started.
     private var currentCaptureGeneration = 0
+
+    /// Task 0 latency instrumentation: per-session engine-start / first-buffer
+    /// stamps + mic-transport tag (see `SessionTimingMarks`). Timings only,
+    /// never content. Read by KalamApp's gated latency log lines.
+    private let timingMarks = SessionTimingMarks()
     
     // Tap buffer size reduced to lower tail latency at key-up
     private let tapBufferSizeFrames: AVAudioFrameCount = 1024
@@ -78,6 +83,10 @@ final class AudioRecorder: @unchecked Sendable {
     /// pass it into `stopAndFetchSamples` — the stop must never adopt a newer
     /// session's id (rapid re-record).
     var captureGeneration: Int { currentCaptureGeneration }
+
+    /// Immutable copy of the current session's timing stamps. Safe from any
+    /// thread (interior locking); intended for the stage-timing log lines.
+    var lastSessionTiming: SessionTimingSnapshot { timingMarks.snapshot() }
 
     static func requestMicrophoneAccessIfNeeded() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
@@ -188,6 +197,9 @@ final class AudioRecorder: @unchecked Sendable {
                 logger.info("Device ring shrink skipped: default-input query failed osStatus=\(Int(qStatus), privacy: .public)")
             }
         }
+        // Task 0: classify the bound device's transport once per graph build
+        // (built-in / usb / bluetooth) so baseline logs are route-filterable.
+        timingMarks.setTransportTag(AudioTransportTag.label(forDeviceID: boundDeviceID))
         if let boundDeviceID {
             if let applied = Self.shrinkDeviceRingBuffer(deviceID: boundDeviceID) {
                 logger.info("Device ring buffer applied frames=\(applied, privacy: .public)")
@@ -250,6 +262,7 @@ final class AudioRecorder: @unchecked Sendable {
         // failed, and the failure was silently swallowed.
         exchange.resetForNewSession()
         currentCaptureGeneration = exchange.currentGeneration()
+        timingMarks.beginSession()
 
         if !engine.isRunning {
             do {
@@ -273,6 +286,9 @@ final class AudioRecorder: @unchecked Sendable {
                 }
             }
         }
+        // Single success point covers primary start, recovery re-start and an
+        // already-running engine alike; latest-wins semantics in the marks box.
+        timingMarks.markEngineStart()
 
         if !tapInstalled {
             // For input node taps, AVAudioEngine expects the input bus hardware format.
@@ -410,7 +426,9 @@ final class AudioRecorder: @unchecked Sendable {
     /// Internal for testability (KalamTests drives it with synthetic buffers).
     @discardableResult
     func process(buffer: AVAudioPCMBuffer) -> Bool {
-        exchange.publish(buffer)
+        // Task 0: one-time stamp; steady-state callbacks exit on the nil-check.
+        timingMarks.markFirstBufferIfNeeded()
+        return exchange.publish(buffer)
     }
 
     func recentWaveform(sampleCount: Int = 512) -> [Float] {
