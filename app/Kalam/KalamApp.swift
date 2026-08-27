@@ -91,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var setupMenuItem: NSMenuItem!
     private let asr = ASRService()
     private let audio = AudioRecorder()
+    private let warmPool = WarmEnginePool()
     private let overlay = DictationOverlayController()
     private let hotkeys = HotkeyListener()
     private let paster = PasteService()
@@ -844,6 +845,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // matches the device the first press will request (early-return path).
                 _ = try prepareAudioForRecording()
                 isAudioReady = true
+                // Task-1: fill the spare so the next press hits the pool.
+                warmPool.prewarmNext()
             } catch {
                 isAudioReady = false
                 logger.warning("Audio prepare failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
@@ -894,6 +897,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.post(name: .audioDevicesDidChange, object: nil)
         invalidateOnboardingSnapshot()
         audio.invalidatePreparedState()
+        warmPool.invalidate(reason: "deviceChange")
         do {
             _ = try prepareAudioForRecording()
             isAudioReady = true
@@ -912,6 +916,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 2. A stale audio-graph binding — same refresh as a device change.
     private func handleSystemWake() {
         invalidateOnboardingSnapshot()
+        warmPool.invalidate(reason: "wake")
         logger.info("System wake: resetting PTT state and refreshing audio input")
         if isRecording {
             transcriptionTask?.cancel()
@@ -980,14 +985,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let candidates = resolvePriorityOrderedMicrophones()
         for candidate in candidates {
             do {
-                try audio.prepare(preferredInputDeviceID: candidate.deviceID)
+                try audio.prepare(preferredInputDeviceID: candidate.deviceID, warmPool: warmPool)
                 return candidate.uid
             } catch {
                 logger.warning("Audio input bind failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
                 continue
             }
         }
-        try audio.prepare(preferredInputDeviceID: nil)
+        try audio.prepare(preferredInputDeviceID: nil, warmPool: warmPool)
         return nil
     }
 

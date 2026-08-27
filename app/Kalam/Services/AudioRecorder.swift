@@ -53,11 +53,24 @@ enum AudioPrepareDecision {
     ) -> Bool {
         !(isPrepared && lastDeviceID == preferredDeviceID && !invalidated)
     }
+
+    /// Task-1: pool-aware variant — when the pool already holds a fresh graph
+    /// for `preferredDeviceID`, `prepare()` can adopt it instead of rebuilding.
+    static func shouldReconfigure(
+        isPrepared: Bool,
+        lastDeviceID: AudioDeviceID?,
+        preferredDeviceID: AudioDeviceID?,
+        invalidated: Bool,
+        poolIsFreshForPreferred: Bool
+    ) -> Bool {
+        if poolIsFreshForPreferred { return false }
+        return shouldReconfigure(isPrepared: isPrepared, lastDeviceID: lastDeviceID, preferredDeviceID: preferredDeviceID, invalidated: invalidated)
+    }
 }
 
 final class AudioRecorder: @unchecked Sendable {
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "AudioRecorder")
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
     private var isPrepared = false
     private var tapInstalled = false
     private var preparedInputDeviceID: AudioDeviceID?
@@ -106,6 +119,35 @@ final class AudioRecorder: @unchecked Sendable {
     }
     
     func prepare(preferredInputDeviceID: AudioDeviceID?) throws {
+        try prepare(preferredInputDeviceID: preferredInputDeviceID, warmPool: nil)
+    }
+
+    func prepare(preferredInputDeviceID: AudioDeviceID?, warmPool: WarmEnginePool?) throws {
+        // Task-1: consult pool freshness first — a fresh spare can be adopted
+        // without rebuilding the graph inline (device-change win).
+        if let pool = warmPool, pool.isFresh(for: preferredInputDeviceID) {
+            if let graph = pool.take(for: preferredInputDeviceID) {
+                if engine.isRunning {
+                    engine.stop()
+                }
+                if tapInstalled {
+                    engine.inputNode.removeTap(onBus: 0)
+                    tapInstalled = false
+                }
+                exchange.withExclusiveAccess { state in
+                    state.converter = nil
+                    state.converterInputSampleRate = 0
+                    state.converterInputChannelCount = 0
+                }
+                engine = graph.engine
+                isPrepared = true
+                preparedInputDeviceID = preferredInputDeviceID
+                preparedStateInvalidated = false
+                timingMarks.setTransportTag(AudioTransportTag.label(forDeviceID: preferredInputDeviceID))
+                logger.info("Adopted warm pool graph for deviceID=\(preferredInputDeviceID.map { String($0) } ?? "nil", privacy: .public)")
+                return
+            }
+        }
         if !AudioPrepareDecision.shouldReconfigure(
             isPrepared: isPrepared,
             lastDeviceID: preparedInputDeviceID,
