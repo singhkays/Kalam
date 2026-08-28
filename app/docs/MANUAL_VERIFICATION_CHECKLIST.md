@@ -759,3 +759,252 @@ xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platfor
 - G5 kill-switch flip: _____
 
 *Commit for Task 3: local (not pushed) — leave `K-54 🔄→✅` local until G1–G5 all PASS; do not push until release tag.*
+
+---
+
+## K-55 ValidationGate — auto-degrade banner + trip window (Task 4)
+
+**What this proves:** `ValidationGate` inside `KalamTextEngine` validates raw→clean divergence (length 0.18…1.65, containment ≥0.30, trigram ≥0.05; all 13 goldens accept). On `.reject` the pipeline falls back to raw and counts a trip; 3 trips in 86 400 s → auto-degrade (cleanup bypassed until relaunch or Re-enable, `Notification.Name.validationGateAutoDegraded` once, `CleanupPane` banner). Success streak 5 resets.
+
+**Pre-steps (host Mac, no mic needed for the degrade path):**
+```bash
+# Build & run Kalam-test, grant mic/AX, ensure log stream running as in Part 1 prep step 2
+# The degrade path is app-side UserDefaults, so we can drive it without dictating:
+# In a second terminal, use the headless trip helper (or run the unit test target once):
+xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/ValidationGateTripTests 2>&1 | tail -n 20
+# Expected: 7/7 pass — trip/window/streak pins.
+```
+
+**Gate H1 — triple-degrade flips banner exactly once:**
+1. With Kalam running, open Settings → Cleanup. Note the pane shows no banner.
+2. From `lldb` or a one-liner, record 3 rejects into the app's defaults (or dictate 3 divergent fixtures via the test helper):
+   ```bash
+   # Force 3 trips via defaults (timestamps now):
+   /usr/bin/python3 -c "import subprocess, json, time; import os; print('use ValidationGateTripStore directly via a small Swift snippet')"
+   # Simpler: run the app's debug helper if exposed, or trigger 3 pastes that are known divergent:
+   # Use the engine's divergent fixtures: raw 40×'word ' → 'hi' (run via a local Swift script that calls ValidationGateTripStore)
+   ```
+   Practical shortcut for manual: dictate 3× the divergent pair `raw="word "×40 → "hi"` via a test helper that calls `ValidationGateTripStore().record(.reject)` — or use the `ValidationGateTripTests` as a harness and then check the app's `UserDefaults` suite.
+   Expected: after the 3rd trip, `defaults read singhkays.Kalam-test validationGate.isDegraded` → 1, and a banner **Auto-paused — using raw transcription until relaunch** appears in Cleanup pane after you close/reopen Settings (or on next dictation the overlay shows **Cleanup auto-paused — last 3 pastes had formatting issues.** for 5 s). The banner must appear **once**; a 4th reject while already degraded must NOT post a second notification (check `log stream` shows `ValidationGate auto-degraded` once).
+
+3. Dictate a normal sentence ("hello world") — it must paste via raw (no cleanup), e.g. fillers preserved if you said "um hello world".
+4. Click **Re-enable** in the banner — `validationGate.isDegraded` → 0, banner disappears.
+5. Dictate 5 normal sentences — after the 5th accept the success streak must have reset `validationGate.trips` to empty (`defaults read … validationGate.trips` → missing or empty, and `isDegraded` stays 0).
+
+**Gate H2 — window expiry (headless pin):**
+```bash
+xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/ValidationGateTripTests/testWindowExpiryResets 2>&1 | tail -n 20
+# Must show PASS — trips older than 86 400 s are dropped, degraded clears after streak 5.
+```
+
+**Gate H3 — no double-insert (Task 5 cross-check):**
+After H1's degrade, dictate into TextEdit and into an Electron app (VS Code). Each paste must be exactly one insertion (no double). Check `log stream` shows `ValidationGate verdict=reject fallback=true` on the degraded dictations, but the paste still lands once.
+
+**Post-checks:**
+```bash
+defaults read singhkays.Kalam-test validationGate.isDegraded  # → 0 after Re-enable + streak
+log show --predicate 'subsystem == "singhkays.Kalam"' --info --last 10m 2>&1 | grep -E "ValidationGate|validationGateAutoDegraded" | tail -n 20
+xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/ValidationGateTripTests 2>&1 | tail -n 20
+# Expected: 7/7 pass
+```
+
+**Result:** ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes (attach banner screenshot + `defaults read` output + log snippet):
+- H1 triple banner once: _____
+- H1 Re-enable + streak 5: _____
+- H2 window expiry: _____
+- H3 no double-insert: _____
+
+*Commit for Task 4: local — leave `K-55 ✅` local until H1–H3 PASS.*
+
+---
+
+## K-56 Tier-1 insertion hardening — read-back verify + secure/PID/frontmost (Task 5)
+
+**What this proves:** `PasteService` Tier-1 verified AX (`kAXSelectedTextAttribute` SET + 3×40 ms read-back; unchanged → fall through to `Cmd+V`, never double-post), secure-field / `IsSecureEventInputEnabled()` / `IORegistry IOConsoleUsers` probe refusal before any pasteboard exposure, `AXUIElementGetPid != dictationTargetPID` → hold (`.focusElsewhere`), `AppQuirks.forcePaste` table (empty, governance), `AccessibilityWaker.wakeIfNeeded` while speaking, frontmost re-check after ~350 ms AX window before global `postUnicodeText`/`postCmdV` (mismatch → hold), optional `internal.paste.setVerifyTimeoutOverrideMs` (0 unset, 1.2–1.5 s, global stays 0.75 s per `AXUIElement.h:387`).
+
+**Pre-steps (host Mac, needs mic + AX):**
+```bash
+# 1. Build & run Kalam-test, grant mic/AX, enable stage timing for paste logs
+defaults write singhkays.Kalam-test internal.latency.enableStageTiming -bool true
+# 2. Log stream for paste
+log stream --style compact --predicate 'subsystem == "singhkays.Kalam"' --level info 2>&1 | grep --line-buffered -E "PasteService|SecureInput|AccessibilityWaker|AppQuirks|frontmost" | tee ~/kalam-tier1.txt
+# 3. Keep TextEdit frontmost for baseline; have VS Code (Electron) and a password field ready.
+```
+
+**Gate I1 — Electron lie-success → exactly one insertion (headless pin + manual):**
+```bash
+xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/PasteServiceTier1Tests/testElectronLieFallsThroughToCmdVExactlyOnce 2>&1 | tail -n 20
+# Must pass — verifies AX lie (SET success but value unchanged) falls through to Cmd+V exactly once, no double.
+```
+Manual: dictate a long paragraph (>200 UTF-16, ~40 words) into **VS Code** (Electron, Tier-1 often lies). The paste must land once, no double (check the file has one copy, not two). `~/kalam-tier1.txt` should show `AX verification failed … fall through to global legs` then `Paste succeeded via Cmd+V` (or unicode) — never `Paste succeeded via Accessibility (verified)` followed by a second `Cmd+V` for the same dictation.
+
+**Gate I2 — Secure-field refusal before pasteboard:**
+1. Focus a password field (e.g. System Settings → Users & Groups → password, or Safari save-password prompt, or Keychain Access new item).
+2. Set clipboard sentinel: `printf 'KALAM-SECURE-TEST' | pbcopy`
+3. Dictate a short sentence while the secure field is focused.
+Expected: **no paste**, overlay shows **Secure field — transcript ready. Paste into <app>?** held chip (or similar), and `pbpaste` still prints `KALAM-SECURE-TEST` (pasteboard never exposed). Log shows `Secure field role AXSecureTextField → refusing` and no `writeAndTrackPasteboardState`. **FAIL if** transcript appears in the secure field or clipboard changes.
+
+**Gate I3 — PID mismatch → hold (requires two apps):**
+1. Focus TextEdit, start dictating, **while still holding PTT** switch to Notes (so `dictationTargetPID` = TextEdit, `frontmostPIDAtDecision` = Notes). Release.
+Expected: transcript **held** for TextEdit (chip says **PID mismatch — transcript ready. Paste into TextEdit?**), not blindly pasted into Notes. Log shows `PID mismatch elementPid=… preferPid=… → hold`. Click **Paste** in the chip — it must activate TextEdit and paste there.
+
+**Gate I4 — Frontmost changed during AX window → hold:**
+Same as I3 but the switch happens *after* the AX attempt window: dictate into TextEdit, release, and *immediately* cmd-tab to another app before the paste lands (within ~350 ms). The frontmost re-check before global legs must detect `frontmostChanged` and hold. Log shows `Frontmost changed during AX window`. **FAIL if** paste lands in the wrong app.
+
+**Gate I5 — AppQuirks empty table:**
+```bash
+xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/PasteServiceTier1Tests/testAppQuirksForcePasteSkipsTier1 2>&1 | tail -n 20
+# Must pass — empty table does not force, Tier-1 is still attempted.
+```
+
+**Gate I6 — Slow SET with override (headless):**
+```bash
+xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/PasteServiceTier1Tests/testSlowSetWithOverrideSucceedsViaAXOnly 2>&1 | tail -n 20
+# Must pass — with internal.paste.setVerifyTimeoutOverrideMs=1500, slow app succeeds via AX only (0 CmdV). Without override (default 0) the same slow app would fall through to CmdV — verify by removing the defaults key and seeing 1 CmdV.
+```
+
+**Gate I7 — No regression when flag unset (default):**
+With `defaults delete singhkays.Kalam-test internal.paste.setVerifyTimeoutOverrideMs` (or 0), dictate 3 normal sentences into TextEdit and 3 into VS Code. Each must land once, no change in latency or double-insert vs before Task 5. Log must show no `Per-element verify timeout override` line.
+
+**Post-checks:**
+```bash
+log show --predicate 'subsystem == "singhkays.Kalam"' --info --last 15m 2>&1 | grep -E "PasteService|SecureInput|AppQuirks|frontmost|Per-element" | tail -n 60
+xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/PasteServiceTier1Tests 2>&1 | tail -n 30
+# Expected: 8/8 pass
+```
+
+**Result:** ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes (attach `~/kalam-tier1.txt` snippet + per-gate checklist):
+- I1 Electron single-insert (headless + manual VS Code): _____
+- I2 Secure field hold + clipboard intact: _____
+- I3 PID mismatch hold: _____
+- I4 Frontmost-changed hold: _____
+- I5 Quirks empty: _____
+- I6 Slow override: _____
+- I7 Flag unset no regression: _____
+
+*Commit for Task 5: local — leave `K-56 ✅` local until I1–I7 PASS.*
+
+---
+
+## K-57 Crash recovery — opt-in retention, streaming CAF, sweep (Task 6)
+
+**What this proves:** Toggle default OFF is byte-identical to today's ephemeral (zero writes when OFF); when ON, per-session `<ISO8601>-<uuid>/audio.caf` (streaming CAF, `mAudioDataByteCount=-1`, never rewrites header per tick) + `meta.json` (isComplete false until `endRetention(markComplete:true)`) under `~/Library/Application Support/Kalam/recordings/`; `RetentionPolicy` 6 h timer, 7 d TTL, newest-first `RecoveryScanner`; `OFF` path verified via `fs_usage`.
+
+**Pre-steps (host Mac, needs mic):**
+```bash
+# 1. Build & run Kalam-test
+# 2. Log stream for retention
+log stream --style compact --predicate 'subsystem == "singhkays.Kalam"' --level info 2>&1 | grep --line-buffered -E "Retention|RecoveryScanner|CAFStreamWriter|recordings" | tee ~/kalam-retention.txt
+# 3. Note the recordings root:
+ls -ld ~/Library/Application\ Support/Kalam/recordings 2>&1 | head -n 5
+```
+
+**Gate J1 — Toggle OFF → zero disk writes (honest zero-off):**
+1. In Settings → Engine, ensure **Keep audio for recovery (7 days)** is **OFF** (default).
+2. In a second terminal, start `fs_usage` filtered to the recordings path (leave it running):
+   ```bash
+   sudo fs_usage -w -f filesys Kalam-test 2>&1 | grep --line-buffered -i "recordings.*audio.caf\|recordings.*meta.json" | tee ~/kalam-fs-off.txt
+   # If sudo is unavailable, use the headless pin as proof:
+   xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/RetentionTests/testRetentionToggleOffDoesZeroWrites 2>&1 | tail -n 20
+   # Must pass — asserts no folder created when OFF.
+   ```
+3. Dictate 3 normal sentences. While dictating, `~/kalam-fs-off.txt` must stay **empty** (no `audio.caf`/`meta.json` writes). `ls ~/Library/Application\ Support/Kalam/recordings` must stay empty or unchanged.
+**FAIL if** any `audio.caf` appears while OFF, or the headless test fails.
+
+**Gate J2 — Toggle ON → streaming CAF per session:**
+1. Flip the toggle **ON** in Settings → Engine. Quit and relaunch Kalam-test (or toggle observer will pick it up).
+2. `sudo fs_usage` as above but now tee to `~/kalam-fs-on.txt`.
+3. Dictate one short sentence, release. Immediately:
+   ```bash
+   ls -R ~/Library/Application\ Support/Kalam/recordings 2>&1 | head -n 40
+   cat ~/Library/Application\ Support/Kalam/recordings/*/meta.json 2>&1 | head -n 40
+   ```
+   Expected: one new folder `<ISO>-<uuid>/` with `audio.caf` (size > header, `file audio.caf` shows `Apple CAF`) and `meta.json` (`isComplete` true after paste, `deviceUID` present, `sampleRate` 16000). While still holding PTT on the *next* dictation, `~/kalam-fs-on.txt` should show **incremental** `audio.caf` writes (multiple `write` lines, not one final rewrite) — proves streaming, not per-tick header rewrite.
+4. Dictate 2 more sentences — each must create a new folder (3 total). `RecoveryScanner` log should show `Retention reindex count=3` on next launch.
+
+**Gate J3 — Kill -9 mid-recording → recoverable next launch:**
+1. With toggle still ON, start a dictation and **while still holding PTT** (recording), kill the app:
+   ```bash
+   pkill -9 Kalam-test; sleep 1; ls -R ~/Library/Application\ Support/Kalam/recordings 2>&1 | tail -n 40
+   ```
+   Expected: the newest folder's `meta.json` has `isComplete` **false** and `audio.caf` exists with non-zero size (streaming header allowed a playable file even without `close`). `log show` last lines before kill should include `Retention begin folder=…`.
+2. Relaunch Kalam-test. Log should show `RecoveryScanner` `newest interrupted session=…` and (deferred) a held row or log about auto-transcribe. The folder must still be present (not swept).
+**FAIL if** `isComplete` is true after kill -9, or `audio.caf` is 0 bytes, or the folder was not created.
+
+**Gate J4 — Retention sweep (headless pin + manual TTL):**
+```bash
+xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/RetentionTests/testRetentionPolicySweepRemovesOldFolders 2>&1 | tail -n 20
+# Must pass — 8-day folder purged, 1-day kept.
+xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/RetentionTests/testRecoveryScannerNewestFirstOrdering 2>&1 | tail -n 20
+# Must pass — newest-first.
+```
+Manual TTL check (optional, not waiting 7 days): set a folder's mtime to 8 days ago (`touch -t $(date -v-8d +%Y%m%d%H%M) <folder>`), then `killall Kalam-test` and relaunch — the 6 h timer will sweep on next launch, or run `xcodebuild test … testRetentionPolicySweepRemovesOldFolders` as proof.
+
+**Gate J5 — Toggle OFF again → no new writes, old folders remain until TTL:**
+Flip toggle **OFF**, dictate once more — `~/kalam-fs-on.txt` must show **no new** `audio.caf`/`meta.json` writes (only the earlier ON folders remain). Existing `recordings/*` folders are **not** deleted immediately; they age out via the 7 d sweep. This proves OFF is byte-identical to the pre-Task-6 ephemeral path.
+
+**Post-checks:**
+```bash
+ls -R ~/Library/Application\ Support/Kalam/recordings 2>&1 | head -n 60
+log show --predicate 'subsystem == "singhkays.Kalam"' --info --last 15m 2>&1 | grep -E "Retention|RecoveryScanner|CAFStreamWriter" | tail -n 40
+xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/RetentionTests 2>&1 | tail -n 30
+# Expected: 7/7 pass
+```
+
+**Result:** ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes (attach `~/kalam-retention.txt` + `~/kalam-fs-on/off.txt` snippets + `ls -R` + per-gate checklist):
+- J1 OFF zero writes (fs_usage empty + headless): _____
+- J2 ON streaming CAF + meta per session: _____
+- J3 kill -9 interrupted folder: _____
+- J4 sweep + ordering (headless): _____
+- J5 OFF again no new writes: _____
+
+*Commit for Task 6: local — leave `K-57 ✅` local until J1–J5 PASS.*
+
+---
+
+## K-58 FnUsageAdvisor — silent-trigger support trap (Task 7)
+
+**What this proves:** `Services/FnUsageAdvisor` reads `com.apple.HIToolbox AppleFnUsageType` only when present (absent → UNKNOWN → no banner), interprets via OS-version-documented table (0=Do Nothing OK, 1/2/3→advise, verified 2026-08-27 on macOS 14.6/26.5), detects `org.pqrs.Karabiner-Elements` independently, fires once per condition-change, deep-links System Settings → Keyboard, hides when resolved. Never logs transcript.
+
+**Headless pins (already green):**
+```bash
+xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/FnUsageAdvisorTests 2>&1 | tail -n 20
+# Must show 6/6 pass: absent quiet, confirmed-bad once, Karabiner decoupled
+```
+
+**Gate L1 — Absent-key stock config → no banner:**
+1. On a stock Mac (no `AppleFnUsageType` key — verify: `defaults read com.apple.HIToolbox AppleFnUsageType` → `Domain ... does not exist`), launch Kalam-test, watch `log stream --predicate 'subsystem == "singhkays.Kalam"' --info | grep FnUsageAdvisor` and the overlay. **No banner** must appear, no `FnUsageAdvisor firing advisory` log. Headless `testAbsentKeyIsQuiet` already pins this.
+
+**Gate L2 — Confirmed-bad → banner once, deep-link, then cleared:**
+1. With Kalam not running: `defaults write com.apple.HIToolbox AppleFnUsageType -int 1` (Change Input Source — confirmed-bad for this OS version; see code table). Launch Kalam-test.
+2. Expected: overlay shows **Fn key is set to Change Input Source … Check System Settings → Keyboard → Press Fn key to.** with **Open** button → click it → System Settings → Keyboard opens. Log shows `FnUsageAdvisor firing advisory` once.
+3. Without quitting, `defaults write com.apple.HIToolbox AppleFnUsageType -int 1` again and wait 30 s — **no second banner** must appear (once-per-condition).
+4. Fix: `defaults delete com.apple.HIToolbox AppleFnUsageType` (or `defaults write … -int 0` for Do Nothing), then `killall Kalam-test` and relaunch, or just trigger a re-check by switching apps. Banner must **not** reappear and the stored `fnAdvisor.lastNotifiedReason` must be cleared (check `defaults read singhkays.Kalam-test fnAdvisor.lastShouldAdvise` → 0 or missing). Dictating with `fn` as hotkey should now work if that was the blocker.
+5. Repeat with `AppleFnUsageType -int 2` (Show Emoji) to confirm the second bad value also fires once with its own reason, then clears.
+
+**Gate L3 — Karabiner-Elements decoupled:**
+1. With `AppleFnUsageType` absent (or 0), launch **Karabiner-Elements** (install from `https://karabiner-elements.pqrs.org` if not present; bundle `org.pqrs.Karabiner-Elements`).
+2. Launch or re-activate Kalam-test (or just switch apps to trigger `didLaunchApplicationNotification`).
+3. Expected: banner shows **Karabiner-Elements is intercepting the Fn key** (or combined with fn reason if both), even though `AppleFnUsageType` is absent/OK. Log shows `karabiner=true` and `reason` contains `Karabiner`. Quit Karabiner, re-activate Kalam — banner must clear and not reappear (condition resolved). Headless `testKarabinerDecoupledFromDomainRead` pins the logic.
+
+**Gate L4 — No transcript logging:**
+While `log stream --level info` is running, dictate a sentence containing a sensitive word. Verify the `FnUsageAdvisor` log lines contain only `reason`/`karabiner`/`fnState`, never the transcript text.
+
+**Post-checks:**
+```bash
+defaults read com.apple.HIToolbox AppleFnUsageType 2>&1 | head -n 5
+defaults read singhkays.Kalam-test fnAdvisor.lastNotifiedReason 2>&1 | head -n 5
+log show --predicate 'subsystem == "singhkays.Kalam"' --info --last 15m 2>&1 | grep -E "FnUsageAdvisor|fnAdvisor" | tail -n 20
+xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/FnUsageAdvisorTests 2>&1 | tail -n 20
+# Expected: no banner on stock, banner once for 1/2/3 and for Karabiner, cleared when resolved; 6/6 tests pass
+```
+
+**Result:** ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes (attach log snippet + `defaults read` outputs + banner screenshot):
+- L1 absent quiet: _____
+- L2 bad fires once + deep-link + clear: _____
+- L3 Karabiner decoupled: _____
+- L4 no transcript log: _____
+
+*Status: ✅ implemented & headless-verified 2026-08-27; manual gate L1–L4 pending host with remapped fn/Karabiner (see `KalamTests/FnUsageAdvisorTests` for pins). Commit for Task 7: local — leave `K-58 ✅` local until L1–L4 PASS.*
+
+

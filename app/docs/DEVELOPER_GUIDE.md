@@ -212,6 +212,14 @@ ON-DEVICE (deferred), older surfaced as recovered rows. When OFF, zero disk writ
 `audio.caf` — verified via `RetentionTests` and manual `fs_usage`). Toggle lives in `Settings`
 `EnginePane` ("Keep audio for recovery").
 
+**Fn-key advisor (K-58).** `Services/FnUsageAdvisor` reads `com.apple.HIToolbox AppleFnUsageType`
+only when present (absent → `unknown` → no banner, verified `defaults read` exit 1 on stock;
+table 0=Do Nothing OK, 1=Change Input Source/2=Show Emoji/3=Start Dictation→advise, documented for
+macOS 14.6/26.5). `isKarabinerRunning()` checks `org.pqrs.Karabiner-Elements` bundle (independent of
+fn domain). `shouldFireNow` fires once per condition-change via `UserDefaults` `fnAdvisor.*`,
+deep-links `x-apple.systempreferences:com.apple.Keyboard-Settings.extension` via
+`SystemSettingsDestination.keyboard` and `DictationOverlayController.OverlayAction.openKeyboardSettings`.
+
 **Fused trim stage.** `SilenceTrimmer.trimAndNormalize` performs endpointing + peak
 normalization in one output pass via vDSP (`vDSP_maxmgv` peak scan, scale + clamp),
 semantically identical to the legacy two-pass `normalizePeak(trim(...))` and parity-pinned.

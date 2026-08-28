@@ -5,6 +5,7 @@ import Foundation
 enum SystemSettingsDestination {
     case accessibility
     case microphone
+    case keyboard
 
     var deepLinkURLs: [String] {
         switch self {
@@ -17,6 +18,11 @@ enum SystemSettingsDestination {
             return [
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
                 "x-apple.systempreferences:com.apple.Settings.PrivacySecurity.extension?Privacy_Microphone",
+            ]
+        case .keyboard:
+            return [
+                "x-apple.systempreferences:com.apple.Keyboard-Settings.extension",
+                "x-apple.systempreferences:com.apple.preference.keyboard",
             ]
         }
     }

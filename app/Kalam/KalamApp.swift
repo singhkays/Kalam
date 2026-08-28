@@ -417,6 +417,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.refreshOnboardingState(reopenIfNeeded: true)
                 await self.prepareRuntimeIfPossible()
                 self.refreshOnboardingState(reopenIfNeeded: true)
+                self.checkFnAdvisor()
             }
         }
 
@@ -466,6 +467,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // Task 7 (K-58): FnUsageAdvisor — silent-trigger support trap.
+        FnUsageAdvisor.checkAndNotifyIfNeeded(overlay: overlay)
+        // Re-check on app active and on Karabiner launch/terminate (independent of fn domain).
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
+        _ = workspaceCenter.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.checkFnAdvisor() }
+        }
+        _ = workspaceCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.checkFnAdvisor() }
+        }
+
         applyGeneralSettings()
         installEscapeMonitor()
         refreshOnboardingState(reopenIfNeeded: false)
@@ -475,6 +487,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.refreshOnboardingState(reopenIfNeeded: true)
         }
 
+    }
+
+    @MainActor
+    private func checkFnAdvisor() {
+        FnUsageAdvisor.checkAndNotifyIfNeeded(overlay: overlay)
     }
     
     @objc private func quit() {

@@ -28,6 +28,7 @@ final class DictationOverlayController {
     enum OverlayAction {
         case openAccessibilitySettings
         case openMicrophoneSettings
+        case openKeyboardSettings
         /// record-time paste target capture: paste a held transcript into the current frontmost app (explicit user action).
         case pasteHeldTranscript
         /// K-52 discard: drop a held transcript without delivering it.
@@ -390,6 +391,8 @@ final class DictationOverlayController {
             return "Open"
         case .openMicrophoneSettings:
             return "Open"
+        case .openKeyboardSettings:
+            return "Open"
         case .pasteHeldTranscript:
             return "Paste"
         case .destroyHeldTranscript:
@@ -406,7 +409,9 @@ final class DictationOverlayController {
             _ = SystemSettingsNavigator.open(.accessibility)
         case .openMicrophoneSettings:
             _ = SystemSettingsNavigator.open(.microphone)
-                case .pasteHeldTranscript:
+        case .openKeyboardSettings:
+            _ = SystemSettingsNavigator.open(.keyboard)
+        case .pasteHeldTranscript:
             pasteHeldTranscriptAction?()
         case .destroyHeldTranscript:
             destroyHeldTranscriptAction?()
