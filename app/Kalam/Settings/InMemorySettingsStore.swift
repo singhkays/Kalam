@@ -96,7 +96,37 @@ final class InMemorySettingsStore: SettingsBacking {
     }
 
     var installCommand: String {
-        "cp ~/Downloads/Parakeet* \(modelFolder.path)/"
+        // Design override (2026-08-28): rebuilt EnginePane with 3-step wizard.
+        // `brew install hf` is shown in wizard Step 2; `installCommand` preserved
+        // for backward compatibility.
+        ModelSetupSupport.huggingFaceInstallCommand
+    }
+
+    /// Full `hf download` command — rebuilt per user directive.
+    var downloadCommand: String {
+        let config = ModelsConfiguration.load(from: UserDefaults.standard)
+        // Use stored bookmark to resolve library URL, falling back to folder path
+        let libURL = config.modelLibraryURL ?? modelFolder
+        var updatedConfig = config
+        // If we have a folder selected, use it; otherwise use current modelFolder
+        if modelFolder != libURL && libURL == nil {
+            // No bookmark resolved; create a temporary bookmark for the folder path
+            // (production: this uses security-scoped bookmark; preview uses path directly)
+        }
+        return ModelSetupSupport.downloadCommand(for: .v2, config: config)
+    }
+
+    var selectedDownloadVersion: ASRModelVersion {
+        get { .v2 }
+        set { }
+    }
+
+    var availableModelVersions: [ASRModelVersion] {
+        ASRModelVersion.allCases
+    }
+
+    func isModelVersionInstalled(_ version: ASRModelVersion) -> Bool {
+        false  // Preview fixture: no live folder scan; production uses ModelsConfiguration
     }
 
     // MARK: Fixtures

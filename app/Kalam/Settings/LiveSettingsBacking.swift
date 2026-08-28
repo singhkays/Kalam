@@ -408,7 +408,43 @@ final class LiveSettingsBacking: SettingsBacking {
     }
 
     var installCommand: String {
-        "cp ~/Downloads/Parakeet* \(modelFolder.path)/"
+        // Design override (2026-08-28): Engine pane rebuilt to match onboarding
+        // 3-step wizard; `cp` replaced with full `hf download` command per user
+        // directive, overriding K-30 spec line 27 (`cp`-only lock). See
+        // 2026-08-28-engine-pane-redesign-override.md.
+        ModelSetupSupport.huggingFaceInstallCommand
+    }
+
+    /// Design override (2026-08-28): full `hf download` command (replaces `cp`).
+    /// Bound through `ModelsConfiguration.asrVersion` and `modelLibraryURL`.
+    var downloadCommand: String {
+        let config = ModelsConfiguration.load(from: defaults)
+        return ModelSetupSupport.downloadCommand(for: config.asrVersion, config: config)
+    }
+
+    /// Step 3 model picker source — all `ASRModelVersion` cases.
+    var availableModelVersions: [ASRModelVersion] {
+        ASRModelVersion.allCases
+    }
+
+    /// Whether a given version is installed (live state from folder scan).
+    func isModelVersionInstalled(_ version: ASRModelVersion) -> Bool {
+        let config = ModelsConfiguration.load(from: defaults)
+        return config.availability(for: version).isInstalled
+    }
+
+    /// The selected/download version — mapped from settings backing.
+    /// In full build this would use a `@Binding` through the wizard; for the
+    /// rebuilt EnginePane, this returns the current configured `asrVersion`.
+    var selectedDownloadVersion: ASRModelVersion {
+        get { ModelsConfiguration.load(from: defaults).asrVersion }
+        set {
+            var config = ModelsConfiguration.load(from: defaults)
+            config.asrVersion = newValue
+            config.save(to: defaults)
+            NotificationCenter.default.post(name: .modelsConfigurationDidChange, object: nil)
+            ping()
+        }
     }
 
     // MARK: - Retention (Task 6)

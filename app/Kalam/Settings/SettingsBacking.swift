@@ -49,6 +49,10 @@ protocol SettingsBacking: AnyObject {
     func chooseModelFolder() async -> URL?
     func rescanEngine()
     var installCommand: String { get }
+    var downloadCommand: String { get }
+    var selectedDownloadVersion: ASRModelVersion { get set }
+    var availableModelVersions: [ASRModelVersion] { get }
+    func isModelVersionInstalled(_ version: ASRModelVersion) -> Bool
 
     // Retention — Task 6 (K-57) opt-in crash recovery, default OFF
     var retentionEnabled: Bool { get set }

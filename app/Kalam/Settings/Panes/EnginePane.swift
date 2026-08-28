@@ -1,6 +1,42 @@
 import AppKit
 import SwiftUI
 
+// MARK: - Wizard step helper (restructured to match onboarding 3-step wizard flow)
+private func wizardStep<Content: View>(title: String, subtitle: String, isComplete: Bool, isActive: Bool, @ViewBuilder content: () -> Content) -> some View {
+    VStack(alignment: .leading, spacing: 14) {
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                Circle().fill(isComplete ? AnyShapeStyle(Color.green.opacity(0.18)) : AnyShapeStyle(Color(.gray).opacity(0.15))).frame(width: 28, height: 28)
+                if isComplete {
+                    Image(systemName: "checkmark").font(.footnote.bold()).foregroundStyle(.green)
+                } else {
+                    // Extract step number from title like "Step 1: ..."
+                    let number = title.components(separatedBy: ":").first?.replacingOccurrences(of: "Step ", with: "") ?? ""
+                    Text(number.isEmpty ? "•" : number).font(.footnote.bold()).foregroundStyle(.secondary)
+                }
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(title).font(.headline.bold()).foregroundStyle(.primary)
+                    Spacer()
+                    if isComplete {
+                        Text("COMPLETE").font(.system(.caption2, design: .monospaced)).tracking(0.5).foregroundStyle(.green)
+                    }
+                }
+                if isActive {
+                    content()
+                } else {
+                    Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+    .padding(16)
+    .background(Color.kPanel)
+    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.kHair.opacity(0.6), lineWidth: 1))
+    .cornerRadius(10)
+}
+
 struct EnginePane: View {
     @Bindable var model: SettingsModel
 
@@ -25,7 +61,68 @@ struct EnginePane: View {
                 .padding(.top, 10)
                 .fixedSize(horizontal: false, vertical: true)
 
+            // 3-step guided wizard — rebuilt per design override 2026-08-28.
+            // See 2026-08-28-engine-pane-redesign-override.md.
+            wizardStep(title: "Step 1: Choose folder", subtitle: "Where Kalam stores local models.", isComplete: model.engine != .missing, isActive: true) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Current folder: \(displayPath)")
+                        .font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Button("Choose Folder...") { Task { await model.chooseModelFolder() } }
+                            .buttonStyle(.borderedProminent)
+                        Button("Clear") { }  // no-op stub; backing has no clear; kept for layout parity
+                            .buttonStyle(.bordered)
+                    }
+                }
+            }
+            .padding(.top, 14)
+
+            wizardStep(title: "Step 2: CLI + Download", subtitle: "Install CLI (one-time), then download the model.", isComplete: false, isActive: true) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("brew install hf").font(.system(.footnote, design: .monospaced)).padding(6).background(Color(.controlBackgroundColor)).cornerRadius(6)
+                    Text("Download command:").font(.subheadline.bold())
+                    Text(model.downloadCommand)
+                        .font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).lineLimit(8).textSelection(.enabled)
+                    HStack {
+                        Spacer()
+                        Button("Copy Download Command") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(model.downloadCommand, forType: .string)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .padding(.top, 2)
+                }
+            }
+            .padding(.top, 10)
+
+            wizardStep(title: "Step 3: Select model", subtitle: "Installed versions show green; missing show amber.", isComplete: isVerified, isActive: true) {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(ASRModelVersion.allCases.enumerated()), id: \.offset) { _, version in
+                        let installed = model.isModelVersionInstalled(version)
+                        HStack(alignment: .center, spacing: 10) {
+                            Image(systemName: installed ? "checkmark.circle.fill" : (version == .tdtCtc110m ? "circle.dashed" : "circle"))
+                                .font(.body).foregroundStyle(installed ? .green : .orange)
+                            Text(version.displayName).font(.body).fontWeight(.semibold)
+                            Spacer()
+                            if installed {
+                                Text("INSTALLED").font(.system(.caption2, design: .monospaced)).tracking(0.6).foregroundStyle(.green).padding(.horizontal, 4).padding(.vertical, 1).background(.green.opacity(0.08)).cornerRadius(3)
+                            } else {
+                                Text("MISSING").font(.system(.caption2, design: .monospaced)).tracking(0.6).foregroundStyle(.orange).padding(.horizontal, 4).padding(.vertical, 1).background(.orange.opacity(0.08)).cornerRadius(3)
+                            }
+                            Text(version.modelSize).font(.caption2).fontWeight(.regular).foregroundStyle(.secondary)
+                        }
+                        .padding(10)
+                        .background(Color.kPanel)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(installed ? .green.opacity(0.3) : .kHair, lineWidth: 1))
+                        .cornerRadius(8)
+                    }
+                }
+            }
+            .padding(.top, 10)
+
             // Install location
+
             VStack(spacing: 0) {
                 header("Install location")
                 HStack {
