@@ -117,6 +117,10 @@ relaunch.
 
 Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
 
+> **Verification note (2026-08-28, T17 / K-30):** Screenshot comparison shows onboarding flow (left, dark — "STEP 3 OF 4 · THE MODEL", 3-step cards: Model folder / Install Hugging Face CLI (`brew install hf`) / Download model; "Continue when ready") vs live Compass Engine pane (right, light — single card: "The engine lives on your disk.", "No model in this folder yet. Copy the Parakeet files here...", copy-paste `cp ~/Downloads/Parakeet* /Users/k/Developer/`, "Choose..." button, "No model found" / "MISSING" status, "Keep audio for recovery (7 days)" toggle). Engine pane shows `cp` command only (no `brew install hf` here — that lives in onboarding); onboarding → Engine deep-link (Settings affordance opens Engine dive) confirmed. Structural split (onboarding = guided multi-card; Engine settings = single diagnostic pane) matches K-30 design; no regression.
+
+
+> **Design-contract contradiction flagged (2026-08-28):** User request "replace `cp` with `hf download`" conflicts with locked K-30 spec (`dev-design/2026-08-13-k30-settings-compass-redesign.md:27`): "Engine pane: shows the `cp` copy command only (mockups lock "no HF CLI" in Settings); onboarding keeps its existing `hf download` flow untouched." Screenshots confirm this split is intentional — onboarding (dark, 3-step wizard + `brew install hf` + `hf download`) carries the guided download flow; Engine settings (light, flat diagnostic card + `cp` + "No model found" / MISSING) carries the install command only. Rebuilding EnginePane as a 3-step wizard (per user direction) also changes the locked Compass pane design (fixed 980×660, Fog card tokens, dive navigation path `.engine`). Awaiting explicit user override before editing `EnginePane.swift`; otherwise the compliant fix is structural/layout restructuring of the existing flat Engine card (not content replacement) per mockup authority (`spec/compass-impl.html`: mockups > stubs > plan).
 ---
 
 ## T18 — K-31 + K-32: visual QA vs the v1.2 mockups
