@@ -12,10 +12,21 @@ execution notes of `app/docs/IMPROVEMENT_PLAN.md`.
 
 # Runbook for the open gates
 
-Still open: **T16** (K-19 VoiceOver/keyboard), **T17** (K-30 Compass smoke),
+Still open: **T17** (K-30 Compass smoke),
 **T18** (K-31+K-32 visual QA vs mockups — Compass Settings window, NOT onboarding),
 **T19** (K-36 overlay click rules), **T21/T22** (K-44 cleanup-master gate + its
 dictionary scope). Everything else in Part 1 has passed; see the verification record below.
+
+
+**Open gate details (still pending live verification on host Mac):**
+
+| Gate | K-Code | What it proves | Key evidence needed |
+|---|---|---|---|
+| T17 | K-30 Compass smoke | Compass window fixed size / map states / per-pane smoke | Settings fixed 980×660; 6 map cards announce; all controls label+value; settings persist |
+| T18 | K-31 + K-32 visual QA | Compass Settings window matches v1.2 mockups | Side-by-side screenshot comparison; no dark chrome; fonts match spec |
+| T19 | K-36 overlay click rules | Actionable capsule buttons work; other states pass clicks through | Click "Open" / "Paste" works; recording capsule invisible to clicks |
+| T21 | K-44a Cleanup master OFF | ITN skips when master OFF; spoken numbers stay words | "twenty one" stays words; no 21 / $5.50 conversion |
+| T22 | K-44b dictionary with cleanup OFF | Dictionary rules still fire independently of cleanup master | "open ai" → "OpenAI" even with master OFF |
 
 Run order tip: do T21 and T22 back-to-back (one settings flip serves both); T21 needs the
 Cleanup master left OFF, so run them BEFORE any test that wants cleanup on.
@@ -73,28 +84,6 @@ Cleanup master left OFF, so run them BEFORE any test that wants cleanup on.
 
 # Instructions for the open gates
 
-## T16 — K-19: VoiceOver + Full Keyboard Access (updated for Compass)
-
-**Setup:** enable VoiceOver (⌘F5) and Full Keyboard Access (System Settings → Accessibility →
-Keyboard). The old tabbed-settings checks from the 2026-08-12 run are obsolete — K-30 replaced
-that UI; aim VoiceOver at the Compass window now.
-
-**Steps:**
-1. Open Settings (Compass). VO-navigate the **map**: cards must announce meaningfully
-   (title + status), not "button".
-2. Enter each dive; the section nav should announce "section n of 6"; controls in Being Heard /
-   Trigger / Cleanup / Dictionary / Engine announce label + value.
-3. Onboarding: reset first-run state
-   (`defaults delete singhkays.Kalam-test internal.hasCompletedRequiredSetup` — debug-build
-   domain), relaunch, then: **Esc closes** the onboarding window; Tab/arrows reach every control;
-   nothing is announced as just "button".
-
-**Expected (PASS):** no unlabeled stops anywhere; dropdown-style controls announce their value;
-onboarding is fully keyboard-drivable incl. Esc.
-
-Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
-
----
 
 ## T17 — K-30: Compass window + map states + per-pane smoke
 
@@ -253,6 +242,38 @@ capitalization via preserveCase (default true), which is correct rule behavior, 
 
 ---
 
+
+---
+
+# Archive — Verified / Closed Gates (moved out of active open-gates runbook)
+
+These gates have passed live verification (host Mac, with evidence) and have been moved
+from the open-gates instructions section above. Their headings are marked ✅; their
+full details remain here for reference. See verification record below for the one-line
+evidence, and see `IMPROVEMENT_PLAN.md` for the per-K execution notes.
+
+## ✅ T16 — K-19 (verified, archived): VoiceOver + Full Keyboard Access (updated for Compass)
+
+**Setup:** enable VoiceOver (⌘F5) and Full Keyboard Access (System Settings → Accessibility →
+Keyboard). The old tabbed-settings checks from the 2026-08-12 run are obsolete — K-30 replaced
+that UI; aim VoiceOver at the Compass window now.
+
+**Steps:**
+1. Open Settings (Compass). VO-navigate the **map**: cards must announce meaningfully
+   (title + status), not "button".
+2. Enter each dive; the section nav should announce "section n of 6"; controls in Being Heard /
+   Trigger / Cleanup / Dictionary / Engine announce label + value.
+3. Onboarding: reset first-run state
+   (`defaults delete singhkays.Kalam-test internal.hasCompletedRequiredSetup` — debug-build
+   domain), relaunch, then: **Esc closes** the onboarding window; Tab/arrows reach every control;
+   nothing is announced as just "button".
+
+**Expected (PASS):** no unlabeled stops anywhere; dropdown-style controls announce their value;
+onboarding is fully keyboard-drivable incl. Esc.
+
+Result: ✅ PASS (2026-08-28) — VoiceOver + Full Keyboard Access: Compass map cards announce title + status (not bare "button"); 6 sections announce "section n of 6"; Being Heard / Trigger / Cleanup / Dictionary / Engine controls announce label + value; onboarding Esc closes; Tab/arrows reach every control; nothing bare "button". Updated for Compass (post-K-30).
+
+---
 # Verification record (closed gates)
 
 | Test | Items | Date | Verdict | Evidence (one line) |
@@ -262,8 +283,9 @@ capitalization via preserveCase (default true), which is correct rule behavior, 
 | T13 | K-29 | 2026-08-24 | PASS (pre-verify) | both bare-"no" sentences pasted complete; tracker closes when a build ships |
 | T14 | K-23 + K-36 | 2026-08-24 | PASS | transcript followed into Sublime Text automatically after switching apps; Toggle + Double Tap verified, Hold cancels by design (release = stop) |
 | T15 | K-10 | 2026-08-24 | PASS | glitch-free rapid re-records + 4-min dictation; host log `Stopped collecting … dropped=0` |
+| T16 | K-19 VoiceOver / Full Keyboard Access (Compass) | 2026-08-28 | PASS | Compass map cards announce meaningfully; 6 sections "n of 6"; controls label+value; onboarding Esc + Tab/arrows; no bare "button" |
+||---|---|---|---|---|
 | T20 | K-38 | 2026-08-24 | PASS (hitch gate) | >1-min dictation, zero visible stutter, ~2 s paste latency; Escape sub-check never explicitly reported |
-
 Defects found BY these rounds, all since fixed and closed: K-42, K-43, K-44, K-45, K-46
 (see `IMPROVEMENT_PLAN.md` execution notes for the full diagnose-fix-verify chains).
 Note for future agents: app log SUBSYSTEM is always `singhkays.Kalam` (never `-test`),
