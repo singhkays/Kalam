@@ -121,6 +121,8 @@ Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
 
 
 > **Design-contract contradiction flagged (2026-08-28):** User request "replace `cp` with `hf download`" conflicts with locked K-30 spec (`dev-design/2026-08-13-k30-settings-compass-redesign.md:27`): "Engine pane: shows the `cp` copy command only (mockups lock "no HF CLI" in Settings); onboarding keeps its existing `hf download` flow untouched." Screenshots confirm this split is intentional — onboarding (dark, 3-step wizard + `brew install hf` + `hf download`) carries the guided download flow; Engine settings (light, flat diagnostic card + `cp` + "No model found" / MISSING) carries the install command only. Rebuilding EnginePane as a 3-step wizard (per user direction) also changes the locked Compass pane design (fixed 980×660, Fog card tokens, dive navigation path `.engine`). Awaiting explicit user override before editing `EnginePane.swift`; otherwise the compliant fix is structural/layout restructuring of the existing flat Engine card (not content replacement) per mockup authority (`spec/compass-impl.html`: mockups > stubs > plan).
+
+> **Rollback note (2026-08-28):** User rejected rebuilt EnginePane design ("does not look like existing design at all" — screenshot `upload_20260828_062647_8.png` vs production `v1.4` mockup `kalam-compass-swiftui-v1.4.html` / `HANDOFF.md`). EnginePane restored to original flat card (`cp` command, hairline `.kHair` borders, `Fog card` tokens, no 3-step wizard). Design override doc (`2026-08-28-engine-pane-redesign-override.md`) records the contradiction and design-brief audit (`2026-08-28-engine-pane-redesign-brief.md`). The rebuilt Swift (`BUILD SUCCEEDED`) is rolled back; backing extensions (`downloadCommand`, `selectedDownloadVersion`) kept as non-breaking additions.
 ---
 
 ## T18 — K-31 + K-32: visual QA vs the v1.2 mockups
@@ -1034,3 +1036,18 @@ xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platfor
 *Status: ✅ implemented & headless-verified 2026-08-27; manual gate L1–L4 pending host with remapped fn/Karabiner (see `KalamTests/FnUsageAdvisorTests` for pins). Commit for Task 7: local — leave `K-58 ✅` local until L1–L4 PASS.*
 
 
+
+---
+
+## F popover manual checklist (Engine Tab — F Popover, 10 states)
+
+- [ ] F1 collapsed: Choose… primary, View/Copy bsec white, no popover
+- [ ] F2 folder chosen: Change/Open/Clear, same
+- [ ] F3 Install popover: Hide well tint, well #F1F0EA brew, notch right:135 centered on Hide, card height stable
+- [ ] F4 Download popover: selchip before well, v2→v3 swaps command, notch pinned
+- [ ] F5 picker open: selchipMenu (v2 ✓) + dimmed well 0.55
+- [ ] F6 verified: green ✓, ON DISK, no View
+- [ ] F6b multiple: 2 models, v2 ON green-t, v3 Use, Missing dimmed
+- [ ] F6c multiple incomplete: warn orange border + chipgrid
+- [ ] F7 incomplete popover: chipgrid inside popover, well #F1F0EA
+- [ ] F8 repo guard: orange guard, GetTheModel dimmed 0.55
