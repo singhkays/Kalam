@@ -40,6 +40,16 @@ final class InMemorySettingsStore: SettingsBacking {
     var rules: [ReplacementRule] = [] { didSet { ping() } }
     var retentionEnabled: Bool = false { didSet { ping() } }
 
+    private var _installed: [ASRModelVersion] = []
+    var installedModelVersions: [ASRModelVersion] { _installed }
+    var activeModelVersion: ASRModelVersion = .v2 { didSet { ping() } }
+
+    func testSetInstalledVersions(_ versions: [ASRModelVersion]) {
+        _installed = versions
+        activeModelVersion = versions.first ?? .v2
+        ping()
+    }
+
     private(set) var modelFolder: URL
     private(set) var engine: EnginePresence = .verified(
         ModelInfo(name: "Parakeet v3", detail: "25+ languages · on this Mac")
@@ -126,7 +136,7 @@ final class InMemorySettingsStore: SettingsBacking {
     }
 
     func isModelVersionInstalled(_ version: ASRModelVersion) -> Bool {
-        false  // Preview fixture: no live folder scan; production uses ModelsConfiguration
+        _installed.contains(version)
     }
 
     // MARK: Fixtures

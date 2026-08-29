@@ -433,6 +433,18 @@ final class LiveSettingsBacking: SettingsBacking {
         return config.availability(for: version).isInstalled
     }
 
+    var installedModelVersions: [ASRModelVersion] {
+        ModelsConfiguration.load(from: defaults).installedVersions
+    }
+
+    var activeModelVersion: ASRModelVersion {
+        get { ModelsConfiguration.load(from: defaults).asrVersion }
+        set {
+            var c = ModelsConfiguration.load(from: defaults); c.asrVersion = newValue; c.save(to: defaults)
+            NotificationCenter.default.post(name: .modelsConfigurationDidChange, object: nil); ping()
+        }
+    }
+
     /// The selected/download version — mapped from settings backing.
     /// In full build this would use a `@Binding` through the wizard; for the
     /// rebuilt EnginePane, this returns the current configured `asrVersion`.

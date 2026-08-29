@@ -311,4 +311,12 @@ final class SettingsModelTests: XCTestCase {
         }
         XCTAssertTrue(changed.value, "a store change must invalidate views reading model state")
     }
+
+    func testActiveInstalledVersionsFiltersToInstalled() {
+        let store = InMemorySettingsStore()
+        store.testSetInstalledVersions([.v2, .v3])
+        let model = makeModel(store)
+        XCTAssertEqual(model.activeInstalledVersions, [.v2, .v3])
+        XCTAssertEqual(model.activeSelection, .v2)
+    }
 }

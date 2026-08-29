@@ -310,6 +310,12 @@ struct ModelsConfiguration: Equatable, Sendable {
     }
 }
 
+extension ModelsConfiguration {
+    var installedVersions: [ASRModelVersion] {
+        ASRModelVersion.allCases.filter { availability(for: $0).isInstalled }
+    }
+}
+
 // MARK: - Notification
 
 extension Notification.Name {

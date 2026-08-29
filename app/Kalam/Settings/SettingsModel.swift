@@ -142,6 +142,15 @@ final class SettingsModel {
         store.isModelVersionInstalled(version)
     }
 
+    var activeInstalledVersions: [ASRModelVersion] { _ = revision; return store.installedModelVersions }
+
+    var activeSelection: ASRModelVersion {
+        get { _ = revision; return store.activeModelVersion }
+        set { store.activeModelVersion = newValue }
+    }
+
+    func selectActiveModel(_ v: ASRModelVersion) { guard store.installedModelVersions.contains(v) else { return }; store.activeModelVersion = v }
+
     var releaseURL: URL { _ = revision; return store.releaseURL }
 
     var versionString: String {

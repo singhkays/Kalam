@@ -53,6 +53,8 @@ protocol SettingsBacking: AnyObject {
     var selectedDownloadVersion: ASRModelVersion { get set }
     var availableModelVersions: [ASRModelVersion] { get }
     func isModelVersionInstalled(_ version: ASRModelVersion) -> Bool
+    var installedModelVersions: [ASRModelVersion] { get }
+    var activeModelVersion: ASRModelVersion { get set }
 
     // Retention — Task 6 (K-57) opt-in crash recovery, default OFF
     var retentionEnabled: Bool { get set }
