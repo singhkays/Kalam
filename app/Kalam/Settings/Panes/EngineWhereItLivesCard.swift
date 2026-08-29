@@ -3,7 +3,7 @@ import SwiftUI
 
 // MARK: - Environment signal for GetTheModel dimming (F8 repo guard)
 
-private struct IsRepoGuardKey: EnvironmentKey {
+struct IsRepoGuardKey: EnvironmentKey {
     static let defaultValue = false
 }
 

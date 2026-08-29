@@ -77,24 +77,8 @@ struct EnginePane: View {
             }
             .padding(.top, 14)
 
-            wizardStep(title: "Step 2: CLI + Download", subtitle: "Install CLI (one-time), then download the model.", isComplete: false, isActive: true) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("brew install hf").font(.system(.footnote, design: .monospaced)).padding(6).background(Color(.controlBackgroundColor)).cornerRadius(6)
-                    Text("Download command:").font(.subheadline.bold())
-                    Text(model.downloadCommand)
-                        .font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).lineLimit(8).textSelection(.enabled)
-                    HStack {
-                        Spacer()
-                        Button("Copy Download Command") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(model.downloadCommand, forType: .string)
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    .padding(.top, 2)
-                }
-            }
-            .padding(.top, 10)
+            EngineGetTheModelCard(model: model)
+                .padding(.top, 14)
 
             wizardStep(title: "Step 3: Select model", subtitle: "Installed versions show green; missing show amber.", isComplete: isVerified, isActive: true) {
                 VStack(alignment: .leading, spacing: 10) {

@@ -125,18 +125,14 @@ final class SettingsModel {
     var modelFolder: URL { _ = revision; return store.modelFolder }
     var engine: EnginePresence { _ = revision; return store.engine }
     var installCommand: String { _ = revision; return store.installCommand }
-    var downloadCommand: String {
-        store.downloadCommand
-    }
+    var downloadCommand: String { _ = revision; return store.downloadCommand }
 
     var selectedDownloadVersion: ASRModelVersion {
-        get { store.selectedDownloadVersion }
+        get { _ = revision; return store.selectedDownloadVersion }
         set { store.selectedDownloadVersion = newValue }
     }
 
-    var availableModelVersions: [ASRModelVersion] {
-        store.availableModelVersions
-    }
+    var availableModelVersions: [ASRModelVersion] { _ = revision; return store.availableModelVersions }
 
     func isModelVersionInstalled(_ version: ASRModelVersion) -> Bool {
         store.isModelVersionInstalled(version)

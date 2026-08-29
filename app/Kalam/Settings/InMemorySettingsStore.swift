@@ -112,23 +112,22 @@ final class InMemorySettingsStore: SettingsBacking {
         ModelSetupSupport.huggingFaceInstallCommand
     }
 
+    private var _selectedDownloadVersion: ASRModelVersion = .v2
+
     /// Full `hf download` command — rebuilt per user directive.
+    /// InMemory preview uses the selected version so the picker → command binding is observable.
     var downloadCommand: String {
         let config = ModelsConfiguration.load(from: UserDefaults.standard)
-        // Use stored bookmark to resolve library URL, falling back to folder path
-        let libURL = config.modelLibraryURL ?? modelFolder
-        var updatedConfig = config
-        // If we have a folder selected, use it; otherwise use current modelFolder
-        if modelFolder != libURL && libURL == nil {
-            // No bookmark resolved; create a temporary bookmark for the folder path
-            // (production: this uses security-scoped bookmark; preview uses path directly)
-        }
-        return ModelSetupSupport.downloadCommand(for: .v2, config: config)
+        return ModelSetupSupport.downloadCommand(for: _selectedDownloadVersion, config: config)
     }
 
     var selectedDownloadVersion: ASRModelVersion {
-        get { .v2 }
-        set { }
+        get { _selectedDownloadVersion }
+        set {
+            guard newValue != _selectedDownloadVersion else { return }
+            _selectedDownloadVersion = newValue
+            ping()
+        }
     }
 
     var availableModelVersions: [ASRModelVersion] {
