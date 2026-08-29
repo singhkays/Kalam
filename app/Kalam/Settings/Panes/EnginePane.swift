@@ -121,69 +121,8 @@ struct EnginePane: View {
             }
             .padding(.top, 10)
 
-            // Install location
-
-            VStack(spacing: 0) {
-                header("Install location")
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Model folder")
-                            .font(SettingsType.styleRowTitle).compassTracking(SettingsType.trackRowTitle)
-                        Text(displayPath)
-                            .font(SettingsType.styleRowDetail)
-                            .foregroundStyle(Color.kInk2)
-                    }
-                    Spacer()
-                    Group {
-                        if isVerified {
-                            Button("Choose…") {
-                                Task { await model.chooseModelFolder() }
-                            }
-                            .buttonStyle(SettingsSecondaryButtonStyle())
-                        } else {
-                            Button("Choose…") {
-                                Task { await model.chooseModelFolder() }
-                            }
-                            .buttonStyle(SettingsPrimaryButtonStyle())
-                        }
-                    }
-                }
-                .padding(SettingsLayout.diveRowPad)
-                .rowTopEdge(first: true)
-
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Copy to install")
-                            .font(SettingsType.styleRowTitle).compassTracking(SettingsType.trackRowTitle)
-                        Text(model.installCommand)
-                            .font(SettingsType.stylePathMono)
-                            .foregroundStyle(Color.kInk2)
-                            .lineLimit(2)
-                    }
-                    Spacer()
-                    Group {
-                        if isVerified {
-                            Button("Copy command") {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(model.installCommand, forType: .string)
-                            }
-                            .buttonStyle(SettingsPrimaryButtonStyle())
-                        } else {
-                            Button("Copy command") {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(model.installCommand, forType: .string)
-                            }
-                            .buttonStyle(SettingsSecondaryButtonStyle())
-                        }
-                    }
-                }
-                .padding(SettingsLayout.diveRowPad)
-                .overlay(alignment: .top) { Divider().background(Color.kHair2) }
-            }
-            .background(Color.kPanel)
-            .overlay(RoundedRectangle(cornerRadius: SettingsLayout.cardRadius).stroke(Color.kHair))
-            .cornerRadius(SettingsLayout.cardRadius)
-            .padding(.top, 18)
+            EngineWhereItLivesCard(model: model)
+                .padding(.top, 18)
 
             // Active model
             VStack(spacing: 0) {
