@@ -1,41 +1,4 @@
-import AppKit
 import SwiftUI
-
-// MARK: - Wizard step helper (restructured to match onboarding 3-step wizard flow)
-private func wizardStep<Content: View>(title: String, subtitle: String, isComplete: Bool, isActive: Bool, @ViewBuilder content: () -> Content) -> some View {
-    VStack(alignment: .leading, spacing: 14) {
-        HStack(alignment: .top, spacing: 12) {
-            ZStack {
-                Circle().fill(isComplete ? AnyShapeStyle(Color.green.opacity(0.18)) : AnyShapeStyle(Color(.gray).opacity(0.15))).frame(width: 28, height: 28)
-                if isComplete {
-                    Image(systemName: "checkmark").font(.footnote.bold()).foregroundStyle(.green)
-                } else {
-                    // Extract step number from title like "Step 1: ..."
-                    let number = title.components(separatedBy: ":").first?.replacingOccurrences(of: "Step ", with: "") ?? ""
-                    Text(number.isEmpty ? "•" : number).font(.footnote.bold()).foregroundStyle(.secondary)
-                }
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(title).font(.headline.bold()).foregroundStyle(.primary)
-                    Spacer()
-                    if isComplete {
-                        Text("COMPLETE").font(.system(.caption2, design: .monospaced)).tracking(0.5).foregroundStyle(.green)
-                    }
-                }
-                if isActive {
-                    content()
-                } else {
-                    Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-    .padding(16)
-    .background(Color.kPanel)
-    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.kHair.opacity(0.6), lineWidth: 1))
-    .cornerRadius(10)
-}
 
 struct EnginePane: View {
     @Bindable var model: SettingsModel
@@ -61,78 +24,14 @@ struct EnginePane: View {
                 .padding(.top, 10)
                 .fixedSize(horizontal: false, vertical: true)
 
-            // 3-step guided wizard — rebuilt per design override 2026-08-28.
-            // See 2026-08-28-engine-pane-redesign-override.md.
-            wizardStep(title: "Step 1: Choose folder", subtitle: "Where Kalam stores local models.", isComplete: model.engine != .missing, isActive: true) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Current folder: \(displayPath)")
-                        .font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary)
-                    HStack(spacing: 8) {
-                        Button("Choose Folder...") { Task { await model.chooseModelFolder() } }
-                            .buttonStyle(.borderedProminent)
-                        Button("Clear") { }  // no-op stub; backing has no clear; kept for layout parity
-                            .buttonStyle(.bordered)
-                    }
-                }
-            }
-            .padding(.top, 14)
+            EngineWhereItLivesCard(model: model)
+                .padding(.top, 18)
 
             EngineGetTheModelCard(model: model)
                 .padding(.top, 14)
 
-            wizardStep(title: "Step 3: Select model", subtitle: "Installed versions show green; missing show amber.", isComplete: isVerified, isActive: true) {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(Array(ASRModelVersion.allCases.enumerated()), id: \.offset) { _, version in
-                        let installed = model.isModelVersionInstalled(version)
-                        HStack(alignment: .center, spacing: 10) {
-                            Image(systemName: installed ? "checkmark.circle.fill" : (version == .tdtCtc110m ? "circle.dashed" : "circle"))
-                                .font(.body).foregroundStyle(installed ? .green : .orange)
-                            Text(version.displayName).font(.body).fontWeight(.semibold)
-                            Spacer()
-                            if installed {
-                                Text("INSTALLED").font(.system(.caption2, design: .monospaced)).tracking(0.6).foregroundStyle(.green).padding(.horizontal, 4).padding(.vertical, 1).background(.green.opacity(0.08)).cornerRadius(3)
-                            } else {
-                                Text("MISSING").font(.system(.caption2, design: .monospaced)).tracking(0.6).foregroundStyle(.orange).padding(.horizontal, 4).padding(.vertical, 1).background(.orange.opacity(0.08)).cornerRadius(3)
-                            }
-                            Text(version.modelSize).font(.caption2).fontWeight(.regular).foregroundStyle(.secondary)
-                        }
-                        .padding(10)
-                        .background(Color.kPanel)
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(installed ? .green.opacity(0.3) : .kHair, lineWidth: 1))
-                        .cornerRadius(8)
-                    }
-                }
-            }
-            .padding(.top, 10)
-
-            EngineWhereItLivesCard(model: model)
+            EngineActiveCard(model: model)
                 .padding(.top, 18)
-
-            // Active model
-            VStack(spacing: 0) {
-                header("Active model", trailing: statusLabel, trailingColor: statusTone)
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(activeTitle)
-                            .font(SettingsType.styleModelName).compassTracking(SettingsType.trackModelName)
-                        Text(activeDetail)
-                            .font(SettingsType.styleRowDetail)
-                            .foregroundStyle(Color.kInk2)
-                    }
-                    Spacer()
-                    if isVerified {
-                        Text("ON DISK")
-                            .font(SettingsFont.mono(10))
-                            .tracking(0.8)
-                            .foregroundStyle(Color.kGreen)
-                    }
-                }
-                .padding(SettingsLayout.diveRowPad)
-            }
-            .background(Color.kPanel)
-            .overlay(RoundedRectangle(cornerRadius: SettingsLayout.cardRadius).stroke(Color.kHair))
-            .cornerRadius(SettingsLayout.cardRadius)
-            .padding(.top, 18)
 
             VStack(alignment: .leading, spacing: 7) {
                 Text("Why there is no download")
@@ -152,7 +51,6 @@ struct EnginePane: View {
             .cornerRadius(SettingsLayout.cardRadius)
             .padding(.top, 14)
 
-            // Task 6 (K-57): opt-in retention — default OFF, byte-identical ephemeral when OFF.
             VStack(alignment: .leading, spacing: 8) {
                 Text("Crash recovery")
                     .font(SettingsFont.mono(9))
@@ -180,15 +78,6 @@ struct EnginePane: View {
         .onAppear { model.rescanEngine() }
     }
 
-    private var displayPath: String {
-        let home = NSHomeDirectory()
-        let path = model.modelFolder.path
-        if path.hasPrefix(home) {
-            return "~" + path.dropFirst(home.count)
-        }
-        return path
-    }
-
     private var lede: String {
         switch model.engine {
         case .verified:
@@ -198,62 +87,5 @@ struct EnginePane: View {
         case .incomplete:
             return "This folder is not a full model yet. Copy the remaining Parakeet files and return when they are in place."
         }
-    }
-
-    private var isVerified: Bool {
-        if case .verified = model.engine { return true }
-        return false
-    }
-
-    private var statusLabel: String {
-        switch model.engine {
-        case .verified: return "Verified"
-        case .missing: return "Missing"
-        case .incomplete: return "Incomplete"
-        }
-    }
-
-    /// Status tone — shared warn/bad vocabulary from onboarding (F-07).
-    private var statusTone: Color {
-        switch model.engine {
-        case .verified: return Color.kGreen
-        case .missing: return Color.kBad
-        case .incomplete: return Color.kWarn
-        }
-    }
-
-    private var activeTitle: String {
-        switch model.engine {
-        case .verified(let info): return info.name
-        case .missing: return "No model found"
-        case .incomplete: return "Incomplete"
-        }
-    }
-
-    private var activeDetail: String {
-        switch model.engine {
-        case .verified(let info): return info.detail
-        case .missing: return "The folder is empty, or no model is installed."
-        case .incomplete: return "The folder does not have a full model yet."
-        }
-    }
-
-    private func header(_ title: String, trailing: String? = nil, trailingColor: Color? = nil) -> some View {
-        HStack {
-            Text(title)
-                .font(SettingsType.styleCardHeaderLabel)
-                .compassTracking(SettingsType.trackCardHeaderLabel)
-                .textCase(.uppercase)
-                .foregroundStyle(Color.kInk3)
-            Spacer()
-            if let trailing {
-                Text(trailing)
-                    .font(SettingsFont.mono(9.5))
-                    .tracking(1.2)
-                    .textCase(.uppercase)
-                    .foregroundStyle(trailingColor ?? Color.kGreen)
-            }
-        }
-        .padding(SettingsLayout.diveCardHeaderPad)
     }
 }
