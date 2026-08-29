@@ -319,4 +319,54 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertEqual(model.activeInstalledVersions, [.v2, .v3])
         XCTAssertEqual(model.activeSelection, .v2)
     }
+
+    func testFixtureMultipleHasTwoInstalled() {
+        let s = InMemorySettingsStore.fixtureEngineMultiple()
+        let m = makeModel(s)
+        XCTAssertEqual(m.activeInstalledVersions.count, 2)
+        XCTAssertEqual(m.activeInstalledVersions, [.v2, .v3])
+        XCTAssertEqual(m.activeSelection, .v2)
+        XCTAssertTrue(m.isModelVersionInstalled(.v2))
+        XCTAssertTrue(m.isModelVersionInstalled(.v3))
+        XCTAssertFalse(m.isModelVersionInstalled(.tdtCtc110m))
+    }
+
+    func testFixtureMultipleIncompleteHasTwoInstalled() {
+        let s = InMemorySettingsStore.fixtureEngineMultipleIncomplete()
+        let m = makeModel(s)
+        XCTAssertEqual(m.activeInstalledVersions.count, 2)
+        XCTAssertEqual(m.activeInstalledVersions, [.v2, .v3])
+        XCTAssertEqual(m.activeSelection, .v2)
+        XCTAssertEqual(m.engine, .incomplete)
+        XCTAssertTrue(m.isModelVersionInstalled(.v2))
+        XCTAssertTrue(m.isModelVersionInstalled(.v3))
+    }
+
+    func testIsModelVersionInstalledReflectsInstalled() {
+        let store = InMemorySettingsStore()
+        store.testSetInstalledVersions([.v3])
+        let m = makeModel(store)
+        XCTAssertFalse(m.isModelVersionInstalled(.v2))
+        XCTAssertTrue(m.isModelVersionInstalled(.v3))
+        XCTAssertFalse(m.isModelVersionInstalled(.tdtCtc110m))
+        store.testSetInstalledVersions([])
+        XCTAssertFalse(m.isModelVersionInstalled(.v3))
+    }
+
+    func testApplyModelFolderForTestingStillWorks() {
+        let store = InMemorySettingsStore()
+        let url = URL(fileURLWithPath: "/tmp/KalamTestModels")
+        store.applyModelFolderForTesting(url, presence: .missing)
+        let m = makeModel(store)
+        XCTAssertEqual(m.modelFolder, url)
+        XCTAssertEqual(m.engine, .missing)
+        let url2 = URL(fileURLWithPath: "/tmp/KalamTestModels2")
+        store.applyModelFolderForTesting(url2, presence: .verified(ModelInfo(name: "Parakeet v2", detail: "English-only \u{00B7} 5 of 5")))
+        XCTAssertEqual(m.modelFolder, url2)
+        if case .verified(let info) = m.engine {
+            XCTAssertEqual(info.name, "Parakeet v2")
+        } else {
+            XCTFail("expected verified")
+        }
+    }
 }

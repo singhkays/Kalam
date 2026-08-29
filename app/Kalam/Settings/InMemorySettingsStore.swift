@@ -169,6 +169,20 @@ final class InMemorySettingsStore: SettingsBacking {
         return s
     }
 
+    static func fixtureEngineMultiple() -> InMemorySettingsStore {
+        let s = fixtureSettled()
+        s.engine = .verified(ModelInfo(name: "Parakeet v2", detail: "English-only \u{00B7} 5 of 5"))
+        s.testSetInstalledVersions([.v2, .v3])
+        return s
+    }
+
+    static func fixtureEngineMultipleIncomplete() -> InMemorySettingsStore {
+        let s = fixtureSettled()
+        s.engine = .incomplete
+        s.testSetInstalledVersions([.v2, .v3])
+        return s
+    }
+
     static func fixtureNoDevices() -> InMemorySettingsStore {
         let s = fixtureSettled()
         s.microphones = []
