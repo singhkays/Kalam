@@ -141,9 +141,9 @@ struct EngineGetTheModelCard: View {
                     let rect = proxy[a]
                     let popoverWidth: CGFloat = 560
                     let rowFrame = proxy.frame(in: .local)
-                    // Popover right:28 from row trailing, top 12 below button
-                    let popoverX = rowFrame.maxX - 28 - popoverWidth / 2
-                    let popoverY = rect.maxY + 12 + 90
+                    // Popover right:28 from row trailing, top 12 below button (HTML: top calc(100%+12) right:28)
+                    let popoverCenterX = rowFrame.maxX - 28 - popoverWidth / 2
+                    let popoverCenterY = rect.maxY + 12 + 90 // 90 ≈ half popover height (180/2), so top = button bottom +12
                     Color.clear
                         .frame(width: popoverWidth, height: 180)
                         .overlay(
@@ -169,7 +169,7 @@ struct EngineGetTheModelCard: View {
                             .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
                             .background(EnginePopoverNotch(), alignment: .topTrailing)
                         )
-                        .position(x: popoverX + popoverWidth/2, y: popoverY)
+                        .position(x: popoverCenterX, y: popoverCenterY)
                         .allowsHitTesting(true)
                         .onTapGesture {} // consume
                 }
@@ -228,8 +228,8 @@ struct EngineGetTheModelCard: View {
                     let rect = proxy[a]
                     let popoverWidth: CGFloat = 560
                     let rowFrame = proxy.frame(in: .local)
-                    let popoverX = rowFrame.maxX - 28 - popoverWidth / 2
-                    let popoverY = rect.maxY + 12 + 90
+                    let popoverCenterX = rowFrame.maxX - 28 - popoverWidth / 2
+                    let popoverCenterY = rect.maxY + 12 + 90
                     Color.clear
                         .frame(width: popoverWidth, height: 180)
                         .overlay(
@@ -259,7 +259,7 @@ struct EngineGetTheModelCard: View {
                             .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
                             .background(EnginePopoverNotch(), alignment: .topTrailing)
                         )
-                        .position(x: popoverX + popoverWidth/2, y: popoverY)
+                        .position(x: popoverCenterX, y: popoverCenterY)
                         .allowsHitTesting(true)
                         .onTapGesture {}
                 }
