@@ -38,12 +38,11 @@ struct EngineGetTheModelCard: View {
             installRow
             downloadRow
         }
-        .background(Color.kPanel)
+        .background(Color.kPanel, in: RoundedRectangle(cornerRadius: SettingsLayout.cardRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: SettingsLayout.cardRadius, style: .continuous)
                 .stroke(Color.kHair, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: SettingsLayout.cardRadius, style: .continuous))
         .onExitCommand {
             if showInstall { showInstall = false }
             if showDownload { showDownload = false }
@@ -124,26 +123,56 @@ struct EngineGetTheModelCard: View {
                             if willShow { showDownload = false }
                         }
                     }
+                    .anchorPreference(key: ViewButtonAnchorKey.self, value: .bounds, transform: { $0 })
                     copyButton {
                         copyToPasteboard(model.installCommand)
                     }
                     .opacity(isRepoGuard ? 0.55 : 1)
-                    .disabled(false) // Copy stays enabled even when repo guard (dimmed only via row opacity)
+                    .disabled(false)
                 }
             }
         }
         .padding(SettingsLayout.diveRowPad)
         .rowTopEdge(first: true)
         .opacity(isRepoGuard ? 0.55 : 1)
-        .overlay(alignment: .bottomTrailing) {
-            if showInstall && !isVerified && !isRepoGuard {
-                // F3 Install popover — card-stable, anchored to Hide (row bottomTrailing)
-                EnginePopover(title: "Install command — Hugging Face CLI", command: model.installCommand)
-                    .frame(width: 560)
-                    .padding(.trailing, 28)
-                    .offset(y: 12)
-                    .zIndex(10)
-                    .onTapGesture {} // consume tap so card-level onTapGesture doesn't dismiss when tapping popover
+        .overlayPreferenceValue(ViewButtonAnchorKey.self) { anchor in
+            GeometryReader { proxy in
+                if showInstall && !isVerified && !isRepoGuard, let a = anchor {
+                    let rect = proxy[a]
+                    let popoverWidth: CGFloat = 560
+                    let rowFrame = proxy.frame(in: .local)
+                    // Popover right:28 from row trailing, top 12 below button
+                    let popoverX = rowFrame.maxX - 28 - popoverWidth / 2
+                    let popoverY = rect.maxY + 12 + 90
+                    Color.clear
+                        .frame(width: popoverWidth, height: 180)
+                        .overlay(
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text("Install command — Hugging Face CLI")
+                                    .font(SettingsFont.mono(10))
+                                    .tracking(0.9)
+                                    .textCase(.uppercase)
+                                    .foregroundStyle(Color.kInk3)
+                                    .padding(.bottom, 8)
+                                EnginePopoverWell(command: model.installCommand)
+                                Text("Click outside or press Esc to dismiss.")
+                                    .font(SettingsFont.body(11))
+                                    .foregroundStyle(Color.kInk3)
+                                    .padding(.top, 10)
+                            }
+                            .padding(14)
+                            .frame(width: popoverWidth)
+                            .background(Color.kPanel)
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.kHair))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .shadow(color: .black.opacity(0.14), radius: 16, y: 10)
+                            .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
+                            .background(EnginePopoverNotch(), alignment: .topTrailing)
+                        )
+                        .position(x: popoverX + popoverWidth/2, y: popoverY)
+                        .allowsHitTesting(true)
+                        .onTapGesture {} // consume
+                }
             }
         }
         .accessibilityElement(children: .contain)
@@ -180,6 +209,7 @@ struct EngineGetTheModelCard: View {
                             if willShow { showInstall = false }
                         }
                     }
+                    .anchorPreference(key: ViewButtonAnchorKey.self, value: .bounds, transform: { $0 })
                     copyButton {
                         copyToPasteboard(model.downloadCommand)
                     }
@@ -192,14 +222,47 @@ struct EngineGetTheModelCard: View {
             Divider().background(Color.kHair2)
         }
         .opacity(isRepoGuard ? 0.55 : 1)
-        .overlay(alignment: .bottomTrailing) {
-            if showDownload && !isVerified && !isRepoGuard {
-                downloadPopover
-                    .frame(width: 560)
-                    .padding(.trailing, 28)
-                    .offset(y: 12)
-                    .zIndex(10)
-                    .onTapGesture {} // consume
+        .overlayPreferenceValue(ViewButtonAnchorKey.self) { anchor in
+            GeometryReader { proxy in
+                if showDownload && !isVerified && !isRepoGuard, let a = anchor {
+                    let rect = proxy[a]
+                    let popoverWidth: CGFloat = 560
+                    let rowFrame = proxy.frame(in: .local)
+                    let popoverX = rowFrame.maxX - 28 - popoverWidth / 2
+                    let popoverY = rect.maxY + 12 + 90
+                    Color.clear
+                        .frame(width: popoverWidth, height: 180)
+                        .overlay(
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text("Download command — \(model.selectedDownloadVersion.displayName)")
+                                    .font(SettingsFont.mono(10))
+                                    .tracking(0.9)
+                                    .textCase(.uppercase)
+                                    .foregroundStyle(Color.kInk3)
+                                    .padding(.bottom, 8)
+                                if isIncomplete {
+                                    incompleteChipGrid
+                                        .padding(.bottom, 10)
+                                }
+                                EnginePopoverWell(command: model.downloadCommand)
+                                Text("Click outside or press Esc to dismiss.")
+                                    .font(SettingsFont.body(11))
+                                    .foregroundStyle(Color.kInk3)
+                                    .padding(.top, 10)
+                            }
+                            .padding(14)
+                            .frame(width: popoverWidth)
+                            .background(Color.kPanel)
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.kHair))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .shadow(color: .black.opacity(0.14), radius: 16, y: 10)
+                            .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
+                            .background(EnginePopoverNotch(), alignment: .topTrailing)
+                        )
+                        .position(x: popoverX + popoverWidth/2, y: popoverY)
+                        .allowsHitTesting(true)
+                        .onTapGesture {}
+                }
             }
         }
         .accessibilityElement(children: .contain)
@@ -461,4 +524,9 @@ private struct ChipView: View {
     .padding(24)
     .background(Color.kPaper)
     .frame(width: 640)
+}
+
+private struct ViewButtonAnchorKey: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>? { nil }
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) { value = nextValue() ?? value }
 }
