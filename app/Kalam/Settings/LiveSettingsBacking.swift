@@ -54,6 +54,7 @@ final class LiveSettingsBacking: SettingsBacking {
         ] {
             notificationObservers.append(
                 center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    self?.clearDerivedCaches()
                     self?.ping()
                 }
             )
@@ -121,6 +122,11 @@ final class LiveSettingsBacking: SettingsBacking {
     var indicatorStyle: IndicatorStyle {
         get { GeneralSettingsConfiguration.load(from: defaults).indicatorStyle }
         set { saveGeneral { $0.indicatorStyle = newValue } }
+    }
+
+    var appearance: AppearancePreference {
+        get { GeneralSettingsConfiguration.load(from: defaults).appearanceMode }
+        set { saveGeneral { $0.appearanceMode = newValue } }
     }
 
     private func saveGeneral(_ mutate: (inout GeneralSettingsConfiguration) -> Void) {
@@ -365,23 +371,63 @@ final class LiveSettingsBacking: SettingsBacking {
         .replacingOccurrences(of: "\n", with: " ")
     }
 
+    // MARK: - Engine disk-scan memo (tap-lag fix, 2026-09-03)
+    //
+    // One availability scan costs ~1-2ms but runs dozens of times per render
+    // pass (every `engine` / `installedModelVersions` / manifest read re-scans
+    // disk with security-scoped access), totaling ~200ms of MainActor work per
+    // picker tap. Memoize per (library path, version); disk truth re-enters
+    // only via rescanEngine() (the Check-again affordance), folder change, or
+    // a config-change notification — never implicitly. External changes (e.g.
+    // a download finishing mid-session) surface on the next explicit rescan,
+    // which is exactly what the UI promises ("Check again").
+
+    private var enginePresenceCache: (path: String?, version: ASRModelVersion, value: EnginePresence)?
+    private var installedVersionsCache: (path: String?, value: [ASRModelVersion])?
+    private var manifestCache: [String: [ASRModelFileEntry]] = [:]
+    // The loaded config itself: resolving the security-scoped bookmark on
+    // every getter cost ~1ms × dozens of reads per render. Cached alongside
+    // the scan memos; every mutation path below clears it after saving.
+    private var cachedConfig: ModelsConfiguration?
+
+    private func loadedConfig() -> ModelsConfiguration {
+        if let c = cachedConfig { return c }
+        let c = ModelsConfiguration.load(from: defaults)
+        cachedConfig = c
+        return c
+    }
+
+    private func clearDerivedCaches() {
+        cachedConfig = nil
+        enginePresenceCache = nil
+        installedVersionsCache = nil
+        manifestCache = [:]
+    }
+
     // MARK: - Engine
 
     var modelFolder: URL {
-        ModelsConfiguration.load(from: defaults).modelLibraryURL
+        loadedConfig().modelLibraryURL
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Kalam/models")
     }
 
     var engine: EnginePresence {
-        let config = ModelsConfiguration.load(from: defaults)
+        let config = loadedConfig()
+        let path = config.modelLibraryURL?.path
+        if let c = enginePresenceCache, c.path == path, c.version == config.asrVersion {
+            return c.value
+        }
+        let value: EnginePresence
         switch config.availability(for: config.asrVersion) {
         case .installed:
-            return .verified(ModelInfo(name: Self.shortName(for: config.asrVersion), detail: config.asrVersion.description))
+            value = .verified(ModelInfo(name: Self.shortName(for: config.asrVersion), detail: config.asrVersion.description))
         case .modelLibraryNotConfigured, .missingModelFolder:
-            return .missing
+            value = .missing
         case .invalidModelFolder, .partial:
-            return .incomplete
+            value = .incomplete
         }
+        enginePresenceCache = (path, config.asrVersion, value)
+        return value
     }
 
     func chooseModelFolder() async -> URL? {
@@ -404,6 +450,7 @@ final class LiveSettingsBacking: SettingsBacking {
     }
 
     func rescanEngine() {
+        clearDerivedCaches()
         ping()
     }
 
@@ -418,7 +465,7 @@ final class LiveSettingsBacking: SettingsBacking {
     /// Design override (2026-08-28): full `hf download` command (replaces `cp`).
     /// Bound through `ModelsConfiguration.asrVersion` and `modelLibraryURL`.
     var downloadCommand: String {
-        let config = ModelsConfiguration.load(from: defaults)
+        let config = loadedConfig()
         return ModelSetupSupport.downloadCommand(for: config.asrVersion, config: config)
     }
 
@@ -428,20 +475,29 @@ final class LiveSettingsBacking: SettingsBacking {
     }
 
     /// Whether a given version is installed (live state from folder scan).
+    /// Same predicate as `installedVersions` (`availability.isInstalled`), so
+    /// it reads the memoized set instead of rescanning per call.
     func isModelVersionInstalled(_ version: ASRModelVersion) -> Bool {
-        let config = ModelsConfiguration.load(from: defaults)
-        return config.availability(for: version).isInstalled
+        installedModelVersions.contains(version)
     }
 
     var installedModelVersions: [ASRModelVersion] {
-        ModelsConfiguration.load(from: defaults).installedVersions
+        let config = loadedConfig()
+        let path = config.modelLibraryURL?.path
+        if let c = installedVersionsCache, c.path == path {
+            return c.value
+        }
+        let value = config.installedVersions
+        installedVersionsCache = (path, value)
+        return value
     }
 
     var activeModelVersion: ASRModelVersion {
-        get { ModelsConfiguration.load(from: defaults).asrVersion }
+        get { loadedConfig().asrVersion }
         set {
             var c = ModelsConfiguration.load(from: defaults); c.asrVersion = newValue; c.save(to: defaults)
-            NotificationCenter.default.post(name: .modelsConfigurationDidChange, object: nil); ping()
+            clearDerivedCaches()
+            NotificationCenter.default.post(name: .modelsConfigurationDidChange, object: nil)
         }
     }
 
@@ -449,13 +505,16 @@ final class LiveSettingsBacking: SettingsBacking {
     /// In full build this would use a `@Binding` through the wizard; for the
     /// rebuilt EnginePane, this returns the current configured `asrVersion`.
     var selectedDownloadVersion: ASRModelVersion {
-        get { ModelsConfiguration.load(from: defaults).asrVersion }
+        get { loadedConfig().asrVersion }
         set {
             var config = ModelsConfiguration.load(from: defaults)
             config.asrVersion = newValue
             config.save(to: defaults)
+            clearDerivedCaches()
+            // No explicit ping: the post below reaches this store's own
+            // observer synchronously on the same thread, which pings once —
+            // one revision (one render) per tap instead of two.
             NotificationCenter.default.post(name: .modelsConfigurationDidChange, object: nil)
-            ping()
         }
     }
 
@@ -468,6 +527,49 @@ final class LiveSettingsBacking: SettingsBacking {
             // No notification needed beyond ping — UI reads revision.
             ping()
         }
+    }
+
+    // MARK: - Engine wizard (Option D Setup)
+
+    /// Step-2 tool-install attestation. Same load/save/notify pattern as
+    /// `retention.enabled`. Machine-wide on purpose: `chooseModelFolder`
+    /// never touches this key, so Change-folder re-activates Step 3 directly.
+    var hasConfirmedHFCLIInstall: Bool {
+        get { defaults.bool(forKey: "engine.hfCLIConfirmed") }
+        set {
+            defaults.set(newValue, forKey: "engine.hfCLIConfirmed")
+            ping()
+        }
+    }
+
+    var isModelLibraryConfigured: Bool {
+        loadedConfig().modelLibraryURL != nil
+    }
+
+    var modelFolderExistsOnDisk: Bool {
+        FileManager.default.fileExists(atPath: modelFolder.path)
+    }
+
+    /// Sourced ONLY from `ModelSetupSupport.modelFileManifest` (same file
+    /// source as `AsrModels.modelsExist`) — never `requiredModelDirectoryNames`.
+    func modelFileManifest(for version: ASRModelVersion) -> [ASRModelFileEntry] {
+        let config = loadedConfig()
+        let key = "\(config.modelLibraryURL?.path ?? "-")#\(version.rawValue)"
+        if let hit = manifestCache[key] {
+            return hit
+        }
+        let out = ModelSetupSupport.modelFileManifest(for: version, libraryURL: config.modelLibraryURL)
+        manifestCache[key] = out
+        return out
+    }
+
+    var engineFolderFreeBytes: Int64? {
+        guard let values = try? modelFolder.resourceValues(
+            forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey]
+        ) else { return nil }
+        if let important = values.volumeAvailableCapacityForImportantUsage { return important }
+        if let available = values.volumeAvailableCapacity { return Int64(available) }
+        return nil
     }
 
     /// Short map title ("Parakeet v3") — the live displayName is too long for the card.

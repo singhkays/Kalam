@@ -397,6 +397,81 @@ final class LiveSettingsBackingTests: XCTestCase {
         XCTAssertEqual(makeBacking().engine, .incomplete)
     }
 
+    // MARK: - Engine wizard confirm flag (Option D Step 2)
+
+    func testHFCLIConfirmedDefaultsFalse() {
+        XCTAssertFalse(makeBacking().hasConfirmedHFCLIInstall)
+        XCTAssertFalse(suite.bool(forKey: "engine.hfCLIConfirmed"))
+    }
+
+    func testHFCLIConfirmedRoundTrip() {
+        let backing = makeBacking()
+        backing.hasConfirmedHFCLIInstall = true
+        XCTAssertTrue(suite.bool(forKey: "engine.hfCLIConfirmed"))
+        XCTAssertTrue(makeBacking().hasConfirmedHFCLIInstall)
+        backing.hasConfirmedHFCLIInstall = false
+        XCTAssertFalse(suite.bool(forKey: "engine.hfCLIConfirmed"))
+        XCTAssertFalse(makeBacking().hasConfirmedHFCLIInstall)
+    }
+
+    func testHFCLIConfirmedSurvivesFolderChange() throws {
+        let backing = makeBacking()
+        backing.hasConfirmedHFCLIInstall = true
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KalamHFCLIKeep-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var config = ModelsConfiguration.load(from: suite)
+        try config.setModelLibraryURL(dir)
+        config.save(to: suite)
+
+        XCTAssertTrue(suite.bool(forKey: "engine.hfCLIConfirmed"), "choosing a folder must not reset the machine-wide attestation")
+        XCTAssertTrue(makeBacking().hasConfirmedHFCLIInstall)
+    }
+
+    // MARK: - Engine wizard manifest + disk space (Option D Step 3 / S6)
+
+    func testModelFileManifestMatchesRequiredModelFiles() throws {
+        XCTAssertFalse(makeBacking().isModelLibraryConfigured)
+        XCTAssertTrue(makeBacking().modelFileManifest(for: .v2).isEmpty)
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KalamManifestTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = root.appendingPathComponent("models", isDirectory: true)
+        try FileManager.default.createDirectory(at: library, withIntermediateDirectories: true)
+        var config = ModelsConfiguration.load(from: suite)
+        try config.setModelLibraryURL(library)
+        config.save(to: suite)
+
+        let backing = makeBacking()
+        XCTAssertTrue(backing.isModelLibraryConfigured)
+        let manifest = backing.modelFileManifest(for: .v2)
+        // Same file source as the validator — including the vocab file, which
+        // `requiredModelDirectoryNames` never contains.
+        XCTAssertEqual(manifest.map(\.name), ModelSetupSupport.requiredModelFiles(for: .v2))
+        XCTAssertTrue(manifest.allSatisfy { !$0.isPresent })
+        XCTAssertTrue(manifest.contains { $0.name.localizedCaseInsensitiveContains("vocab") })
+    }
+
+    func testEngineFolderFreeBytesForExistingFolder() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KalamFreeBytesTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var config = ModelsConfiguration.load(from: suite)
+        try config.setModelLibraryURL(dir)
+        config.save(to: suite)
+
+        let backing = makeBacking()
+        XCTAssertTrue(backing.modelFolderExistsOnDisk)
+        let free = backing.engineFolderFreeBytes
+        XCTAssertNotNil(free)
+        XCTAssertGreaterThan(free ?? 0, 0)
+    }
+
     // MARK: - Preset menu plain-name hints (hotkey onboarding card UX seventh round)
 
     func testTwoGlyphCombosSpellTheirModifiersInWords() {
@@ -424,5 +499,49 @@ final class LiveSettingsBackingTests: XCTestCase {
             guard let hint = preset.plainNameHint else { continue }
             XCTAssertEqual(hint, preset.mapVerbose?.replacingOccurrences(of: " + ", with: " "))
         }
+    }
+
+    // MARK: - Engine scan memo (tap-lag fix)
+
+    /// Disk truth re-enters only via rescan/folder-change/notification: an
+    /// external change with no rescan stays stale by design (the UI promises
+    /// "Check again"), and `rescanEngine()` picks it up.
+    func testEngineMemoHoldsUntilRescan() throws {
+        let backing = makeBacking()
+        let library = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KalamEngineMemo-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: library, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: library) }
+        var config = ModelsConfiguration.load(from: suite)
+        try config.setModelLibraryURL(library)
+        config.save(to: suite)
+
+        XCTAssertEqual(backing.engine, .missing)
+        // External change, no rescan: memo holds.
+        let version = ModelsConfiguration.load(from: suite).asrVersion
+        try FileManager.default.createDirectory(
+            at: library.appendingPathComponent(version.repositoryFolderName, isDirectory: true),
+            withIntermediateDirectories: true)
+        XCTAssertEqual(backing.engine, .missing)
+        // Explicit rescan re-reads disk: an empty repo dir is invalid, not missing.
+        backing.rescanEngine()
+        XCTAssertEqual(backing.engine, .incomplete)
+    }
+
+    // MARK: - Appearance preference
+
+    func testAppearanceDefaultsToSystem() {
+        XCTAssertEqual(makeBacking().appearance, .system)
+    }
+
+    func testAppearanceCoercesUnknownToSystem() {
+        suite.set("neon", forKey: GeneralSettingsKeys.appearanceMode)
+        XCTAssertEqual(makeBacking().appearance, .system)
+    }
+
+    func testAppearanceWriteThroughPersistsRawValue() {
+        makeBacking().appearance = .dark
+        XCTAssertEqual(suite.string(forKey: GeneralSettingsKeys.appearanceMode), "dark")
+        XCTAssertEqual(GeneralSettingsConfiguration.load(from: suite).appearanceMode, .dark)
     }
 }

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SwiftUI
 
 // MARK: - Live store boundary
 // The settings UI owns no UserDefaults keys. Conform the existing app settings object to this protocol
@@ -14,6 +15,7 @@ protocol SettingsBacking: AnyObject {
     var muteOtherAudio: Bool { get set }
     var indicator: IndicatorPlacement { get set }
     var indicatorStyle: IndicatorStyle { get set }
+    var appearance: AppearancePreference { get set }
 
     // Microphones — ordered priority; IN USE is first connected, not blindly index 0
     var microphones: [Microphone] { get }
@@ -56,6 +58,21 @@ protocol SettingsBacking: AnyObject {
     var installedModelVersions: [ASRModelVersion] { get }
     var activeModelVersion: ASRModelVersion { get set }
 
+    // Engine wizard (Option D Setup) — Step-2 tool-install attestation + routing primitives
+    /// Persisted Step-2 attestation ("I've installed the tool"). Machine-wide:
+    /// choosing a different model folder must not reset it.
+    var hasConfirmedHFCLIInstall: Bool { get set }
+    /// Whether a model-library bookmark is stored (resolves to a URL).
+    /// False on first run and when a stale bookmark was unresolvable.
+    var isModelLibraryConfigured: Bool { get }
+    /// Whether `modelFolder` exists on disk right now (FileManager-backed live).
+    var modelFolderExistsOnDisk: Bool { get }
+    /// Per-file present/missing entries for a version (same source as the
+    /// validator — never `requiredModelDirectoryNames`).
+    func modelFileManifest(for version: ASRModelVersion) -> [ASRModelFileEntry]
+    /// Free bytes on the model folder's volume, nil when unknown.
+    var engineFolderFreeBytes: Int64? { get }
+
     // Retention — Task 6 (K-57) opt-in crash recovery, default OFF
     var retentionEnabled: Bool { get set }
 
@@ -90,6 +107,35 @@ enum IndicatorPlacement: String, CaseIterable, Codable, Sendable {
              "topRight", "Top Right", "top_right",
              "topCenter", "Top Center", "top_center": return .topCenter
         default: return .topCenter
+        }
+    }
+}
+
+enum AppearancePreference: String, CaseIterable, Codable, Sendable {
+    case system, light, dark
+
+    var label: String {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+
+    static func migrating(fromStored raw: String?) -> AppearancePreference {
+        switch raw {
+        case "light": return .light
+        case "dark": return .dark
+        default: return .system
+        }
+    }
+
+    /// Nil = no override, the OS appearance shows through.
+    var overrideScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
         }
     }
 }

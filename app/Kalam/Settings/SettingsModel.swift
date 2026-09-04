@@ -6,6 +6,37 @@ enum MapStateTone: Equatable {
     case ok, neutral, warn, bad
 }
 
+/// Option D Setup wizard active step (one derived routing value drives the card).
+enum EngineSetupActiveStep: String, Equatable, Sendable {
+    case folder
+    case tool
+    case download
+    case done
+}
+
+/// Single derived wizard-routing value: which step is active, which steps are
+/// locked, the Setup header trailing + tone, and the pane lede variant.
+/// Step 1 is never locked; Steps 2–3 lock at 55% until their predecessor completes.
+struct EngineSetupRouting: Equatable, Sendable {
+    var activeStep: EngineSetupActiveStep
+    var isToolLocked: Bool
+    var isDownloadLocked: Bool
+    var headerTrailing: String
+    var headerTone: MapStateTone
+    var lede: String
+    /// The picked folder IS a model repo (guard callout at the Setup bottom).
+    var isRepoGuard: Bool
+}
+
+/// Disk-space readout for the S6 row: free bytes on the folder's volume plus
+/// the per-version download-size estimate (from `ASRModelVersion.modelSize`).
+struct EngineDiskSpace: Equatable, Sendable {
+    var freeBytes: Int64?
+    var neededDescription: String
+    /// `Needed ~450 MB · Free 410 MB` (free unknown → `Free unknown`).
+    var summary: String
+}
+
 /// Façade over `SettingsBacking`. Map/dive read derived attention from here only.
 @Observable
 @MainActor
@@ -64,6 +95,11 @@ final class SettingsModel {
     var indicatorStyle: IndicatorStyle {
         get { _ = revision; return store.indicatorStyle }
         set { store.indicatorStyle = newValue }
+    }
+
+    var appearance: AppearancePreference {
+        get { _ = revision; return store.appearance }
+        set { store.appearance = newValue }
     }
 
     var microphones: [Microphone] { _ = revision; return store.microphones }
@@ -210,6 +246,135 @@ final class SettingsModel {
     }
 
     func rescanEngine() { store.rescanEngine() }
+
+    // MARK: - Engine wizard (Option D Setup)
+
+    var hasConfirmedHFCLIInstall: Bool {
+        get { _ = revision; return store.hasConfirmedHFCLIInstall }
+        set { store.hasConfirmedHFCLIInstall = newValue }
+    }
+
+    /// Display-only: a stored bookmark URL exists AND that path does not exist
+    /// on disk (folder moved/renamed/deleted). Nothing persisted.
+    var isFolderMissingOnDisk: Bool {
+        _ = revision
+        return store.isModelLibraryConfigured && !store.modelFolderExistsOnDisk
+    }
+
+    func modelFileManifest(for version: ASRModelVersion) -> [ASRModelFileEntry] {
+        _ = revision
+        return store.modelFileManifest(for: version)
+    }
+
+    var engineDiskSpace: EngineDiskSpace {
+        _ = revision
+        let needed = store.selectedDownloadVersion.modelSize
+        let free = store.engineFolderFreeBytes
+        let freeText = free.map(Self.formatByteCount) ?? "unknown"
+        return EngineDiskSpace(
+            freeBytes: free,
+            neededDescription: needed,
+            summary: "Needed \(needed) · Free \(freeText)"
+        )
+    }
+
+    private static func formatByteCount(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
+    }
+
+    /// ONE derived wizard-routing value. Table:
+    /// - Step 1 active when the folder is not complete (first run, folder
+    ///   deleted, repo-guard picked, bookmark unresolvable) → Steps 2–3 locked.
+    /// - Step 2 active when folder complete and tool not confirmed → Step 3 locked.
+    /// - Step 3 active when folder complete and tool confirmed and engine is not
+    ///   verified (fresh setup AND post-Change re-activation).
+    /// - All collapsed when engine is verified (and the folder is loadable).
+    /// Re-derives on picker change: the picker writes `asrVersion`, which can
+    /// flip engine verified→missing, and every input below reads `revision`.
+    var setupStep: EngineSetupRouting {
+        _ = revision
+        let configured = store.isModelLibraryConfigured
+        let exists = store.modelFolderExistsOnDisk
+        let repoGuard = ASRModelVersion.allCases.map(\.repositoryFolderName)
+            .contains(store.modelFolder.lastPathComponent)
+        let folderComplete = configured && exists && !repoGuard
+        let toolDone = store.hasConfirmedHFCLIInstall
+        let size = store.selectedDownloadVersion.modelSize
+
+        if case .verified = store.engine, folderComplete {
+            let multi = store.installedModelVersions.count >= 2
+            return EngineSetupRouting(
+                activeStep: .done,
+                isToolLocked: false,
+                isDownloadLocked: false,
+                headerTrailing: "Verified",
+                headerTone: .ok,
+                lede: multi
+                    ? "Two models in this folder — pick which one Kalam loads."
+                    : "You supply the model and Kalam loads it locally on the Apple Neural Engine.",
+                isRepoGuard: false
+            )
+        }
+        if !folderComplete {
+            if configured && !exists {
+                return EngineSetupRouting(
+                    activeStep: .folder,
+                    isToolLocked: true,
+                    isDownloadLocked: true,
+                    headerTrailing: "Folder not found",
+                    headerTone: .bad,
+                    lede: "The chosen folder is gone. Pick it again or choose a new one — Kalam will verify automatically.",
+                    isRepoGuard: false
+                )
+            }
+            return EngineSetupRouting(
+                activeStep: .folder,
+                isToolLocked: true,
+                isDownloadLocked: true,
+                headerTrailing: "1 of 3 · \(size)",
+                headerTone: .neutral,
+                lede: "No model in this folder yet. 3 steps · ~5 min · Terminal once — Kalam verifies the folder automatically.",
+                isRepoGuard: repoGuard
+            )
+        }
+        if !toolDone {
+            return EngineSetupRouting(
+                activeStep: .tool,
+                isToolLocked: false,
+                isDownloadLocked: true,
+                headerTrailing: "2 of 3 · \(size)",
+                headerTone: .neutral,
+                lede: "Folder chosen. Install the tool, then download a model into it.",
+                isRepoGuard: false
+            )
+        }
+        if case .incomplete = store.engine {
+            let manifest = store.modelFileManifest(for: store.selectedDownloadVersion)
+            let total = manifest.count
+            let present = manifest.filter(\.isPresent).count
+            let header = total > 0 ? "Incomplete — \(present) of \(total)" : "Incomplete"
+            return EngineSetupRouting(
+                activeStep: .download,
+                isToolLocked: false,
+                isDownloadLocked: false,
+                headerTrailing: header,
+                headerTone: .warn,
+                lede: "This folder has part of a model. Run the command again — it skips files already on disk.",
+                isRepoGuard: false
+            )
+        }
+        return EngineSetupRouting(
+            activeStep: .download,
+            isToolLocked: false,
+            isDownloadLocked: false,
+            headerTrailing: "3 of 3 · \(size)",
+            headerTone: .neutral,
+            lede: "Tool confirmed. Pick how you dictate, then run one command in Terminal.",
+            isRepoGuard: false
+        )
+    }
 
     // MARK: - Cleanup counts
 

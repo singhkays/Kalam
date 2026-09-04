@@ -10,6 +10,7 @@ final class InMemorySettingsStore: SettingsBacking {
     var muteOtherAudio: Bool = true { didSet { ping() } }
     var indicator: IndicatorPlacement = .topCenter { didSet { ping() } }
     var indicatorStyle: IndicatorStyle = .machined { didSet { ping() } }
+    var appearance: AppearancePreference = .system { didSet { ping() } }
 
     var dictionaryLoadFailureNotice: String? { nil }
 
@@ -40,6 +41,42 @@ final class InMemorySettingsStore: SettingsBacking {
     var rules: [ReplacementRule] = [] { didSet { ping() } }
     var retentionEnabled: Bool = false { didSet { ping() } }
 
+    // MARK: - Engine wizard (Option D Setup) mirrors
+
+    var hasConfirmedHFCLIInstall: Bool = false { didSet { ping() } }
+    var isModelLibraryConfigured: Bool = false { didSet { ping() } }
+    var modelFolderExistsOnDisk: Bool = true { didSet { ping() } }
+    var engineFolderFreeBytes: Int64? = nil { didSet { ping() } }
+
+    private var _manifests: [ASRModelVersion: [ASRModelFileEntry]] = [:]
+
+    func modelFileManifest(for version: ASRModelVersion) -> [ASRModelFileEntry] {
+        _manifests[version] ?? []
+    }
+
+    /// Test setter: explicit per-file entries for a version.
+    func testSetManifest(_ entries: [ASRModelFileEntry], for version: ASRModelVersion) {
+        _manifests[version] = entries
+        ping()
+    }
+
+    /// Test setter: builds entries from the same `requiredModelFiles` source
+    /// the live manifest uses — first `presentCount` files present.
+    func testSetManifest(presentCount: Int, totalFor version: ASRModelVersion) {
+        let names = ModelSetupSupport.requiredModelFiles(for: version)
+        testSetManifest(
+            names.enumerated().map { ASRModelFileEntry(name: $0.element, isPresent: $0.offset < presentCount) },
+            for: version
+        )
+    }
+
+    /// Test setter: flip engine presence without touching the folder (mimics
+    /// the live picker coupling, where writing `asrVersion` flips engine).
+    func testSetEnginePresence(_ presence: EnginePresence) {
+        engine = presence
+        ping()
+    }
+
     private var _installed: [ASRModelVersion] = []
     var installedModelVersions: [ASRModelVersion] { _installed }
     var activeModelVersion: ASRModelVersion = .v2 { didSet { ping() } }
@@ -52,7 +89,7 @@ final class InMemorySettingsStore: SettingsBacking {
 
     private(set) var modelFolder: URL
     private(set) var engine: EnginePresence = .verified(
-        ModelInfo(name: "Parakeet v3", detail: "25+ languages · on this Mac")
+        ModelInfo(name: "Parakeet v3", detail: "25 European languages · on this Mac")
     )
 
     var releaseURL: URL = URL(string: "https://example.com/kalam/releases")!
@@ -213,9 +250,79 @@ final class InMemorySettingsStore: SettingsBacking {
     }
 
     /// Test helper: apply a chosen folder and mark presence.
+    /// Choosing a folder stores the bookmark (configured) and the folder
+    /// exists; it never touches the machine-wide tool attestation.
     func applyModelFolderForTesting(_ url: URL, presence: EnginePresence) {
         modelFolder = url
         engine = presence
+        isModelLibraryConfigured = true
+        modelFolderExistsOnDisk = true
         ping()
+    }
+
+    // MARK: - Option D wizard fixtures (7 D states)
+
+    /// D-Missing: first run — no bookmark, tool unconfirmed.
+    static func fixtureSetupMissingDefault() -> InMemorySettingsStore {
+        let s = InMemorySettingsStore()
+        s.testSetEnginePresence(.missing)
+        return s
+    }
+
+    /// D-Step 2: folder chosen (complete) but tool not yet confirmed.
+    static func fixtureSetupFolderChosen() -> InMemorySettingsStore {
+        let s = InMemorySettingsStore()
+        s.applyModelFolderForTesting(
+            URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Models"),
+            presence: .missing
+        )
+        return s
+    }
+
+    /// D-Incomplete: folder complete + tool confirmed, partial download (3 of 5).
+    static func fixtureSetupIncomplete() -> InMemorySettingsStore {
+        let s = fixtureSetupFolderChosen()
+        s.hasConfirmedHFCLIInstall = true
+        s.testSetInstalledVersions([.v2])
+        s.testSetEnginePresence(.incomplete)
+        s.testSetManifest(presentCount: 3, totalFor: .v2)
+        return s
+    }
+
+    /// D-Verified single: one model on disk, wizard collapses.
+    static func fixtureSetupVerifiedSingle() -> InMemorySettingsStore {
+        let s = fixtureSetupFolderChosen()
+        s.hasConfirmedHFCLIInstall = true
+        s.testSetInstalledVersions([.v2])
+        s.testSetEnginePresence(.verified(ModelInfo(name: "Parakeet v2", detail: "English-only · 5 of 5")))
+        s.testSetManifest(presentCount: 5, totalFor: .v2)
+        return s
+    }
+
+    /// D-Verified multi: two models on disk, wizard collapses.
+    static func fixtureSetupVerifiedMulti() -> InMemorySettingsStore {
+        let s = fixtureSetupVerifiedSingle()
+        s.testSetInstalledVersions([.v2, .v3])
+        return s
+    }
+
+    /// D-Folder-deleted: bookmark stored but path gone; tool stays confirmed.
+    static func fixtureSetupFolderDeleted() -> InMemorySettingsStore {
+        let s = fixtureSetupFolderChosen()
+        s.hasConfirmedHFCLIInstall = true
+        s.modelFolderExistsOnDisk = false
+        return s
+    }
+
+    /// D-Repo-guard: the repo folder itself was picked (not its parent).
+    static func fixtureSetupRepoGuard() -> InMemorySettingsStore {
+        let s = InMemorySettingsStore()
+        s.applyModelFolderForTesting(
+            URL(fileURLWithPath: NSHomeDirectory())
+                .appendingPathComponent("Models")
+                .appendingPathComponent(ASRModelVersion.v2.repositoryFolderName),
+            presence: .missing
+        )
+        return s
     }
 }

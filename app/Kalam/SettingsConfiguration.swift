@@ -11,6 +11,7 @@ enum GeneralSettingsKeys {
     static let escapeCancelsRecording = "general.escapeCancelsRecording"
     static let indicatorPlacementPreset = "general.indicatorPlacementPreset"
     static let indicatorStylePreset = "general.indicatorStylePreset"
+    static let appearanceMode = "general.appearanceMode"
     static let selectedInputUID = "audio.selectedInputDeviceUID"
     static let muteWhileRecording = "general.muteWhileRecording"
 }
@@ -22,6 +23,7 @@ struct GeneralSettingsConfiguration: Equatable {
         escapeCancelsRecording: false,
         indicatorPlacement: .topCenter,
         indicatorStyle: .machined,
+        appearanceMode: .system,
         muteWhileRecording: true
     )
 
@@ -30,6 +32,7 @@ struct GeneralSettingsConfiguration: Equatable {
     var escapeCancelsRecording: Bool
     var indicatorPlacement: IndicatorPlacement
     var indicatorStyle: IndicatorStyle
+    var appearanceMode: AppearancePreference
     var muteWhileRecording: Bool
 
     static func load(from defaults: UserDefaults = .standard) -> GeneralSettingsConfiguration {
@@ -45,6 +48,7 @@ struct GeneralSettingsConfiguration: Equatable {
             escapeCancelsRecording: bool(forKey: GeneralSettingsKeys.escapeCancelsRecording, defaults: defaults, fallback: Self.defaults.escapeCancelsRecording),
             indicatorPlacement: preset,
             indicatorStyle: style,
+            appearanceMode: .migrating(fromStored: defaults.string(forKey: GeneralSettingsKeys.appearanceMode)),
             muteWhileRecording: bool(forKey: GeneralSettingsKeys.muteWhileRecording, defaults: defaults, fallback: Self.defaults.muteWhileRecording)
         )
     }
@@ -55,6 +59,7 @@ struct GeneralSettingsConfiguration: Equatable {
         defaults.set(escapeCancelsRecording, forKey: GeneralSettingsKeys.escapeCancelsRecording)
         defaults.set(indicatorPlacement.rawValue, forKey: GeneralSettingsKeys.indicatorPlacementPreset)
         defaults.set(indicatorStyle.rawValue, forKey: GeneralSettingsKeys.indicatorStylePreset)
+        defaults.set(appearanceMode.rawValue, forKey: GeneralSettingsKeys.appearanceMode)
         defaults.set(muteWhileRecording, forKey: GeneralSettingsKeys.muteWhileRecording)
     }
 
