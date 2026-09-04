@@ -4,8 +4,9 @@ import SwiftUI
 // MARK: - Onboarding deck adaptive tokens (v3 adoption, Task 1)
 //
 // Deck-scoped semantic colors that resolve per appearance. The shared `Color.k*`
-// tokens in SettingsTokens.swift are static light-only literals and are also used
-// by the settings UI — this file deliberately does NOT touch them.
+// tokens in SettingsTokens.swift are likewise adaptive since v1.7 (same
+// NSColor-provider pattern, identical light values) and are also used by the
+// settings UI — this file deliberately does NOT touch them.
 //
 // Light values follow the landing-page design language (Option B, 2026-08-21):
 // the card IS the window ground (#FAFAF7, edge-to-edge) and the rail is the

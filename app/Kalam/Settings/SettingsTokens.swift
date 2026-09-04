@@ -2,15 +2,17 @@ import AppKit
 import CoreText
 import SwiftUI
 
-// MARK: - Color tokens (aligned to onboarding · 2026-08-13)
-// Light surfaces, inks, and status colors now follow kalam-onboarding.html.
-// The accent green (#1A5C3A) is the one constant — it was already identical.
+// MARK: - Color tokens (adaptive per appearance · v1.7 dark mode)
+// Same `Color.k*` names, now resolving per appearance via the NSColor-provider
+// pattern from OnboardingDeckTokens.adaptive. Light values are byte-identical to
+// the old static literals, so light-mode rendering is unchanged while
+// `.preferredColorScheme(.light)` is still forced. Dark values come verbatim
+// from the v1.7 mockup token table (kalam-compass-v1.7.html).
 //
-// Light:    paper FAFAF7 · panel FFFFFF · well F1F0EA · hair E5E5E1 · hair2 EFEEE9
-// Inks:     ink 1A1A18 · ink2 3D3C38 · ink3 6B6860   (ink3 passes WCAG AA, 5.32:1)
-// Status:   green 1A5C3A · warn 8A5610 · bad 983226  (+ soft backgrounds)
-// Shell:    shell 1A1A18 · shell2 141412 · shell inks F3EFE7 / D8D5CC / 8E8B82
-// Palette lab is archive only: compass-spec/palette-lab.html
+// Deliberate exceptions: `kGreenT` goes through `adaptiveWash` (alpha differs
+// per mode: 0.07 light / 0.14 dark), NOT `kGreen.opacity(0.07)`; the dead shell
+// tokens (`kShell*`, `kGreenBright`, `kHairOnShell`, `kEtched`, zero call sites
+// outside token files) stay exactly as-is.
 
 extension Color {
     init(hex: String) {
@@ -24,44 +26,62 @@ extension Color {
         )
     }
 
+    /// Resolve a dynamic NSColor-backed SwiftUI Color for the current appearance.
+    /// Internal (not private): Task 3 reuses these for wash/shadow twins.
+    static func adaptive(light: String, dark: String) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return NSColor(Color(hex: isDark ? dark : light))
+        })
+    }
+
+    /// Per-appearance wash: base hue token with a different alpha per mode.
+    /// Internal (not private): Task 3 reuses this for wash/shadow twins.
+    static func adaptiveWash(light: String, dark: String, lightAlpha: Double, darkAlpha: Double) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return NSColor(Color(hex: isDark ? dark : light)).withAlphaComponent(isDark ? darkAlpha : lightAlpha)
+        })
+    }
+
     // MARK: Light surfaces
     /// Card / window surface (onboarding card FAFAF7).
-    static let kPaper = Color(hex: "FAFAF7")
+    static let kPaper = adaptive(light: "FAFAF7", dark: "181816")
     /// Control fill — pure white, matching onboarding control fills.
-    static let kPanel = Color(hex: "FFFFFF")
+    static let kPanel = adaptive(light: "FFFFFF", dark: "20201C")
     /// Inset well (search, dictionary editor, sample strips).
-    static let kWell = Color(hex: "F1F0EA")
+    static let kWell = adaptive(light: "F1F0EA", dark: "131311")
     /// Fields/chips inside cards — same as panel.
     static let kControl = Color.kPanel
 
     // MARK: Ink ramp (WCAG AA safe at all sizes)
-    static let kInk = Color(hex: "1A1A18")
+    static let kInk = adaptive(light: "1A1A18", dark: "F5F4EE")
     /// Secondary text. Was #3D3C38 (F-02) — AppKit rendered it as near-ink.
     /// Lifted to the mockup's *visible* taupe so ledes/details match the HTML (Part 19).
-    static let kInk2 = Color(hex: "5B574C")
+    static let kInk2 = adaptive(light: "5B574C", dark: "D5D3C8")
     /// 5.32:1 on paper, 5.56:1 on panel — passes AA for normal text.
-    static let kInk3 = Color(hex: "6B6860")
+    static let kInk3 = adaptive(light: "6B6860", dark: "9E9C92")
 
     // MARK: Hairlines
-    static let kHair = Color(hex: "E5E5E1")
-    static let kHair2 = Color(hex: "EFEEE9")
+    static let kHair = adaptive(light: "E5E5E1", dark: "2C2C28")
+    static let kHair2 = adaptive(light: "EFEEE9", dark: "262622")
 
     // MARK: Accent (the one constant — matches onboarding exactly)
-    static let kGreen = Color(hex: "1A5C3A")
-    static let kGreenD = Color(hex: "0F3C24")
-    /// 7% green tint, matching onboarding rgba(26,92,58,.07).
-    static let kGreenT = Color.kGreen.opacity(0.07)
+    static let kGreen = adaptive(light: "1A5C3A", dark: "2A9D5C")
+    static let kGreenD = adaptive(light: "0F3C24", dark: "1E6B3E")
+    /// 7% green tint in light, 14% in dark (mockup body.dark wash row).
+    static let kGreenT = adaptiveWash(light: "1A5C3A", dark: "2A9D5C", lightAlpha: 0.07, darkAlpha: 0.14)
     /// Accent for dark shell surfaces (3.45:1 on kShell) — status dots, selected rows on shell.
     static let kGreenBright = Color(hex: "2E7D4F")
 
     // MARK: Status (from onboarding; passes AA on soft backgrounds)
-    static let kWarn = Color(hex: "8A5610")
-    static let kWarnSoft = Color(hex: "FAF0DF")
-    static let kBad = Color(hex: "983226")
-    static let kBadSoft = Color(hex: "F8E9E5")
+    static let kWarn = adaptive(light: "8A5610", dark: "E5A54B")
+    static let kWarnSoft = adaptive(light: "FAF0DF", dark: "2E2313")
+    static let kBad = adaptive(light: "983226", dark: "FB7185")
+    static let kBadSoft = adaptive(light: "F8E9E5", dark: "2E1A17")
 
     // MARK: Disabled
-    static let kOff = Color(hex: "D6D8DC")
+    static let kOff = adaptive(light: "D6D8DC", dark: "3C3C38")
 
     // MARK: Dark shell chrome (onboarding shell / rail)
     static let kShell = Color(hex: "1A1A18")
