@@ -196,7 +196,7 @@ struct DictionaryPane: View {
                 } label: {
                     Image(systemName: "pencil").frame(width: 24, height: 24)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(DictionaryRowActionStyle())
                 .accessibilityLabel("Edit rule \(rule.spoken)")
 
                 Button {
@@ -204,10 +204,10 @@ struct DictionaryPane: View {
                 } label: {
                     Image(systemName: "trash").frame(width: 24, height: 24)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(DictionaryRowActionStyle())
                 .accessibilityLabel("Remove rule \(rule.spoken)")
             }
-            .foregroundStyle(Color.kInk3.opacity(0.7))
+            .foregroundStyle(Color.kDact)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 13)
@@ -355,16 +355,28 @@ struct DictionaryPane: View {
 }
 
 struct SettingsSecondaryButtonStyle: ButtonStyle {
+    @State private var hovering = false
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(SettingsFont.body(12.5))
             .foregroundStyle(Color.kInk)
             .padding(.horizontal, 13)
             .padding(.vertical, 6)
-            .background(Color.kPanel)
+            .background(configuration.isPressed || hovering ? Color.kWell : Color.kPanel)
             .overlay(RoundedRectangle(cornerRadius: SettingsLayout.radiusButton).stroke(Color.kHair))
             .cornerRadius(SettingsLayout.radiusButton)
             .opacity(configuration.isPressed ? 0.85 : 1)
+            .onHover { hovering = $0 }
+    }
+}
+
+struct DictionaryRowActionStyle: ButtonStyle {
+    @State private var hovering = false
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(configuration.isPressed || hovering ? Color.kWell : Color.clear, in: Circle())
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .onHover { hovering = $0 }
     }
 }
 

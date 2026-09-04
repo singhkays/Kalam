@@ -121,10 +121,10 @@ struct EngineActiveCard: View {
                 }
                 .padding(SettingsLayout.diveRowPad)
                 .rowTopEdge(first: true)
-                .background(Color(hex: "FF9500").opacity(0.06))
+                .background(Color.kWarnWash)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color(hex: "FF9500").opacity(0.22), lineWidth: 1)
+                        .stroke(Color.kWarnWashEdge, lineWidth: 1)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .padding(.horizontal, 10)
@@ -182,7 +182,7 @@ struct EngineActiveCard: View {
         case .v2:
             return "English-only · 5 of 5 · ~450 MB"
         case .v3:
-            return "Multilingual · 25+ languages · 5 of 5 · ~480 MB"
+            return "Multilingual · 25 European languages · 5 of 5 · ~450 MB"
         case .tdtCtc110m:
             return "Lightweight · 5 of 5 · ~220 MB"
         }
@@ -221,13 +221,7 @@ struct EngineActiveCard: View {
                             .tracking(0.8)
                             .foregroundStyle(Color.kGreen)
                             .accessibilityLabel("On")
-                    } else if isIncompleteRow {
-                        Button("View") {
-                            // Opens GetTheModel popover — for now just View button per task
-                        }
-                        .buttonStyle(SettingsSecondaryButtonStyle())
-                        .accessibilityLabel("View command")
-                    } else {
+                    } else if !isIncompleteRow {
                         Button("Use") {
                             model.selectActiveModel(v)
                         }
@@ -236,10 +230,10 @@ struct EngineActiveCard: View {
                     }
                 }
                 .padding(EdgeInsets(top: 13, leading: 16, bottom: 13, trailing: 16))
-                .background(isSelected ? Color.kGreenT : (isIncompleteRow ? Color(hex: "FF9500").opacity(0.06) : Color.clear))
+                .background(isSelected ? Color.kGreenT : (isIncompleteRow ? Color.kWarnWash : Color.clear))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(isSelected ? Color.kGreen : (isIncompleteRow ? Color(hex: "FF9500").opacity(0.22) : Color.clear), lineWidth: 1)
+                        .stroke(isSelected ? Color.kGreen : (isIncompleteRow ? Color.kWarnWashEdge : Color.clear), lineWidth: 1)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .padding(.horizontal, 10)
@@ -300,7 +294,7 @@ struct EngineActiveCard: View {
         Group {
             if model.engine == .incomplete && model.activeInstalledVersions.count >= 2 {
                 // F6c alternate footer — keep Click Use string in file for task verification via comment, but render warn footer
-                Text("Incomplete models stay selectable for inspection but can’t be activated until 5/5. Use View to see the popover command again.")
+                Text("Incomplete models stay selectable for inspection but can’t be activated until 5/5. Finish the download in Step 3 above.")
                     .font(SettingsFont.body(11))
                     .foregroundStyle(Color.kInk3)
                     .fixedSize(horizontal: false, vertical: true)
@@ -346,7 +340,7 @@ struct EngineActiveCard: View {
     private func detail(_ v: ASRModelVersion) -> String {
         switch v {
         case .v2: return "English-only · 5 of 5 · ~450 MB"
-        case .v3: return "Multilingual · 25+ languages · 5 of 5 · ~480 MB"
+        case .v3: return "Multilingual · 25 European languages · 5 of 5 · ~450 MB"
         case .tdtCtc110m: return "Lightweight · 5 of 5 · ~220 MB"
         }
     }

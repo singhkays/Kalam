@@ -79,7 +79,7 @@ struct MapCard: View {
             .offset(y: hovering && !reduceMotion ? SettingsLayout.hoverLift : 0)
             .shadow(
                 // Light mockup grammar (v1.3): subtle resting shadow; hover elevation.
-                color: hovering ? Color.black.opacity(0.10) : SettingsLayout.cardRestShadow,
+                color: hovering ? Color.kHoverShadow : SettingsLayout.cardRestShadow,
                 radius: hovering ? SettingsLayout.hoverShadowRadius : SettingsLayout.cardRestShadowRadius,
                 y: hovering ? SettingsLayout.hoverShadowY : SettingsLayout.cardRestShadowY
             )

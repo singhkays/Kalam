@@ -231,7 +231,7 @@ struct CleanupPane: View {
         let post = String(messy[range.upperBound...])
         return Text(pre)
             + Text(mid)
-                .strikethrough(true, color: Color.kInk.opacity(0.45))
+                .strikethrough(true, color: Color.kStrike)
                 .foregroundStyle(Color.kInk3)
             + Text(post)
     }

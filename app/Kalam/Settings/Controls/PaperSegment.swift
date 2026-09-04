@@ -21,15 +21,8 @@ struct PaperSegment<T: Hashable>: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 5)
                         .frame(minWidth: 72)
-                        .background(on ? Color.kPanel : Color.clear)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: SettingsLayout.radiusChip)
-                                .stroke(on ? Color.kHair : Color.clear)
-                        )
-                        .cornerRadius(SettingsLayout.radiusChip)
-                        .shadow(color: on ? Color.black.opacity(0.06) : .clear, radius: 1, y: 1)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PaperSegmentOptionStyle(selected: on))
                 .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
             }
         }
@@ -42,5 +35,28 @@ struct PaperSegment<T: Hashable>: View {
         .cornerRadius(SettingsLayout.radiusButton)
         .opacity(disabled ? SettingsLayout.dimOpacity : 1)
         .allowsHitTesting(!disabled)
+    }
+}
+
+private struct PaperSegmentOptionStyle: ButtonStyle {
+    var selected: Bool
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            // Hover is a middle state: translucent panel reads against the
+            // well track without mimicking the solid selected chip.
+            .background(
+                selected ? Color.kPanel
+                    : (configuration.isPressed || hovering ? Color.kPanel.opacity(0.55) : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: SettingsLayout.radiusChip)
+                    .stroke(selected ? Color.kHair : Color.clear)
+            )
+            .cornerRadius(SettingsLayout.radiusChip)
+            .shadow(color: selected ? Color.kChipShadow : .clear, radius: 1, y: 1)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .onHover { hovering = $0 }
     }
 }

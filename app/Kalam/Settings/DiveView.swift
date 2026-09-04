@@ -18,7 +18,7 @@ struct DiveView: View {
                 .frame(width: SettingsLayout.contentsWidth)
 
                 Rectangle()
-                    .fill(Color.black.opacity(0.08)) // v1.3 rail divider (light grammar)
+                    .fill(Color.kRailHair) // mockup `.contents` divider; white @8% in dark (body.dark .contents)
                     .frame(width: 1)
 
                 SettingsScrollView {
@@ -67,8 +67,8 @@ struct DiveView: View {
         .padding(.horizontal, 18)
         .frame(height: SettingsLayout.bar)
         .overlay(alignment: .bottom) {
-            // Mockup `.bar` inset hairline: rgba(26,26,24,.10) (v1.3 light grammar).
-            Rectangle().fill(Color.black.opacity(0.10)).frame(height: 1)
+            // Mockup `.bar` inset hairline: rgba(26,26,24,.10) light, white @8% dark (body.dark .bar).
+            Rectangle().fill(Color.kBarHair).frame(height: 1)
         }
     }
 

@@ -83,6 +83,30 @@ extension Color {
     // MARK: Disabled
     static let kOff = adaptive(light: "D6D8DC", dark: "3C3C38")
 
+    // MARK: Washes + shadows with per-appearance twins (v1.7 Task 3)
+    // Light values are byte-identical to the old literals; dark values come
+    // verbatim from the mockup `body.dark` override block (kalam-compass-v1.7.html).
+    /// Resting card shadow: black @4% light / @35% dark (mockup `.mcard` / `body.dark .mcard`).
+    static let kRestShadow = adaptiveWash(light: "000000", dark: "000000", lightAlpha: 0.04, darkAlpha: 0.35)
+    /// Hover-lift shadow: black @10% light / @50% dark (mockup `.mcard:hover` / `body.dark .mcard:hover`).
+    static let kHoverShadow = adaptiveWash(light: "000000", dark: "000000", lightAlpha: 0.10, darkAlpha: 0.50)
+    /// Selected-chip shadow: black @6% light / @40% dark (mockup `.seg span.on` / `body.dark .seg span.on`).
+    static let kChipShadow = adaptiveWash(light: "000000", dark: "000000", lightAlpha: 0.06, darkAlpha: 0.40)
+    /// Bar hairline: black @10% light / white @8% dark (mockup `.bar` / `body.dark .bar`).
+    static let kBarHair = adaptiveWash(light: "000000", dark: "FFFFFF", lightAlpha: 0.10, darkAlpha: 0.08)
+    /// Contents rail divider: black @8% light / white @8% dark (mockup `.contents` / `body.dark .contents`).
+    static let kRailHair = adaptiveWash(light: "000000", dark: "FFFFFF", lightAlpha: 0.08, darkAlpha: 0.08)
+    /// Dictionary row actions (`dact`): ink3 @70% light / @80% dark (mockup `.dact` / `body.dark .dact`).
+    static let kDact = adaptiveWash(light: "6B6860", dark: "9E9C92", lightAlpha: 0.7, darkAlpha: 0.8)
+    /// Cleanup sample strikethrough: ink @45% both modes (mockup `.sample .txt s` + dark row).
+    static let kStrike = adaptiveWash(light: "1A1A18", dark: "F5F4EE", lightAlpha: 0.45, darkAlpha: 0.45)
+    /// Incomplete-model warn wash: orange @6% light / amber @8% dark (mockup `.repoWarn` / `body.dark .repoWarn`).
+    static let kWarnWash = adaptiveWash(light: "FF9500", dark: "E5A54B", lightAlpha: 0.06, darkAlpha: 0.08)
+    /// Warn wash edge: orange @22% light / amber @30% dark (mockup `.repoWarn` border rows).
+    static let kWarnWashEdge = adaptiveWash(light: "FF9500", dark: "E5A54B", lightAlpha: 0.22, darkAlpha: 0.30)
+    /// Repo-guard warn wash: orange @8% light / amber @8% dark (mockup `.repoWarn` background, verbatim).
+    static let kRepoWarn = adaptiveWash(light: "FF9500", dark: "E5A54B", lightAlpha: 0.08, darkAlpha: 0.08)
+
     // MARK: Dark shell chrome (onboarding shell / rail)
     static let kShell = Color(hex: "1A1A18")
     static let kShell2 = Color(hex: "141412")
@@ -473,7 +497,7 @@ extension View {
                 LinearGradient(
                     stops: [
                         .init(color: SettingsLayout.cardHeaderShadowColor, location: 0.0),
-                        .init(color: Color(hex: "28241C").opacity(0.0), location: 1.0)
+                        .init(color: .clear, location: 1.0)
                     ],
                     startPoint: .top,
                     endPoint: .bottom
@@ -522,7 +546,8 @@ enum SettingsLayout {
     // AppKit renders shadows heavier; the wash is a 5pt gradient (rowTopEdge(first:)) on the
     // FIRST row of each card — the mockup has no border under the header (`.row + .row` only).
     // Peak 0.10 — deliberately softer than the CSS 0.35 per user QA (2026-08-14, round 2).
-    static let cardHeaderShadowColor = Color(hex: "28241C").opacity(0.10)
+    // Dark twin 0.55 black per the mockup `body.dark .row.first` row (v1.7 Task 3).
+    static let cardHeaderShadowColor = Color.adaptiveWash(light: "28241C", dark: "000000", lightAlpha: 0.10, darkAlpha: 0.55)
     static let diveRowPad = EdgeInsets(top: 12, leading: 18, bottom: 12, trailing: 18)
     static let contentsRowPad = EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12)
     static let contentsIndexWidth: CGFloat = 18
@@ -539,8 +564,8 @@ enum SettingsLayout {
     static let wellSplitOpacity: Double = 0.22
     static let attentionHairOpacity: Double = 0.42
 
-    // MARK: Card shadow on paper (v1 light mockups)
-    static let cardRestShadow = Color.black.opacity(0.04)
+    // MARK: Card shadow on paper (v1 light mockups; dark twin per body.dark shadow rows)
+    static let cardRestShadow = Color.kRestShadow
     static let cardRestShadowRadius: CGFloat = 2
     static let cardRestShadowY: CGFloat = 1
 

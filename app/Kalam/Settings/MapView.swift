@@ -78,8 +78,8 @@ struct MapView: View {
         .padding(.horizontal, 18)
         .frame(height: SettingsLayout.bar)
         .overlay(alignment: .bottom) {
-            // Mockup `.bar` inset hairline: rgba(26,26,24,.10) (v1.3 light grammar).
-            Rectangle().fill(Color.black.opacity(0.10)).frame(height: 1)
+            // Mockup `.bar` inset hairline: rgba(26,26,24,.10) light, white @8% dark (body.dark .bar).
+            Rectangle().fill(Color.kBarHair).frame(height: 1)
         }
     }
 
@@ -159,7 +159,7 @@ struct MapFoot: View {
             .offset(y: hovering && !reduceMotion ? SettingsLayout.hoverLift : 0)
             .shadow(
                 // Light mockup grammar (v1.3): subtle resting shadow; hover elevation.
-                color: hovering ? Color.black.opacity(0.10) : SettingsLayout.cardRestShadow,
+                color: hovering ? Color.kHoverShadow : SettingsLayout.cardRestShadow,
                 radius: hovering ? SettingsLayout.hoverShadowRadius : SettingsLayout.cardRestShadowRadius,
                 y: hovering ? SettingsLayout.hoverShadowY : SettingsLayout.cardRestShadowY
             )
