@@ -43,8 +43,8 @@ struct SettingsRoot: View {
         }
         .toolbar(.hidden)
         .frame(width: SettingsLayout.window.width, height: SettingsLayout.window.height)
-        .background(Color.kPaper) // v1 light chrome (mockup grammar); F-04 dark shell parked (2026-08-13)
-        .preferredColorScheme(.light)
+        .background(Color.kPaper)
+        .preferredColorScheme(model.appearance.overrideScheme)
         .dynamicTypeSize(.large) // fixed utility chrome; mockups are not Dynamic Type
         .onAppear {
             SettingsFont.ensureBrandFontRegistered() // Instrument Serif (bundled)

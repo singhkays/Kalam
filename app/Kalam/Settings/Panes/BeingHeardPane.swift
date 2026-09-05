@@ -66,6 +66,7 @@ struct BeingHeardPane: View {
             toggleRow("Mute other audio while recording", "Pauses playback.", $model.muteOtherAudio)
             indicatorRow
             styleRow
+            appearanceRow
         }
         .background(Color.kPanel)
         .overlay(RoundedRectangle(cornerRadius: SettingsLayout.cardRadius).stroke(Color.kHair))
@@ -165,6 +166,26 @@ struct BeingHeardPane: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
+        }
+        .padding(SettingsLayout.diveRowPad)
+        .overlay(alignment: .top) { Divider().background(Color.kHair2) }
+    }
+
+    private var appearanceRow: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Appearance")
+                    .font(SettingsType.styleRowTitle)
+                    .compassTracking(SettingsType.trackRowTitle)
+                Text("System follows this Mac; Light and Dark pin it.")
+                    .font(SettingsType.styleRowDetail)
+                    .foregroundStyle(Color.kInk2)
+            }
+            Spacer()
+            PaperSegment(
+                selection: $model.appearance,
+                options: AppearancePreference.allCases.map { ($0, $0.label) }
+            )
         }
         .padding(SettingsLayout.diveRowPad)
         .overlay(alignment: .top) { Divider().background(Color.kHair2) }
