@@ -81,7 +81,12 @@ struct TriggerPane: View {
                 let lastIndex = ActivationMode.allCases.count - 1
                 ForEach(Array(ActivationMode.allCases.enumerated()), id: \.element) { index, mode in
                     let on = model.activation == mode
+                    // First row stands 8pt below the header in every state
+                    // (mockup `.radiolist` 4 + `.rrow` 4): the header-cast wash
+                    // then never abuts the ring, so both states read the same.
+                    // Static air only — never selection-dependent.
                     modeRowButton(mode: mode, on: on, bottomMargin: index == 0 ? 4 : (index == lastIndex ? 6 : 4))
+                        .padding(.top, index == 0 ? 8 : 0)
                 }
             }
             .background(Color.kPanel)
