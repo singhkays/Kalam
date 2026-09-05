@@ -74,11 +74,18 @@ struct TriggerPane: View {
                 let lastIndex = ActivationMode.allCases.count - 1
                 ForEach(Array(ActivationMode.allCases.enumerated()), id: \.element) { index, mode in
                     let on = model.activation == mode
-                    // No header wash on radio rows (mockup `.radiolist` uses
-                    // list padding for air): a selected row brings its own
-                    // ring, and wash-over-ring doubled the edge. A padding gap
-                    // instead would jump on every selection change.
-                    modeRowButton(mode: mode, on: on, bottomMargin: index == 0 ? 4 : (index == lastIndex ? 6 : 4))
+                    // Header wash on the first row — unless it is selected:
+                    // a ringed row already separates header from row, and
+                    // wash-over-ring doubled the edge. Paint-only switch, so
+                    // selection never shifts layout. (No wash exists in the
+                    // mockup radiolist either way; the v1.3.8 first-row
+                    // grammar governs plain rows.)
+                    let row = modeRowButton(mode: mode, on: on, bottomMargin: index == 0 ? 4 : (index == lastIndex ? 6 : 4))
+                    if index == 0 && !on {
+                        row.rowTopEdge(first: true)
+                    } else {
+                        row
+                    }
                 }
             }
             .background(Color.kPanel)
