@@ -39,10 +39,14 @@ struct TriggerPane: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Start recording with")
                             .font(SettingsType.styleRowTitle).compassTracking(SettingsType.trackRowTitle)
-                        Text(model.hotkey == nil ? "Pick a preset or record a shortcut." : "Pick a preset or record any shortcut.")
-                            .font(SettingsType.styleRowDetail)
-                            .foregroundStyle(Color.kInk2)
-                            .opacity(model.hotkey == nil ? 1 : 0)
+                        // Helper reserves no space once a key is set: an
+                        // opacity-hidden line still centers the title against
+                        // a two-line block and floats it above the chip.
+                        if model.hotkey == nil {
+                            Text("Pick a preset or record a shortcut.")
+                                .font(SettingsType.styleRowDetail)
+                                .foregroundStyle(Color.kInk2)
+                        }
                     }
                     Spacer()
                     HotkeyControl(hotkey: $model.hotkey)
