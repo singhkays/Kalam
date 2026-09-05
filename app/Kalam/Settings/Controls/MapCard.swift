@@ -16,17 +16,28 @@ struct MapCard: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
+                    if let n = destination.number {
+                        Text(n)
+                            .font(SettingsType.styleMapCardNum)
+                            .foregroundStyle(Color.kInk3)
+                    }
                     Text(destination.title)
                         .font(SettingsType.styleMapCardKicker)
                         .compassTracking(SettingsType.trackMapCardKicker)
                         .textCase(.uppercase)
                         .foregroundStyle(Color.kInk3)
                     Spacer()
-                    if let n = destination.number {
-                        Text(n)
-                            .font(SettingsType.styleMapCardNum)
-                            .foregroundStyle(Color.kInk3)
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(stateColor)
+                            .frame(width: 6, height: 6)
+                        Text(state.text)
+                            .font(SettingsType.styleMapCardState)
+                            .compassTracking(SettingsType.trackMonoState)
+                            .textCase(.uppercase)
+                            .foregroundStyle(stateLabelColor)
                     }
+                    .accessibilityHidden(true)
                 }
 
                 Text(title)
@@ -37,20 +48,6 @@ struct MapCard: View {
                     .padding(.top, isAttentionLarge ? 6 : 8)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(stateColor)
-                        .frame(width: 6, height: 6)
-                    Text(state.text)
-                        .font(SettingsType.styleMapCardState)
-                        .compassTracking(SettingsType.trackMonoState)
-                        .textCase(.uppercase)
-                        // Mockup (v1.3.2 Part 17): label is ink3; only the 6px dot carries tone.
-                        .foregroundStyle(stateLabelColor)
-                }
-                .padding(.top, 6)
-                .accessibilityHidden(true)
 
                 Text(description)
                     .font(SettingsFont.body(SettingsType.mapCardBody, weight: SettingsType.wLight))
