@@ -248,6 +248,53 @@ capitalization via preserveCase (default true), which is correct rule behavior, 
 
 ---
 
+## T23 — K-17 v1.7: dark-mode + Option 1 + badge gate (🧑 host Mac, needs human eyes)
+
+**What this checks:** the v1.7 stack (appearance override, adaptive k-tokens, Option 1
+map cards, onboarding-recipe badges) renders per `kalam-compass-v1.7.html` in dark with
+zero light-mode change, and touches nothing outside Settings chrome (no paste/AX/
+VoiceOver-string changes).
+
+**Setup:** fresh build at/after `613d543`. macOS light first, then macOS dark. Compass →
+Being Heard → Appearance segment (System/Light/Dark). v1.7 mockup open side by side
+(`app/docs/plans/kalam-compass-1.7/kalam-compass-v1.7.html`).
+
+**Steps:**
+1. **Appearance three-state (macOS light):** override System → renders light,
+   pixel-identical to the pre-v1.7 build (map + all six dives). Override Light → same.
+   Override Dark → matches the mockup dark map. Toggle live — instant re-theme, no
+   restart, no console errors.
+2. **Appearance follows OS (macOS dark):** override System → dark rendering; flip macOS
+   Control Center Light/Dark → the window follows without touching the segment.
+3. **All six dives + all seven Engine states in dark:** walk Being Heard / Trigger /
+   Cleanup / Dictionary / Engine / Updates under override Dark; drive the Engine dive
+   through all seven states (same manipulations as T17: empty/incomplete model folder,
+   mic denied, key unset, etc.). Each matches the v1.7 dark figures.
+4. **Segment hover in dark:** hover an unselected `PaperSegment` chip — panel-veil lift
+   only, no white flash, no stuck hover after the pointer leaves.
+5. **Option 1 headers in every attention state:** map cards (ready, engine-missing,
+   no-mic, no-key, two-problems-at-once) show number + kicker left, 6 px dot + status
+   text top-right; no mid-card status block; attention-large title sizing and `wide`
+   fill slot behave as before.
+6. **Badge side-by-side:** open onboarding Step 3 of 4 next to the settings Engine dive,
+   in light AND dark — step badges indistinguishable (done = system-green 18% wash +
+   checkmark; todo = quaternary disc + secondary number; locked = same disc dimmed by
+   the row's 55% opacity only).
+7. **VoiceOver unchanged:** VO the map + Engine dive — `MapCard` accessibility labels and
+   `Step N of 3` step labels announce exactly as in T16; no new unlabeled stops from
+   the header/badge rework.
+8. **Paste guard untouched (statement, no live test):** the v1.7 stack changes zero
+   paste/clipboard code paths — the clipboard-restore guard (restore only if
+   changeCount is unchanged AND content equals what Kalam wrote) stays covered by the
+   existing T2/T14 gates; re-verify only if a future diff touches `PasteService.swift`.
+
+**Expected (PASS):** all eight hold; light rendering identical to the pre-v1.7 build;
+dark matches the mockup modulo SwiftUI-vs-mockup AA.
+
+Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+
+---
+
 
 ---
 
