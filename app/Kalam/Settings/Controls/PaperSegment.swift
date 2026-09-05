@@ -46,7 +46,7 @@ private struct PaperSegmentOptionStyle: ButtonStyle {
         configuration.label
             // Hover is a middle state: translucent panel reads against the
             // well track without mimicking the solid selected chip. The wash
-            // is inset 1pt so it never touches a neighbor's edge — full-bleed
+            // is inset 3pt so it never touches a neighbor's edge — full-bleed
             // it visibly contested the selected chip's hairline + shadow.
             .background(
                 Group {
@@ -55,7 +55,7 @@ private struct PaperSegmentOptionStyle: ButtonStyle {
                     } else if configuration.isPressed || hovering {
                         RoundedRectangle(cornerRadius: SettingsLayout.radiusChip)
                             .fill(Color.kPanel.opacity(0.55))
-                            .padding(.horizontal, 1)
+                            .padding(.horizontal, 3)
                     }
                 }
             )
