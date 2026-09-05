@@ -24,17 +24,14 @@ struct EnginePane: View {
                 .padding(.top, 10)
                 .fixedSize(horizontal: false, vertical: true)
 
-            EngineWhereItLivesCard(model: model)
-                .padding(.top, 18)
-
             EngineGetTheModelCard(model: model)
-                .padding(.top, 14)
+                .padding(.top, 18)
 
             EngineActiveCard(model: model)
                 .padding(.top, 18)
 
             VStack(alignment: .leading, spacing: 7) {
-                Text("Why there is no download")
+                Text("Why there is no auto download")
                     .font(SettingsFont.mono(9))
                     .tracking(2.0)
                     .textCase(.uppercase)
@@ -78,14 +75,12 @@ struct EnginePane: View {
         .onAppear { model.rescanEngine() }
     }
 
+    /// Lede variants come from the Task 1 wizard routing: first-run Missing
+    /// carries the work estimate (`3 steps · ~5 min · Terminal once`, D1);
+    /// the other states carry their own D-figure lede. Setup header trailing
+    /// likewise comes from routing (`model.setupStep.headerTrailing`,
+    /// rendered inside the wizard card).
     private var lede: String {
-        switch model.engine {
-        case .verified:
-            return "You supply the model and Kalam loads it locally on the Apple Neural Engine."
-        case .missing:
-            return "No model in this folder yet. Copy the Parakeet files here and return when they are in place."
-        case .incomplete:
-            return "This folder is not a full model yet. Copy the remaining Parakeet files and return when they are in place."
-        }
+        model.setupStep.lede
     }
 }
