@@ -10,6 +10,12 @@ struct DictionaryPane: View {
     @State private var draftMode: MatchMode = .smart
     @FocusState private var searchFocused: Bool
 
+    private enum FieldFocus: Hashable {
+        case spoken, typed
+    }
+
+    @FocusState private var focusedField: FieldFocus?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("The dictionary")
@@ -95,9 +101,11 @@ struct DictionaryPane: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .background(Color.kPaper)
+                // Single focus mark (the halo below): the edge stays hair in
+                // both states — edge-plus-halo read as a doubled outline.
                 .overlay(
                     RoundedRectangle(cornerRadius: SettingsLayout.searchRadius)
-                        .stroke(searchFocused ? Color.kGreen.opacity(0.4) : Color.kHair2)
+                        .stroke(Color.kHair2)
                 )
                 .cornerRadius(SettingsLayout.searchRadius)
                 .overlay(
@@ -233,8 +241,8 @@ struct DictionaryPane: View {
     private func form(isNew: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
-                field("When you say", text: $draftSpoken, placeholder: "siobhan")
-                field("Kalam types", text: $draftTyped, placeholder: "Siobhan")
+                field("When you say", text: $draftSpoken, placeholder: "siobhan", id: .spoken)
+                field("Kalam types", text: $draftTyped, placeholder: "Siobhan", id: .typed)
             }
 
             HStack {
@@ -314,7 +322,7 @@ struct DictionaryPane: View {
         }
     }
 
-    private func field(_ label: String, text: Binding<String>, placeholder: String) -> some View {
+    private func field(_ label: String, text: Binding<String>, placeholder: String, id: FieldFocus) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
                 .font(SettingsType.styleDictLabel)
@@ -325,10 +333,16 @@ struct DictionaryPane: View {
                 .textFieldStyle(.plain)
                 // D.4: real words type in SF Pro, not mono (only spoken tokens read as code).
                 .font(SettingsType.styleDictField)
+                .focused($focusedField, equals: id)
                 .padding(8)
                 .background(Color.kPanel)
                 .overlay(RoundedRectangle(cornerRadius: SettingsLayout.radiusButton).stroke(Color.kHair))
                 .cornerRadius(SettingsLayout.radiusButton)
+                // Same single-halo focus mark as search (edge stays hair).
+                .overlay(
+                    RoundedRectangle(cornerRadius: SettingsLayout.radiusButton + 3)
+                        .stroke(Color.kGreen.opacity(focusedField == id ? 0.08 : 0), lineWidth: 6)
+                )
         }
         .frame(maxWidth: .infinity)
     }
