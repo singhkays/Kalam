@@ -124,7 +124,10 @@ struct DictionaryPane: View {
                 }
             }
             .padding(13)
-            .overlay(alignment: .bottom) { Divider().background(Color.kHair) }
+            // House grammar: headers cast shadow, never borders — the wash
+            // lives in the header's own padding so it shows regardless of
+            // what follows (rules, notice, form).
+            .overlay(alignment: .bottom) { HeaderWash() }
 
             if let notice = model.dictionaryLoadFailureNotice {
                 // dictionary data-loss edge cases: corrupt-store recovery notice — quiet ink-3 line (no error chrome).
@@ -148,14 +151,23 @@ struct DictionaryPane: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(18)
             } else {
-                ForEach(filtered) { rule in
+                ForEach(Array(filtered.enumerated()), id: \.element.id) { index, rule in
                     switch phase {
                     case .editing(let id) where id == rule.id:
                         form(isNew: false)
                     case .confirmingDelete(let id) where id == rule.id:
                         confirmDelete(rule)
                     default:
-                        ruleRow(rule)
+                        // First row carries no divider when it directly follows
+                        // the search header (pure browsing) — the header wash
+                        // owns that boundary. Paint-only: no layout shift.
+                        // Every other state keeps dividers (form/notice need
+                        // separation from the rules below them).
+                        ruleRow(
+                            rule,
+                            hideTopDivider: phase == .browsing
+                                && model.dictionaryLoadFailureNotice == nil && index == 0
+                        )
                     }
                 }
             }
@@ -174,7 +186,7 @@ struct DictionaryPane: View {
         return "\(filtered.count) of \(model.rules.count)"
     }
 
-    private func ruleRow(_ rule: ReplacementRule) -> some View {
+    private func ruleRow(_ rule: ReplacementRule, hideTopDivider: Bool = false) -> some View {
         HStack(spacing: 10) {
             Text("“\(rule.spoken)”")
                 .font(SettingsType.styleDictSpoken)
@@ -211,7 +223,11 @@ struct DictionaryPane: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 13)
-        .overlay(alignment: .top) { Divider().background(Color.kHair) }
+        .overlay(alignment: .top) {
+            if !hideTopDivider {
+                Divider().background(Color.kHair)
+            }
+        }
     }
 
     private func form(isNew: Bool) -> some View {
