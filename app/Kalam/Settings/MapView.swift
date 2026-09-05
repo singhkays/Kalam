@@ -153,7 +153,7 @@ struct MapFoot: View {
             .background(Color.kPanel)
             .overlay(
                 RoundedRectangle(cornerRadius: SettingsLayout.cardRadius)
-                    .stroke(hovering ? Color.kGreen.opacity(0.35) : Color.kHair)
+                    .stroke(hovering ? Color.kHoverEdge : Color.kHair)
             )
             .cornerRadius(SettingsLayout.cardRadius)
             .offset(y: hovering && !reduceMotion ? SettingsLayout.hoverLift : 0)

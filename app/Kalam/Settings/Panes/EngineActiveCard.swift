@@ -399,10 +399,10 @@ private struct EngineActiveChip: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(present ? Color.kGreen.opacity(0.08) : Color.kBadSoft)
+        .background(present ? Color.kChipWash : Color.kBadSoft)
         .overlay(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(present ? Color.kGreen.opacity(0.20) : Color.kBad.opacity(0.12), lineWidth: 1)
+                .stroke(present ? Color.kChipEdge : Color.kChipMissEdge, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .accessibilityLabel("\(name) \(present ? "present" : "missing")")

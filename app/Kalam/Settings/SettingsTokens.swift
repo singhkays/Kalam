@@ -106,6 +106,24 @@ extension Color {
     static let kWarnWashEdge = adaptiveWash(light: "FF9500", dark: "E5A54B", lightAlpha: 0.22, darkAlpha: 0.30)
     /// Repo-guard warn wash: orange @8% light / amber @8% dark (mockup `.repoWarn` background, verbatim).
     static let kRepoWarn = adaptiveWash(light: "FF9500", dark: "E5A54B", lightAlpha: 0.08, darkAlpha: 0.08)
+    // MARK: Selected/active green overlays (Task 3b — mockup dark alphas run
+    // hotter than light; a shared hue with per-mode alpha, mirroring kGreenT)
+    /// Active wizard step wash: green @3% light / luminous @6% dark (mockup `.wstep.active` + dark row).
+    static let kStepWash = adaptiveWash(light: "1A5C3A", dark: "2A9D5C", lightAlpha: 0.03, darkAlpha: 0.06)
+    /// Selected model-card wash: green @5% / luminous @10% (mockup `.scard.sel` + dark row).
+    static let kCardWash = adaptiveWash(light: "1A5C3A", dark: "2A9D5C", lightAlpha: 0.05, darkAlpha: 0.10)
+    /// Selected model-card edge: green @22% / luminous @35% (mockup `.scard.sel` border + dark row).
+    static let kCardEdge = adaptiveWash(light: "1A5C3A", dark: "2A9D5C", lightAlpha: 0.22, darkAlpha: 0.35)
+    /// Present-file chip wash: green @8% / luminous @14% (mockup `.chip.ok` + dark row).
+    static let kChipWash = adaptiveWash(light: "1A5C3A", dark: "2A9D5C", lightAlpha: 0.08, darkAlpha: 0.14)
+    /// Present-file chip edge: green @20% / luminous @25% (mockup `.chip.ok` border + dark row).
+    static let kChipEdge = adaptiveWash(light: "1A5C3A", dark: "2A9D5C", lightAlpha: 0.20, darkAlpha: 0.25)
+    /// Missing-file chip edge: bad @12% light (as-built, do not touch) / luminous rose @25% dark (mockup `.chip.miss` dark row).
+    static let kChipMissEdge = adaptiveWash(light: "983226", dark: "FB7185", lightAlpha: 0.12, darkAlpha: 0.25)
+    /// Map hover edge: green @35% / luminous @45% (mockup `.mcard:hover` + `body.dark .grid .mcard:hover`).
+    static let kHoverEdge = adaptiveWash(light: "1A5C3A", dark: "2A9D5C", lightAlpha: 0.35, darkAlpha: 0.45)
+    /// Attention edge: green @42% / luminous @50% (mockup `.mcard.attention` + dark row; replaces `attentionHairOpacity` at call sites below).
+    static let kAttentionEdge = adaptiveWash(light: "1A5C3A", dark: "2A9D5C", lightAlpha: 0.42, darkAlpha: 0.50)
 
     // MARK: Dark shell chrome (onboarding shell / rail)
     static let kShell = Color(hex: "1A1A18")

@@ -195,7 +195,7 @@ struct EngineGetTheModelCard: View {
         }
         .padding(SettingsLayout.diveRowPad)
         .rowTopEdge(first: number == 1)
-        .background(state == .active ? Color.kGreen.opacity(0.03) : Color.clear)
+        .background(state == .active ? Color.kStepWash : Color.clear)
         .opacity(state == .locked ? 0.55 : 1)
     }
 
@@ -486,10 +486,10 @@ struct EngineGetTheModelCard: View {
             // measurement quirk can ever reopen a height split. Floor-only:
             // larger Dynamic Type still grows past it, so nothing clips.
             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .background(isSelected ? Color.kGreen.opacity(0.05) : Color.kPanel)
+            .background(isSelected ? Color.kCardWash : Color.kPanel)
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(isSelected ? Color.kGreen.opacity(0.22) : Color.kHair2, lineWidth: 1)
+                    .stroke(isSelected ? Color.kCardEdge : Color.kHair2, lineWidth: 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
@@ -941,10 +941,10 @@ private struct SetupFileChip: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(present ? Color.kGreen.opacity(0.08) : Color.kBadSoft)
+        .background(present ? Color.kChipWash : Color.kBadSoft)
         .overlay(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(present ? Color.kGreen.opacity(0.20) : Color.kBad.opacity(0.12), lineWidth: 1)
+                .stroke(present ? Color.kChipEdge : Color.kChipMissEdge, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .accessibilityLabel("\(name) \(present ? "present" : "missing")")

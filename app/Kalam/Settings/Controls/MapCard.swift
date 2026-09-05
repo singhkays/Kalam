@@ -111,10 +111,10 @@ struct MapCard: View {
 
     private var borderColor: Color {
         if isAttentionLarge {
-            return Color.kGreen.opacity(SettingsLayout.attentionHairOpacity)
+            return Color.kAttentionEdge
         }
         if hovering {
-            return Color.kGreen.opacity(0.35)
+            return Color.kHoverEdge
         }
         return Color.kHair
     }
