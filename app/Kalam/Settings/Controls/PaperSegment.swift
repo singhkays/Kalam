@@ -45,10 +45,19 @@ private struct PaperSegmentOptionStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             // Hover is a middle state: translucent panel reads against the
-            // well track without mimicking the solid selected chip.
+            // well track without mimicking the solid selected chip. The wash
+            // is inset 1pt so it never touches a neighbor's edge — full-bleed
+            // it visibly contested the selected chip's hairline + shadow.
             .background(
-                selected ? Color.kPanel
-                    : (configuration.isPressed || hovering ? Color.kPanel.opacity(0.55) : Color.clear)
+                Group {
+                    if selected {
+                        Color.kPanel
+                    } else if configuration.isPressed || hovering {
+                        RoundedRectangle(cornerRadius: SettingsLayout.radiusChip)
+                            .fill(Color.kPanel.opacity(0.55))
+                            .padding(.horizontal, 1)
+                    }
+                }
             )
             .overlay(
                 RoundedRectangle(cornerRadius: SettingsLayout.radiusChip)
