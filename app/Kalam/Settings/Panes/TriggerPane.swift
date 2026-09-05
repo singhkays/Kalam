@@ -37,7 +37,7 @@ struct TriggerPane: View {
 
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Key")
+                        Text("Start recording with")
                             .font(SettingsType.styleRowTitle).compassTracking(SettingsType.trackRowTitle)
                         Text(model.hotkey == nil ? "Pick a preset or record a shortcut." : "Pick a preset or record any shortcut.")
                             .font(SettingsType.styleRowDetail)
@@ -67,42 +67,15 @@ struct TriggerPane: View {
                 }
                 .padding(SettingsLayout.diveCardHeaderPad)
 
+                let lastIndex = ActivationMode.allCases.count - 1
                 ForEach(Array(ActivationMode.allCases.enumerated()), id: \.element) { index, mode in
                     let on = model.activation == mode
-                    Button {
-                        model.activation = mode
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(mode.title)
-                                    .font(SettingsType.styleRowTitle).compassTracking(SettingsType.trackRowTitle)
-                                    .foregroundStyle(Color.kInk)
-                                Text(mode.detail)
-                                    .font(SettingsFont.body(11.5))
-                                    .foregroundStyle(Color.kInk2)
-                                    .multilineTextAlignment(.leading)
-                            }
-                            Spacer()
-                            if on {
-                                Text("ON")
-                                    .font(SettingsFont.mono(10))
-                                    .tracking(0.8)
-                                    .foregroundStyle(Color.kGreen)
-                            }
-                        }
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 13)
-                        .background(on ? Color.kGreenT : Color.clear)
-                        // Green ring on the selected row — onboarding .opt.on grammar (F-10).
-                        .overlay(
-                            RoundedRectangle(cornerRadius: SettingsLayout.radiusButton)
-                                .stroke(on ? Color.kGreen : Color.clear)
-                        )
-                        .cornerRadius(SettingsLayout.radiusButton)
-                        .contentShape(Rectangle())
+                    if index == 0 {
+                        modeRowButton(mode: mode, on: on, bottomMargin: 4)
+                            .rowTopEdge(first: true)
+                    } else {
+                        modeRowButton(mode: mode, on: on, bottomMargin: index == lastIndex ? 6 : 4)
                     }
-                    .buttonStyle(.plain)
-                    .rowTopEdge(first: index == 0)
                 }
             }
             .background(Color.kPanel)
@@ -110,6 +83,49 @@ struct TriggerPane: View {
             .cornerRadius(SettingsLayout.cardRadius)
             .padding(.top, 18)
         }
+    }
+
+    @ViewBuilder
+    private func modeRowButton(mode: ActivationMode, on: Bool, bottomMargin: CGFloat) -> some View {
+        Button {
+            model.activation = mode
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(mode.title)
+                        .font(SettingsType.styleRowTitle).compassTracking(SettingsType.trackRowTitle)
+                        .foregroundStyle(Color.kInk)
+                    Text(mode.detail)
+                        .font(SettingsFont.body(11.5))
+                        .foregroundStyle(Color.kInk2)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer()
+                if on {
+                    Text("ON")
+                        .font(SettingsFont.mono(10))
+                        .tracking(0.8)
+                        .foregroundStyle(Color.kGreen)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 13)
+            .background(on ? Color.kGreenT : Color.clear)
+            // Green ring on the selected row — onboarding .opt.on grammar (F-10).
+            // Inset from the card edge by the outer margins (mockup `.rrow`
+            // grammar shared with the Engine Active list); the ring never
+            // touches the card border.
+            .overlay(
+                RoundedRectangle(cornerRadius: SettingsLayout.radiusButton)
+                    .stroke(on ? Color.kGreen : Color.clear)
+            )
+            .cornerRadius(SettingsLayout.radiusButton)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 10)
+        .padding(.top, 4)
+        .padding(.bottom, bottomMargin)
     }
 
     private var lede: String {
