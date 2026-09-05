@@ -110,8 +110,8 @@ struct DictionaryPane: View {
                 .cornerRadius(SettingsLayout.searchRadius)
                 .overlay(
                     // Focus ring: 3 pt halo @ 8% green (mockup `.search:focus-within`).
-                    RoundedRectangle(cornerRadius: SettingsLayout.searchRadius + 3)
-                        .stroke(Color.kGreen.opacity(searchFocused ? 0.08 : 0), lineWidth: 6)
+                    RoundedRectangle(cornerRadius: SettingsLayout.searchRadius + 1.5)
+                        .stroke(Color.kGreen.opacity(searchFocused ? 0.08 : 0), lineWidth: 3)
                 )
 
                 Text(countLabel)
@@ -340,8 +340,8 @@ struct DictionaryPane: View {
                 .cornerRadius(SettingsLayout.radiusButton)
                 // Same single-halo focus mark as search (edge stays hair).
                 .overlay(
-                    RoundedRectangle(cornerRadius: SettingsLayout.radiusButton + 3)
-                        .stroke(Color.kGreen.opacity(focusedField == id ? 0.08 : 0), lineWidth: 6)
+                    RoundedRectangle(cornerRadius: SettingsLayout.radiusButton + 1.5)
+                        .stroke(Color.kGreen.opacity(focusedField == id ? 0.08 : 0), lineWidth: 3)
                 )
         }
         .frame(maxWidth: .infinity)
