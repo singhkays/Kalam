@@ -511,19 +511,30 @@ extension View {
     func rowTopEdge(first: Bool = false) -> some View {
         overlay(alignment: .top) {
             if first {
-                LinearGradient(
-                    stops: [
-                        .init(color: SettingsLayout.cardHeaderShadowColor, location: 0.0),
-                        .init(color: .clear, location: 1.0)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 3.5) // v1.3.8g: 5 → 3.5pt per user QA ("tiny bit smaller")
+                HeaderWash()
             } else {
                 Divider().background(Color.kHair2)
             }
         }
+    }
+}
+
+/// The header shadow wash as a standalone layer. `rowTopEdge` paints it as an
+/// overlay (above everything — right for plain rows). Ringed first rows
+/// (Trigger radio, Engine incomplete) paint it as a *background* layer beneath
+/// their tint instead, so the ring stays crisp on top and the shadow still
+/// shows in every selection state. Single source for both orderings.
+struct HeaderWash: View {
+    var body: some View {
+        LinearGradient(
+            stops: [
+                .init(color: SettingsLayout.cardHeaderShadowColor, location: 0.0),
+                .init(color: .clear, location: 1.0)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .frame(height: 3.5) // v1.3.8g: 5 → 3.5pt per user QA ("tiny bit smaller")
     }
 }
 
