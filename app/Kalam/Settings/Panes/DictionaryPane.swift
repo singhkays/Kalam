@@ -100,6 +100,10 @@ struct DictionaryPane: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
+                // Whole well is tappable: padding zones and overlay rims
+                // otherwise deaden edge clicks instead of focusing the field.
+                .contentShape(Rectangle())
+                .onTapGesture { searchFocused = true }
                 .background(Color.kPaper)
                 // Single focus mark (the halo below): the edge stays hair in
                 // both states — edge-plus-halo read as a doubled outline.
@@ -335,6 +339,8 @@ struct DictionaryPane: View {
                 .font(SettingsType.styleDictField)
                 .focused($focusedField, equals: id)
                 .padding(8)
+                .contentShape(Rectangle())
+                .onTapGesture { focusedField = id }
                 .background(Color.kPanel)
                 .overlay(RoundedRectangle(cornerRadius: SettingsLayout.radiusButton).stroke(Color.kHair))
                 .cornerRadius(SettingsLayout.radiusButton)
