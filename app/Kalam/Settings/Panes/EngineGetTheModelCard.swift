@@ -202,23 +202,16 @@ struct EngineGetTheModelCard: View {
     private func stepBadge(number: Int, state: WizardStepState) -> some View {
         ZStack {
             Circle()
-                .fill(state == .complete ? Color.kGreen.opacity(0.12) : Color.kWell)
+                .fill(state == .complete ? AnyShapeStyle(Color.green.opacity(0.18)) : AnyShapeStyle(.quaternary))
                 .frame(width: 28, height: 28)
-                .overlay(
-                    Circle()
-                        .stroke(
-                            state == .complete ? Color.kGreen.opacity(0.18) : Color.kHair,
-                            lineWidth: 1
-                        )
-                )
             if state == .complete {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Color.kGreen)
+                    .font(.footnote.bold())
+                    .foregroundStyle(.green)
             } else {
                 Text("\(number)")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Color.kInk3)
+                    .font(.footnote.bold())
+                    .foregroundStyle(state == .locked ? .tertiary : .secondary)
             }
         }
         // Fixed badge box: numeral-vs-check glyph metrics must never alter
