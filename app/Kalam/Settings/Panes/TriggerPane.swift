@@ -74,12 +74,11 @@ struct TriggerPane: View {
                 let lastIndex = ActivationMode.allCases.count - 1
                 ForEach(Array(ActivationMode.allCases.enumerated()), id: \.element) { index, mode in
                     let on = model.activation == mode
-                    if index == 0 {
-                        modeRowButton(mode: mode, on: on, bottomMargin: 4)
-                            .rowTopEdge(first: true)
-                    } else {
-                        modeRowButton(mode: mode, on: on, bottomMargin: index == lastIndex ? 6 : 4)
-                    }
+                    // No header wash on radio rows (mockup `.radiolist` uses
+                    // list padding for air): a selected row brings its own
+                    // ring, and wash-over-ring doubled the edge. A padding gap
+                    // instead would jump on every selection change.
+                    modeRowButton(mode: mode, on: on, bottomMargin: index == 0 ? 4 : (index == lastIndex ? 6 : 4))
                 }
             }
             .background(Color.kPanel)

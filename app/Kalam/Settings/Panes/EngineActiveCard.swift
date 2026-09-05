@@ -120,7 +120,8 @@ struct EngineActiveCard: View {
                     // Keeping "View" for parity with F6c incomplete rows — spec says without selector (or with warn), so we leave no trailing selector.
                 }
                 .padding(SettingsLayout.diveRowPad)
-                .rowTopEdge(first: true)
+                // No header wash: the warn edge ring below already separates
+                // header from row (same wash-over-ring stacking as Trigger).
                 .background(Color.kWarnWash)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
