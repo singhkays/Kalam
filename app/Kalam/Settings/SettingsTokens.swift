@@ -563,8 +563,9 @@ enum SettingsLayout {
     // AppKit renders shadows heavier; the wash is a 5pt gradient (rowTopEdge(first:)) on the
     // FIRST row of each card — the mockup has no border under the header (`.row + .row` only).
     // Peak 0.10 — deliberately softer than the CSS 0.35 per user QA (2026-08-14, round 2).
-    // Dark twin 0.55 black per the mockup `body.dark .row.first` row (v1.7 Task 3).
-    static let cardHeaderShadowColor = Color.adaptiveWash(light: "28241C", dark: "000000", lightAlpha: 0.10, darkAlpha: 0.55)
+    // Dark twin 0.28 black (softened from the mockup's 0.55 `body.dark .row.first`:
+    // AppKit renders the wash heavier and 0.55 read as a hard black line in dark).
+    static let cardHeaderShadowColor = Color.adaptiveWash(light: "28241C", dark: "000000", lightAlpha: 0.10, darkAlpha: 0.28)
     static let diveRowPad = EdgeInsets(top: 12, leading: 18, bottom: 12, trailing: 18)
     static let contentsRowPad = EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12)
     static let contentsIndexWidth: CGFloat = 18

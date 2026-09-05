@@ -67,6 +67,7 @@ struct CleanupPane: View {
                     PaperToggle(isOn: $model.cleanupEnabled)
                 }
                 .padding(SettingsLayout.diveRowPad)
+                .rowTopEdge(first: true)
             }
             .background(Color.kPanel)
             .overlay(RoundedRectangle(cornerRadius: SettingsLayout.cardRadius).stroke(Color.kHair))
@@ -132,6 +133,7 @@ struct CleanupPane: View {
                     )
                 }
                 .padding(SettingsLayout.diveRowPad)
+                .rowTopEdge(first: true)
             }
             .background(Color.kPanel)
             .overlay(RoundedRectangle(cornerRadius: SettingsLayout.cardRadius).stroke(Color.kHair))
