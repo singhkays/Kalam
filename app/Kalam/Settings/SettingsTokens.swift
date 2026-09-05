@@ -5,9 +5,8 @@ import SwiftUI
 // MARK: - Color tokens (adaptive per appearance · v1.7 dark mode)
 // Same `Color.k*` names, now resolving per appearance via the NSColor-provider
 // pattern from OnboardingDeckTokens.adaptive. Light values are byte-identical to
-// the old static literals, so light-mode rendering is unchanged while
-// `.preferredColorScheme(.light)` is still forced. Dark values come verbatim
-// from the v1.7 mockup token table (kalam-compass-v1.7.html).
+// the old static literals, so light-mode rendering is unchanged. Dark values
+// come verbatim from the v1.7 mockup token table (kalam-compass-v1.7.html).
 //
 // Deliberate exceptions: `kGreenT` goes through `adaptiveWash` (alpha differs
 // per mode: 0.07 light / 0.14 dark), NOT `kGreen.opacity(0.07)`; the dead shell
