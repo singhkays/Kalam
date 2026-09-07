@@ -1440,6 +1440,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 
                 let text = try await self.asr.transcribe(samples: normalized)
                 let asrEnd = CFAbsoluteTimeGetCurrent()
+                let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                // Empty/whitespace-only ASR output is NOT committed: committing it
+                // would enter `inserting` with no paste leg to rest it, leaving the
+                // machine stuck in inserting and causing the next start to preserve
+                // a phantom ("Earlier transcript ready" for nothing). Route to
+                // done(empty) instead so the next session starts from rest.
+                guard !trimmedText.isEmpty else {
+                    // User-visible no-paste outcome: one info line with the reason.
+                    self.logger.info("Empty transcription result; skipping paste")
+                    await MainActor.run {
+                        if self.pendingPreserveSession == stopSessionID {
+                            self.pendingPreserveSession = nil
+                        }
+                        self.dispatchLifecycle(.asrFinished(session: stopSessionID, result: .empty), context: "asr-empty")
+                        self.overlay.showInfoAndAutoHide("No speech detected")
+                    }
+                    return
+                }
                 // K-52 P0 #1 (manual-gate finding): text is COMMITTED the
                 // moment ASR returns it — even if the task was cancelled
                 // during the await. The old `guard !Task.isCancelled` here
@@ -1459,15 +1477,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard !Task.isCancelled,
                       recordingSessions.isCurrentSession(stopSessionID) else { return }
                 stageMark("asr")
-                let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                
-                guard !trimmedText.isEmpty else {
-                    self.logger.info("Empty transcription result; skipping paste")
-                    await MainActor.run {
-                        self.overlay.showInfoAndAutoHide("No speech detected")
-                    }
-                    return
-                }
                 
                 // off-main post-processing: snapshot Sendable inputs on-main, run cleanup+ITN+
                 // dictionary OFF the main actor, keep only counts in logs.
@@ -1490,6 +1499,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
                 let post = await Self.postProcessTranscript(processor, trimmedText)
                 stageMark("cleanup+itn+dictionary")
+                // Post-processing (cleanup gate fallback aside) can empty the text:
+                // rest the machine instead of stranding it in inserting.
+                if post.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    // User-visible no-paste outcome: one info line with the reason.
+                    self.logger.info("Post-processed transcript empty; skipping paste")
+                    await MainActor.run {
+                        self.dispatchLifecycle(.insertSucceeded(session: stopSessionID, outcome: .empty), context: "post-empty")
+                        self.overlay.showInfoAndAutoHide("No speech detected")
+                    }
+                    return
+                }
                 // K-55: record verdict and surface degraded banner exactly once
                 self.validationGateStore.record(post.gateVerdict)
                 let gateReason: String
@@ -1745,18 +1765,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // has not landed yet (interrupt during the ASR await), record
                 // the intent — `fulfillPendingPreservation` completes it when
                 // the task returns with text despite being cancelled.
+                // Defense-in-depth for the empty-transcript phantom: whitespace-only
+                // commits are never materialized and never arm a notice.
                 if let committed = committedTranscript, committed.session == session {
-                    heldTranscript = committed.text
-                    heldTranscriptTargetPID = committed.targetPID
-                    heldTranscriptSession = session
+                    if committed.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        if heldTranscriptSession == session {
+                            heldTranscript = nil
+                            heldTranscriptTargetPID = nil
+                            heldTranscriptSession = nil
+                        }
+                        if pendingPreserveSession == session {
+                            pendingPreserveSession = nil
+                        }
+                    } else {
+                        heldTranscript = committed.text
+                        heldTranscriptTargetPID = committed.targetPID
+                        heldTranscriptSession = session
+                        switch notice {
+                        case .now, .deferredUntilSettled:
+                            pendingHeldNotice = true
+                        case .never:
+                            break
+                        }
+                    }
                 } else {
                     pendingPreserveSession = session
-                }
-                switch notice {
-                case .now, .deferredUntilSettled:
-                    pendingHeldNotice = true
-                case .never:
-                    break
+                    switch notice {
+                    case .now, .deferredUntilSettled:
+                        pendingHeldNotice = true
+                    case .never:
+                        break
+                    }
                 }
             case .cancelWork:
                 transcriptionTask?.cancel()
@@ -1779,10 +1818,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func fulfillPendingPreservation(session: SessionID) {
         guard pendingPreserveSession == session,
               let committed = committedTranscript, committed.session == session else { return }
+        // Empty commits (whitespace-only) never become a hold — clear the intent.
+        guard !committed.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            pendingPreserveSession = nil
+            return
+        }
         pendingPreserveSession = nil
         heldTranscript = committed.text
         heldTranscriptTargetPID = committed.targetPID
         heldTranscriptSession = session
+        // Rare + user-visible (a held chip follows): info, not gated.
         logger.info("Lifecycle deferred preserve fulfilled session=\(String(session.uuidString.prefix(8)), privacy: .public)")
         // Surface the chip now if the machine is at rest; otherwise defer to
         // the next settle (a newer session may still own the overlay — its
@@ -1801,7 +1846,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func settlePendingHeldNotice() {
         guard pendingHeldNotice, lifecycle.phase == nil else { return }
         pendingHeldNotice = false
-        guard heldTranscript != nil else { return }
+        guard let held = heldTranscript,
+              !held.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            // Drop phantom holds (empty/whitespace) instead of surfacing a chip.
+            if heldTranscript != nil {
+                heldTranscript = nil
+                heldTranscriptTargetPID = nil
+                heldTranscriptSession = nil
+            }
+            return
+        }
         let promisedName = NSRunningApplication(processIdentifier: heldTranscriptTargetPID ?? 0)?.localizedName
             ?? NSWorkspace.shared.frontmostApplication?.localizedName
             ?? "the frontmost app"
@@ -1843,7 +1897,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the promised app quit entirely does the paste go to the current frontmost —
     /// the user's click is then the conscious choice of destination.
     private func pasteHeldTranscript() {
-        guard let text = heldTranscript else { return }
+        guard let text = heldTranscript,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let promisedPID = heldTranscriptTargetPID
         let ownerSession = heldTranscriptSession
         heldTranscript = nil
