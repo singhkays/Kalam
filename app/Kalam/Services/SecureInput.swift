@@ -32,7 +32,7 @@ enum SecureInput {
         let mainPort: mach_port_t = kIOMainPortDefault
         let entry = IORegistryEntryFromPath(mainPort, "IOService:/IOResources/IOConsoleUsers")
         guard entry != MACH_PORT_NULL else {
-            logger.debug("SecureInput probe: IOConsoleUsers entry not found")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("SecureInput probe: IOConsoleUsers entry not found") }
             return nil
         }
         defer { IOObjectRelease(entry) }
@@ -40,7 +40,7 @@ enum SecureInput {
         var props: Unmanaged<CFMutableDictionary>?
         let result = IORegistryEntryCreateCFProperties(entry, &props, kCFAllocatorDefault, 0)
         guard result == KERN_SUCCESS, let dict = props?.takeRetainedValue() as? [String: Any] else {
-            logger.debug("SecureInput probe: failed to read properties")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("SecureInput probe: failed to read properties") }
             return nil
         }
 
@@ -79,7 +79,7 @@ enum SecureInput {
             if let pidNum = dict[key] as? Int, pidNum != 0 { return pid_t(pidNum) }
         }
 
-        logger.debug("SecureInput probe: no secure PID found in IOConsoleUsers")
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("SecureInput probe: no secure PID found in IOConsoleUsers") }
         return nil
     }
 

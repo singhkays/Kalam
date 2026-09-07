@@ -153,13 +153,13 @@ final class PasteService {
             return false
         }()
         if shouldForcePaste {
-            Self.logger.info("AppQuirks forcePaste skip Tier-1 bundleID=\(frontmostBundleID ?? "nil", privacy: .public)")
+            if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AppQuirks forcePaste skip Tier-1 bundleID=\(frontmostBundleID ?? "nil", privacy: .public)") }
         } else if let app = frontmostApp {
             switch strategies.resolveFocusedElement(app) {
             case .success(let res):
                 tier1Element = res.element
             case .failure(let err):
-                Self.logger.debug("Tier-1 resolve failed: \(err.reason, privacy: .public) — will try global legs")
+                if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Tier-1 resolve failed: \(err.reason, privacy: .public) — will try global legs") }
                 tier1Element = nil
             }
         }
@@ -191,14 +191,14 @@ final class PasteService {
             if overrideMs > 0 {
                 let sec = Float(overrideMs) / 1000.0
                 strategies.setMessagingTimeout(element, sec)
-                Self.logger.info("Per-element verify timeout override ms=\(overrideMs, privacy: .public)")
+                if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Per-element verify timeout override ms=\(overrideMs, privacy: .public)") }
             }
             let verified = await performVerifiedAXInsert(element: element, text: text)
             if verified {
-                Self.logger.info("Paste succeeded via Accessibility (verified)")
+                if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via Accessibility (verified)") }
                 return
             } else {
-                Self.logger.info("AX verification failed (Electron lie / timeout) → fall through to global legs after frontmost re-check")
+                if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AX verification failed (Electron lie / timeout) → fall through to global legs after frontmost re-check") }
             }
         }
 
@@ -215,7 +215,7 @@ final class PasteService {
 
         // Global legs: CGEvent unicode → pasteboard+CmdV
         if strategies.postUnicodeText(text) {
-            Self.logger.info("Paste succeeded via CGEvent unicode")
+            if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via CGEvent unicode") }
             return
         }
 
@@ -238,14 +238,14 @@ final class PasteService {
         try Task.checkCancellation()
 
         if pidPostingEnabled, let preferPid, strategies.postCmdVToPid(preferPid) {
-            Self.logger.info("Paste succeeded via PID-posted Cmd+V pid=\(preferPid, privacy: .public)")
+            if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via PID-posted Cmd+V pid=\(preferPid, privacy: .public)") }
             outcome = .cmdV
             return
         } else if pidPostingEnabled, preferPid != nil {
             Self.logger.warning("PID-posted Cmd+V refused; falling back to global post")
         }
         if strategies.postCmdV() {
-            Self.logger.info("Paste succeeded via Cmd+V")
+            if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via Cmd+V") }
             outcome = .cmdV
             return
         }
@@ -257,7 +257,7 @@ final class PasteService {
             throw PasteServiceError.pasteExecutionFailed(reason: error)
         }
 
-        Self.logger.info("Paste succeeded via Accessibility (fallback)")
+        if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via Accessibility (fallback)") }
         outcome = .accessibility
     }
 
@@ -284,11 +284,11 @@ final class PasteService {
         }
         // AppQuirks check for captured element's PID
         if let pid = strategies.axGetPid(element), AppQuirks.shouldForcePaste(pid: pid) {
-            Self.logger.info("AppQuirks forcePaste for captured element pid=\(pid, privacy: .public) — refusing Tier-1, caller should fallback")
+            if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AppQuirks forcePaste for captured element pid=\(pid, privacy: .public) — refusing Tier-1, caller should fallback") }
             throw PasteServiceError.pasteExecutionFailed(reason: "AppQuirks forcePaste — Tier-1 skipped for captured element")
         }
         if let bundle = strategies.frontmostBundleID(), AppQuirks.shouldForcePaste(bundleID: bundle) {
-            Self.logger.info("AppQuirks forcePaste for frontmost bundle \(bundle, privacy: .public)")
+            if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AppQuirks forcePaste for frontmost bundle \(bundle, privacy: .public)") }
             throw PasteServiceError.pasteExecutionFailed(reason: "AppQuirks forcePaste")
         }
         // Per-element timeout override for captured path as well.
@@ -299,7 +299,7 @@ final class PasteService {
         }
         let verified = await performVerifiedAXInsert(element: element, text: text)
         if verified {
-            Self.logger.info("Paste succeeded via captured-element Accessibility insert (verified)")
+            if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via captured-element Accessibility insert (verified)") }
             return
         }
         // Fallback to legacy insert for compatibility (still verified via same element)
@@ -307,7 +307,7 @@ final class PasteService {
             Self.logger.warning("Captured-element paste failed: \(error, privacy: .public)")
             throw PasteServiceError.pasteExecutionFailed(reason: error)
         }
-        Self.logger.info("Paste succeeded via captured-element Accessibility insert (fallback)")
+        if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via captured-element Accessibility insert (fallback)") }
     }
 
     /// Where a transcript should be pasted (record-time paste target capture).
@@ -375,7 +375,7 @@ final class PasteService {
                   pasteboard.string(forType: .string) == insertedState.text
             else {
                 guard attempt < maxAttempts else {
-                    Self.logger.info("Clipboard restore skipped: pasteboard no longer matches Kalam's write")
+                    if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Clipboard restore skipped: pasteboard no longer matches Kalam's write") }
                     return
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + retryInterval) {
@@ -384,7 +384,7 @@ final class PasteService {
                 return
             }
             snapshot.restore(to: pasteboard)
-            Self.logger.info("Clipboard restored after paste")
+            if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Clipboard restored after paste") }
         }
 
         if delay > 0 {
@@ -439,7 +439,7 @@ final class PasteService {
         let before = strategies.getElementValue(element)
         let setResult = strategies.axSetSelectedText(element, text)
         guard setResult == .success else {
-            Self.logger.debug("AX SET failed with \(setResult.debugName, privacy: .public)")
+            if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AX SET failed with \(setResult.debugName, privacy: .public)") }
             return false
         }
         // Poll for verification.
@@ -448,22 +448,22 @@ final class PasteService {
             if Task.isCancelled { return false }
             if let after = strategies.getElementValue(element) {
                 if after == text {
-                    Self.logger.debug("AX verification succeeded poll=\(i, privacy: .public)")
+                    if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AX verification succeeded poll=\(i, privacy: .public)") }
                     return true
                 }
                 if after != before {
                     // Value changed but not to expected — keep polling; some apps update async.
                     // Continue to next poll unless it's the last.
                     if after.contains(text) {
-                        Self.logger.debug("AX verification contains text poll=\(i, privacy: .public)")
+                        if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AX verification contains text poll=\(i, privacy: .public)") }
                         return true
                     }
                 } else {
-                    Self.logger.debug("AX verification unchanged poll=\(i, privacy: .public) before=\(before ?? "nil", privacy: .public)")
+                    if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AX verification unchanged poll=\(i, privacy: .public) before=\(before ?? "nil", privacy: .public)") }
                 }
             } else {
                 // Unreadable — trust SET succeeded (graceful for non-standard fields)
-                Self.logger.debug("AX verification unreadable poll=\(i, privacy: .public) — trusting SET")
+                if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AX verification unreadable poll=\(i, privacy: .public) — trusting SET") }
                 return true
             }
         }
@@ -529,7 +529,7 @@ final class PasteService {
             return false
         }
         if utf16Array.count > 200 {
-            Self.logger.info("CGEvent unicode skipped due to length=\(utf16Array.count)")
+            if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("CGEvent unicode skipped due to length=\(utf16Array.count)") }
             return false
         }
 

@@ -107,7 +107,7 @@ final class CAFStreamWriter: @unchecked Sendable {
         guard !isClosed else { return }
         isClosed = true
         try fileHandle.close()
-        Self.logger.info("CAFStreamWriter closed url=\(self.url.lastPathComponent, privacy: .public) totalSamples=\(self.totalSamples, privacy: .public) durationMs=\(Int(Double(self.totalSamples)/self.sampleRate*1000), privacy: .public)")
+        Self.logger.debug("CAFStreamWriter closed url=\(self.url.lastPathComponent, privacy: .public) totalSamples=\(self.totalSamples, privacy: .public) durationMs=\(Int(Double(self.totalSamples)/self.sampleRate*1000), privacy: .public)")
     }
 
     deinit {

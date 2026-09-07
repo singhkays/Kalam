@@ -48,9 +48,10 @@ final class WarmEnginePool: @unchecked Sendable {
                 AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
             },
             currentDeviceProvider: {
+                // Hot path (prewarm/refill/take): single enumeration, no
+                // normalize — normalize enumerates again and spams logs.
                 let config = MicrophonePriorityConfiguration.load()
-                let normalized = MicrophoneDeviceService.normalize(config: config)
-                let candidates = MicrophoneDeviceService.mergedPriorityList(config: normalized)
+                let candidates = MicrophoneDeviceService.mergedPriorityList(config: config)
                     .filter(\.isAvailable)
                 return candidates.first?.uid
             },
@@ -85,12 +86,12 @@ final class WarmEnginePool: @unchecked Sendable {
     /// (MainActor) for test determinism; production factory does `prepare()` only.
     func prewarm(for deviceUID: String?) {
         guard permissionCheck() else {
-            logger.debug("WarmEnginePool prewarm skipped: mic permission not authorized")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("WarmEnginePool prewarm skipped: mic permission not authorized") }
             return
         }
         let target = deviceUID ?? currentDeviceProvider()
         if let s = spare, s.deviceUID == target {
-            logger.debug("WarmEnginePool prewarm skipped: already fresh for uid=\(target ?? "nil", privacy: .public)")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("WarmEnginePool prewarm skipped: already fresh for uid=\(target ?? "nil", privacy: .public)") }
             return
         }
         do {
@@ -100,7 +101,7 @@ final class WarmEnginePool: @unchecked Sendable {
                 engine.stop()
             }
             spare = PreparedGraph(deviceUID: target, engine: engine)
-            logger.info("WarmEnginePool spare READY uid=\(target ?? "nil", privacy: .public)")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("WarmEnginePool spare READY uid=\(target ?? "nil", privacy: .public)") }
         } catch {
             logger.warning("WarmEnginePool prewarm failed errorSummary=\((error as NSError).domain)#\((error as NSError).code, privacy: .public)")
         }
@@ -118,11 +119,11 @@ final class WarmEnginePool: @unchecked Sendable {
     func take(for deviceUID: String?) -> PreparedGraph? {
         guard let s = spare else { return nil }
         guard s.deviceUID == deviceUID else {
-            logger.debug("WarmEnginePool take stale: spare uid=\(s.deviceUID ?? "nil", privacy: .public) requested=\(deviceUID ?? "nil", privacy: .public) — nil")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("WarmEnginePool take stale: spare uid=\(s.deviceUID ?? "nil", privacy: .public) requested=\(deviceUID ?? "nil", privacy: .public) — nil") }
             return nil
         }
         spare = nil
-        logger.info("WarmEnginePool take consumed uid=\(deviceUID ?? "nil", privacy: .public) — scheduling refill")
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("WarmEnginePool take consumed uid=\(deviceUID ?? "nil", privacy: .public) — scheduling refill") }
         scheduleRebuild()
         return s
     }
@@ -145,7 +146,7 @@ final class WarmEnginePool: @unchecked Sendable {
         pendingRebuild?.cancel()
         pendingRebuild = nil
         lock.unlock()
-        logger.info("WarmEnginePool invalidated reason=\(reason, privacy: .public) hadSpare=\(hadSpare, privacy: .public)")
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("WarmEnginePool invalidated reason=\(reason, privacy: .public) hadSpare=\(hadSpare, privacy: .public)") }
         scheduleRebuild()
     }
 
@@ -161,7 +162,7 @@ final class WarmEnginePool: @unchecked Sendable {
             self.pendingRebuild = nil
             self.lock.unlock()
             guard self.permissionCheck() else {
-                self.logger.debug("WarmEnginePool rebuild skipped: not authorized")
+                if KalamDiagnosticFlags.verboseAudio { self.logger.debug("WarmEnginePool rebuild skipped: not authorized") }
                 return
             }
             let target = self.currentDeviceProvider()
@@ -170,7 +171,7 @@ final class WarmEnginePool: @unchecked Sendable {
                 let engine = try self.engineFactory(target)
                 if engine.isRunning { engine.stop() }
                 self.spare = PreparedGraph(deviceUID: target, engine: engine)
-                self.logger.info("WarmEnginePool rebuilt spare uid=\(target ?? "nil", privacy: .public)")
+                if KalamDiagnosticFlags.verboseAudio { self.logger.debug("WarmEnginePool rebuilt spare uid=\(target ?? "nil", privacy: .public)") }
             } catch {
                 self.logger.warning("WarmEnginePool rebuild failed errorSummary=\((error as NSError).domain)#\((error as NSError).code, privacy: .public)")
             }
@@ -185,8 +186,7 @@ final class WarmEnginePool: @unchecked Sendable {
     private static func uid(for deviceID: AudioDeviceID?, provider: () -> String?) -> String? {
         guard let deviceID else { return nil }
         let config = MicrophonePriorityConfiguration.load()
-        let normalized = MicrophoneDeviceService.normalize(config: config)
-        let candidates = MicrophoneDeviceService.mergedPriorityList(config: normalized)
+        let candidates = MicrophoneDeviceService.mergedPriorityList(config: config)
         if let match = candidates.first(where: { $0.deviceID == deviceID }) {
             return match.uid
         }
@@ -224,7 +224,9 @@ final class WarmEnginePool: @unchecked Sendable {
             return st == noErr ? def : nil
         }()
         if let bound, let applied = AudioRecorder.shrinkDeviceRingBuffer(deviceID: bound) {
-            Logger(subsystem: "singhkays.Kalam", category: "WarmEnginePool").info("Warm pool ring applied frames=\(applied, privacy: .public)")
+            if KalamDiagnosticFlags.verboseAudio {
+                Logger(subsystem: "singhkays.Kalam", category: "WarmEnginePool").debug("Warm pool ring applied frames=\(applied, privacy: .public)")
+            }
         }
         let fmt = input.outputFormat(forBus: 0)
         guard fmt.channelCount > 0, fmt.sampleRate > 0 else {

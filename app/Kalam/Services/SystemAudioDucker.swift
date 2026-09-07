@@ -38,7 +38,7 @@ final class SystemAudioDucker {
         guard GeneralSettingsConfiguration.load().muteWhileRecording else { return }
         
         duckingActive = true
-        logger.info("Muting system volume for recording")
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("Muting system volume for recording") }
         
         let deviceID = getDefaultOutputDevice()
         guard deviceID != kAudioObjectUnknown else { return }
@@ -52,7 +52,7 @@ final class SystemAudioDucker {
     func stopDucking() {
         guard duckingActive else { return }
         duckingActive = false
-        logger.info("Restoring system volume after recording")
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("Restoring system volume after recording") }
         
         guard let savedVolume = preDuckingVolume else { return }
         let deviceID = getDefaultOutputDevice()
@@ -97,7 +97,7 @@ final class SystemAudioDucker {
         )
         
         guard AudioObjectHasProperty(deviceID, &propertyAddress) else {
-            logger.info("Device does not support VirtualMainVolume")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("Device does not support VirtualMainVolume") }
             return nil
         }
         

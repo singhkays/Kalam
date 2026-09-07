@@ -56,7 +56,7 @@ final class CustomDictionaryManager: ObservableObject {
     func apply(to text: String) -> (String, Int) {
         let (out, count) = compiled.apply(to: text)
         if count > 0 {
-            logger.info("Custom dictionary applied replacements=\(count), outputLength=\(out.count)")
+            logger.debug("Custom dictionary applied replacements=\(count), outputLength=\(out.count)")
         }
         return (out, count)
     }
@@ -156,7 +156,7 @@ final class CustomDictionaryManager: ObservableObject {
         debounceWork = nil
         save()
         recompile()
-        logger.info("Custom dictionary immediate save triggered")
+        logger.debug("Custom dictionary immediate save triggered")
     }
 
     func entriesDidChange() {

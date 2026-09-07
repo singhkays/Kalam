@@ -31,10 +31,10 @@ enum SilenceTrimmer {
         guard !samples.isEmpty else { return samples }
 
         let maxAmplitude = samples.map { abs($0) }.max() ?? 0
-        logger.info("Trimming audio maxAmplitude=\(maxAmplitude, privacy: .public)")
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("Trimming audio maxAmplitude=\(maxAmplitude, privacy: .public)") }
 
         if maxAmplitude < 0.00001 {
-            logger.info("Audio is silent below amplitude threshold")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("Audio is silent below amplitude threshold") }
             return []
         }
 
@@ -72,7 +72,7 @@ enum SilenceTrimmer {
         let noiseFloorDb = percentile(energiesDb, p: 0.05)
         let startThresholdDb = noiseFloorDb + startMarginDb
         let stopThresholdDb = noiseFloorDb + stopMarginDb
-        logger.info("Silence thresholds noiseFloorDb=\(noiseFloorDb, privacy: .public) startThresholdDb=\(startThresholdDb, privacy: .public) stopThresholdDb=\(stopThresholdDb, privacy: .public)")
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("Silence thresholds noiseFloorDb=\(noiseFloorDb, privacy: .public) startThresholdDb=\(startThresholdDb, privacy: .public) stopThresholdDb=\(stopThresholdDb, privacy: .public)") }
 
         // Scan the buffer to extract multiple speech segments, dropping long silences
         let padWins = max(0, (padMs + windowMs - 1) / windowMs)
@@ -112,10 +112,10 @@ enum SilenceTrimmer {
         }
 
         if segments.isEmpty {
-            logger.info("No speech detected after endpointing")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("No speech detected after endpointing") }
             // Conservative fallback: send full audio if it looks speech-y
             if maxAmplitude > 0.001 {
-                logger.info("Returning full audio for ASR fallback")
+                if KalamDiagnosticFlags.verboseAudio { logger.debug("Returning full audio for ASR fallback") }
                 return Plan(ranges: [], fellBack: true)
             }
             return nil
@@ -173,15 +173,15 @@ enum SilenceTrimmer {
             dynamicMinKeepRatio = fallbackMinKeepRatio
         }
 
-        logger.info("Trim decision segments=\(segments.count, privacy: .public) padWins=\(padWins, privacy: .public) keptSamples=\(trimmedCount, privacy: .public) trimmedMs=\(Int(trimmedDur * 1000), privacy: .public) originalMs=\(Int(originalDur * 1000), privacy: .public) keepRatioPercent=\(Int(keepRatio * 100), privacy: .public)")
-        logger.info("Trim fallback thresholds minMs=\(Int(dynamicMinSeconds * 1000), privacy: .public) minKeepRatioPercent=\(Int(dynamicMinKeepRatio * 100), privacy: .public)")
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("Trim decision segments=\(segments.count, privacy: .public) padWins=\(padWins, privacy: .public) keptSamples=\(trimmedCount, privacy: .public) trimmedMs=\(Int(trimmedDur * 1000), privacy: .public) originalMs=\(Int(originalDur * 1000), privacy: .public) keepRatioPercent=\(Int(keepRatio * 100), privacy: .public)") }
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("Trim fallback thresholds minMs=\(Int(dynamicMinSeconds * 1000), privacy: .public) minKeepRatioPercent=\(Int(dynamicMinKeepRatio * 100), privacy: .public)") }
 
         let shouldFallback =
         (originalDur >= 1.2 && trimmedDur < dynamicMinSeconds) ||
         (keepRatio < dynamicMinKeepRatio)
 
         if trimmedCount <= 0 || shouldFallback {
-            logger.info("Falling back to full audio clip")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("Falling back to full audio clip") }
             return Plan(ranges: [], fellBack: true)
         }
 
@@ -208,10 +208,10 @@ enum SilenceTrimmer {
         guard !samples.isEmpty else { return samples }
 
         let maxAmplitude = samples.map { abs($0) }.max() ?? 0
-        logger.info("Trimming audio maxAmplitude=\(maxAmplitude, privacy: .public)")
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("Trimming audio maxAmplitude=\(maxAmplitude, privacy: .public)") }
 
         if maxAmplitude < 0.00001 {
-            logger.info("Audio is silent below amplitude threshold")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("Audio is silent below amplitude threshold") }
             return []
         }
 

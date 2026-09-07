@@ -72,7 +72,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         static let defaultPasteDelayShortMs = 50
         static let defaultPasteDelayLongMs = 80
         static let defaultPasteFallbackTotalMs = 120
-        static let defaultEnableStageTiming = true
+        // Production default: stage-timing diagnostics stay OFF unless opted in
+        // (`defaults write singhkays.Kalam internal.latency.enableStageTiming -bool YES`).
+        // Info-level Lifecycle/Latency lines persist to the unified log store,
+        // so a loud default would spam production logs.
+        static let defaultEnableStageTiming = false
         static let defaultSnrAwareEnabled = true
         static let defaultSnrTrustDb: Float = 12
         static let defaultSnrAbsoluteCapMs = 1500
@@ -146,12 +150,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let configuredPostRollMin = max(50, min(400, defaults.integer(forKey: LatencyTuningOptions.postRollMinMsKey)))
         let configuredPostRollMax = max(configuredPostRollMin, min(500, defaults.integer(forKey: LatencyTuningOptions.postRollMaxMsKey)))
         let postRollMs = min(configuredPostRollMax, max(configuredPostRollMin, segmentEstimateMs))
-        logger.info("Post-roll computed segmentEstimateMs=\(segmentEstimateMs, privacy: .public) postRollMs=\(postRollMs, privacy: .public)")
+        if KalamDiagnosticFlags.verboseAudio {
+            logger.debug("Post-roll computed segmentEstimateMs=\(segmentEstimateMs, privacy: .public) postRollMs=\(postRollMs, privacy: .public)")
+        }
         return postRollMs
     }
 
     private var statusItem: NSStatusItem!
     private var setupMenuItem: NSMenuItem!
+    /// Dedup for the partial-AX capture failure (Sublime etc.): expected on every
+    /// press, so log once per pid per launch and only when verbose.
+    private static nonisolated(unsafe) var loggedPartialAXPIDs = Set<pid_t>()
+    private static let loggedPartialAXPIDsLock = NSLock()
     private let asr = ASRService()
     private let audio = AudioRecorder()
     private let warmPool = WarmEnginePool()
@@ -268,14 +278,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             LatencyTuningOptions.pasteDelayLongMsKey: LatencyTuningOptions.defaultPasteDelayLongMs,
             LatencyTuningOptions.pasteFallbackTotalMsKey: LatencyTuningOptions.defaultPasteFallbackTotalMs,
             LatencyTuningOptions.enableStageTimingKey: LatencyTuningOptions.defaultEnableStageTiming,
-            LatencyTuningOptions.startStageTimingKey: true,
+            // Production default OFF (see defaultEnableStageTiming): start-latency
+            // lines persist to the log store, so they require opt-in too.
+            LatencyTuningOptions.startStageTimingKey: false,
             LatencyTuningOptions.pasteSetVerifyTimeoutOverrideMsKey: 0,
             LatencyTuningOptions.snrAwareEnabledKey: LatencyTuningOptions.defaultSnrAwareEnabled,
             LatencyTuningOptions.snrTrustDbKey: LatencyTuningOptions.defaultSnrTrustDb,
             LatencyTuningOptions.snrAbsoluteCapMsKey: LatencyTuningOptions.defaultSnrAbsoluteCapMs,
             LatencyTuningOptions.snrQuietToStopMsKey: LatencyTuningOptions.defaultSnrQuietToStopMs,
             LatencyTuningOptions.snrRelativeCapKey: LatencyTuningOptions.defaultSnrRelativeCap,
-            LatencyTuningOptions.snrFloorMarginDbKey: LatencyTuningOptions.defaultSnrFloorMarginDb
+            LatencyTuningOptions.snrFloorMarginDbKey: LatencyTuningOptions.defaultSnrFloorMarginDb,
+            // Diagnostic console gating (default OFF): high-frequency audio /
+            // enumeration telemetry. Enable with:
+            // defaults write singhkays.Kalam internal.logging.verboseAudio -bool YES
+            KalamDiagnosticFlags.verboseAudioKey: false
         ])
 
         // App Nap guard: defeats timer coalescing so hotkey handling stays
@@ -1019,6 +1035,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // reopened. handleSystemWake delegates here, so wake is covered too.
         NotificationCenter.default.post(name: .audioDevicesDidChange, object: nil)
         invalidateOnboardingSnapshot()
+        // Normalize persisted priority list here (infrequent path) instead of on
+        // every press — normalize itself enumerates CoreAudio.
+        let loaded = MicrophonePriorityConfiguration.load()
+        let normalized = MicrophoneDeviceService.normalize(config: loaded)
+        if normalized != loaded {
+            normalized.save()
+        }
         audio.invalidatePreparedState()
         warmPool.invalidate(reason: "deviceChange")
         do {
@@ -1097,12 +1120,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func resolvePriorityOrderedMicrophones() -> [MicrophoneDeviceDescriptor] {
+        // Hot path (every press): single enumeration. Config normalization
+        // (which itself enumerates) stays on the infrequent device-change path
+        // so one press doesn't cost 2-3 full CoreAudio sweeps + log bursts.
         let config = MicrophonePriorityConfiguration.load()
-        let normalized = MicrophoneDeviceService.normalize(config: config)
-        if normalized != config {
-            normalized.save()
-        }
-        return MicrophoneDeviceService.mergedPriorityList(config: normalized)
+        return MicrophoneDeviceService.mergedPriorityList(config: config)
             .filter(\.isAvailable)
     }
 
@@ -1230,7 +1252,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .success(let resolution):
                 dictationTargetPID = frontmost.processIdentifier
                 dictationTargetElement = resolution.element
-                logger.info("Dictation target captured appName=\(resolution.appName, privacy: .public) strategy=\(resolution.strategy, privacy: .public) pid=\(frontmost.processIdentifier, privacy: .public)")
+                if KalamDiagnosticFlags.verboseAudio {
+                    logger.debug("Dictation target captured appName=\(resolution.appName, privacy: .public) strategy=\(resolution.strategy, privacy: .public) pid=\(frontmost.processIdentifier, privacy: .public)")
+                }
                 overlay.refinePlacementIfMoved(focusHint: resolution.element)
                 // K-48 Task 7: same element anchors the at-the-caret chip when selected.
                 overlay.setCaretAnchorElement(resolution.element)
@@ -1241,7 +1265,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // degrading to frontmost-at-paste-time.
                 dictationTargetPID = frontmost.processIdentifier
                 dictationTargetElement = nil
-                logger.warning("Dictation target element capture FAILED reason=\(error.reason, privacy: .public) pidKept=\(frontmost.processIdentifier, privacy: .public)")
+                // Partial-AX apps answer none of the AX queries on every press —
+                // expected, not a warning. Gated + deduped per pid per launch.
+                if KalamDiagnosticFlags.verboseAudio {
+                    Self.loggedPartialAXPIDsLock.lock()
+                    let seen = Self.loggedPartialAXPIDs.contains(frontmost.processIdentifier)
+                    if !seen { Self.loggedPartialAXPIDs.insert(frontmost.processIdentifier) }
+                    Self.loggedPartialAXPIDsLock.unlock()
+                    if !seen {
+                        logger.debug("Dictation target element capture FAILED reason=\(error.reason, privacy: .public) pidKept=\(frontmost.processIdentifier, privacy: .public)")
+                    }
+                }
             }
         } else {
             dictationTargetPID = nil
@@ -1349,7 +1383,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // A stale stop (superseded by a rapid re-record) returns no audio;
             // the newer session's overlay state owns the indicator from here.
             guard !samples.isEmpty else {
-                self.logger.info("Stop superseded by a newer recording; skipping transcription")
+                if KalamDiagnosticFlags.verboseAudio {
+                    self.logger.debug("Stop superseded by a newer recording; skipping transcription")
+                }
                 return
             }
             let afterStop = CFAbsoluteTimeGetCurrent()
@@ -1395,14 +1431,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 sessionTimingExtras += " postRollMode=\(mode)"
             }
-            self.logger.info("Recording timing holdMs=\(Int(keyDownToUp * 1000), privacy: .public) keyUpToSamplesMs=\(Int(upToSamples * 1000), privacy: .public) postRollMs=\(postRollMs, privacy: .public)\(sessionTimingExtras, privacy: .public)")
+            if KalamDiagnosticFlags.verboseAudio {
+                self.logger.debug("Recording timing holdMs=\(Int(keyDownToUp * 1000), privacy: .public) keyUpToSamplesMs=\(Int(upToSamples * 1000), privacy: .public) postRollMs=\(postRollMs, privacy: .public)\(sessionTimingExtras, privacy: .public)")
+            }
             stageMark("audio-stop+fetch")
             
             // Trim with hysteresis/hangover/padding + conservative fallback
             // K-51: fused endpointing + peak normalization (one pass).
             let trimmed = SilenceTrimmer.trimAndNormalize(samples: samples, sampleRate: 16_000)
+            // Pipeline telemetry (counts/timings only, never content): correlates
+            // the SilenceTrimmer-category trim decision with this session so
+            // user-provided logs can distinguish "trimmer cut speech" (low
+            // keepPct on a short hold) from "mic delivered silence".
+            let originalMs = Int(Double(samples.count) / 16_000.0 * 1000)
+            let trimmedMs = Int(Double(trimmed.count) / 16_000.0 * 1000)
+            let keepPct = samples.isEmpty ? 0 : Int(Double(trimmed.count) / Double(samples.count) * 100)
+            if KalamDiagnosticFlags.verboseAudio {
+                self.logger.debug("Trim summary originalMs=\(originalMs, privacy: .public) trimmedMs=\(trimmedMs, privacy: .public) keepPct=\(keepPct, privacy: .public) holdMs=\(segmentEstimateMs, privacy: .public)")
+            }
             stageMark("trim")
             guard !trimmed.isEmpty else {
+                // User-visible no-paste outcome: one info line with the reason.
                 self.logger.info("No speech detected after trimming")
                 await MainActor.run {
                     self.dispatchLifecycle(.captureEnded(session: stopSessionID, result: .noSpeech), context: "trim-empty")
@@ -1517,8 +1566,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case .accept: gateReason = "accept"
                 case .reject(let r): gateReason = r
                 }
-                self.logger.info("ValidationGate verdict=\(gateReason, privacy: .public) fallback=\(post.gateRawFallback, privacy: .public) lengthRatio=\(String(format: "%.2f", post.gateMetrics.lengthRatio), privacy: .public) containment=\(String(format: "%.2f", post.gateMetrics.tokenContainment), privacy: .public) trigram=\(post.gateMetrics.trigramOverlap.map { String(format: "%.2f", $0) } ?? "nil", privacy: .public) rawLen=\(trimmedText.count, privacy: .public) cleanedLen=\(post.text.count, privacy: .public) degradedBefore=\(isDegradedBefore, privacy: .public) degradedNow=\(self.validationGateStore.isDegraded, privacy: .public)")
-                self.logger.info("Transcription completed outputLength=\(post.text.count, privacy: .public) asrMs=\(Int((asrEnd - asrStart) * 1000), privacy: .public) cleanupEdits=\(post.stats.totalEdits, privacy: .public) cleanupMs=\(Int(post.stats.durationMs), privacy: .public) grammarEdits=\(post.stats.grammarEdits, privacy: .public) grammarAttempted=\(post.stats.grammarAttempted, privacy: .public) grammarTimedOut=\(post.stats.grammarTimedOut, privacy: .public) grammarSkippedForLength=\(post.stats.grammarSkippedForLength, privacy: .public) itnSpansMasked=\(post.itnSpansMasked, privacy: .public) itnEnabled=\(post.itnEnabled, privacy: .public) itnAvailable=\(post.itnAvailable, privacy: .public) itnChanged=\(post.itnChanged, privacy: .public) itnMs=\(post.itnMs, privacy: .public) replacements=\(post.replacements, privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public) gateFallback=\(post.gateRawFallback, privacy: .public)")
+                if KalamDiagnosticFlags.verboseAudio {
+                    self.logger.debug("ValidationGate verdict=\(gateReason, privacy: .public) fallback=\(post.gateRawFallback, privacy: .public) lengthRatio=\(String(format: "%.2f", post.gateMetrics.lengthRatio), privacy: .public) containment=\(String(format: "%.2f", post.gateMetrics.tokenContainment), privacy: .public) trigram=\(post.gateMetrics.trigramOverlap.map { String(format: "%.2f", $0) } ?? "nil", privacy: .public) rawLen=\(trimmedText.count, privacy: .public) cleanedLen=\(post.text.count, privacy: .public) degradedBefore=\(isDegradedBefore, privacy: .public) degradedNow=\(self.validationGateStore.isDegraded, privacy: .public)")
+                }
+                let asrMs = Int((asrEnd - asrStart) * 1000)
+                let asrInputMs = Int(Double(normalized.count) / 16_000.0 * 1000)
+                if KalamDiagnosticFlags.verboseAudio {
+                    self.logger.debug("Transcription completed outputLength=\(post.text.count, privacy: .public) asrMs=\(asrMs, privacy: .public) asrInputMs=\(asrInputMs, privacy: .public) cleanupEdits=\(post.stats.totalEdits, privacy: .public) cleanupMs=\(Int(post.stats.durationMs), privacy: .public) grammarEdits=\(post.stats.grammarEdits, privacy: .public) grammarAttempted=\(post.stats.grammarAttempted, privacy: .public) grammarTimedOut=\(post.stats.grammarTimedOut, privacy: .public) grammarSkippedForLength=\(post.stats.grammarSkippedForLength, privacy: .public) itnSpansMasked=\(post.itnSpansMasked, privacy: .public) itnEnabled=\(post.itnEnabled, privacy: .public) itnAvailable=\(post.itnAvailable, privacy: .public) itnChanged=\(post.itnChanged, privacy: .public) itnMs=\(post.itnMs, privacy: .public) replacements=\(post.replacements, privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public) gateFallback=\(post.gateRawFallback, privacy: .public)")
+                }
 
                 // K-50: route decided BEFORE the settle wait so only the
                 // frontmost route pays it. One frontmost read feeds decision
@@ -1544,7 +1599,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     pasteDelayMs = Double(segmentEstimateMs) < 5000 ? Double(pasteDelayShortMs) : Double(pasteDelayLongMs)
                 } else {
                     pasteDelayMs = 0
-                    self.logger.info("Paste settle skipped for captured route")
+                    if KalamDiagnosticFlags.verboseAudio {
+                        self.logger.debug("Paste settle skipped for captured route")
+                    }
                 }
                 let fallbackTotalMs = max(pasteDelayMs, Double(max(20, min(500, defaults.integer(forKey: LatencyTuningOptions.pasteFallbackTotalMsKey)))))
                 let pasteDelay = pasteDelayMs / 1000.0
@@ -1555,7 +1612,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 guard !Task.isCancelled else { return }
                 guard self.recordingSessions.isCurrent(generation) else {
-                    self.logger.info("Paste suppressed: recording superseded by a newer session")
+                    if KalamDiagnosticFlags.verboseAudio {
+                        self.logger.debug("Paste suppressed: recording superseded by a newer session")
+                    }
                     return
                 }
                 stageMark("paste-wait")
@@ -1563,12 +1622,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 do {
                     switch route {
                     case .frontmost:
-                        self.logger.info("Paste route=frontmost capturedPID=\(self.dictationTargetPID.map { String($0) } ?? "nil", privacy: .public) frontmostPIDAtDecision=\(frontmostPIDAtDecision.map { String($0) } ?? "nil", privacy: .public)")
+                        if KalamDiagnosticFlags.verboseAudio {
+                            self.logger.debug("Paste route=frontmost capturedPID=\(self.dictationTargetPID.map { String($0) } ?? "nil", privacy: .public) frontmostPIDAtDecision=\(frontmostPIDAtDecision.map { String($0) } ?? "nil", privacy: .public)")
+                        }
                         try await self.paster.paste(post.text, preferPid: self.dictationTargetPID, pidPostingEnabled: pidPostingEnabled)
                     case .capturedElement(let element):
                         // record-time paste target capture: the user switched apps while transcribing — insert into the
                         // record-time target (bypasses the pasteboard entirely).
-                        self.logger.info("Paste route=capturedElement capturedPID=\(self.dictationTargetPID.map { String($0) } ?? "nil", privacy: .public) frontmostPIDAtDecision=\(frontmostPIDAtDecision.map { String($0) } ?? "nil", privacy: .public)")
+                        if KalamDiagnosticFlags.verboseAudio {
+                            self.logger.debug("Paste route=capturedElement capturedPID=\(self.dictationTargetPID.map { String($0) } ?? "nil", privacy: .public) frontmostPIDAtDecision=\(frontmostPIDAtDecision.map { String($0) } ?? "nil", privacy: .public)")
+                        }
                         do {
                             try await self.paster.paste(into: element, text: post.text)
                         } catch {
@@ -1583,6 +1646,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             await MainActor.run {
                                 self.overlay.showHeldTranscript(message: "Transcript ready. Paste into \(promisedName)?")
                             }
+                            // The captured target is gone: hold the transcript with a
+                            // user-visible notice. Rare + user-visible: info.
                             self.logger.info("Captured-target paste failed; transcript held errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
                             self.dispatchLifecycle(.insertSucceeded(session: stopSessionID, outcome: .held), context: "captured-element-held")
                             return
@@ -1593,7 +1658,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         // path. If it cannot be reactivated or won't settle as frontmost,
                         // hold the transcript for the promised app (the Paste button will
                         // retry activation there).
-                        self.logger.info("Paste route=capturedApp capturedPID=\(capturedPid, privacy: .public) frontmostPIDAtDecision=\(frontmostPIDAtDecision.map { String($0) } ?? "nil", privacy: .public)")
+                        if KalamDiagnosticFlags.verboseAudio {
+                            self.logger.debug("Paste route=capturedApp capturedPID=\(capturedPid, privacy: .public) frontmostPIDAtDecision=\(frontmostPIDAtDecision.map { String($0) } ?? "nil", privacy: .public)")
+                        }
                         guard await self.activateCapturedApp(capturedPid) != nil,
                               await self.waitForFrontmost(pid: capturedPid) else {
                             self.heldTranscript = post.text
@@ -1624,9 +1691,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     stageMark("paste-dispatch")
                     if stageTimingEnabled {
                         let totalMs = (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000.0
-                        self.logger.info("Latency summary pasteDispatchMs=\(Int(totalMs), privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public) postRollMs=\(postRollMs, privacy: .public) pasteDelayMs=\(Int(pasteDelayMs), privacy: .public)")
+                        self.logger.debug("Latency summary pasteDispatchMs=\(Int(totalMs), privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public) postRollMs=\(postRollMs, privacy: .public) pasteDelayMs=\(Int(pasteDelayMs), privacy: .public)")
                     }
-                    self.logger.info("Paste dispatched via initial path delayMs=\(Int(pasteDelay * 1000), privacy: .public)")
+                    if KalamDiagnosticFlags.verboseAudio {
+                        self.logger.debug("Paste dispatched via initial path delayMs=\(Int(pasteDelay * 1000), privacy: .public)")
+                    }
                 } catch {
                     // Task 5 (K-56): Tier-1 hard refusals never blind-paste or fallback — hold.
                     if let pasteError = error as? PasteServiceError {
@@ -1667,9 +1736,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         stageMark("paste-fallback-dispatch")
                         if stageTimingEnabled {
                             let totalMs = (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000.0
-                            self.logger.info("Latency summary pasteFallbackDispatchMs=\(Int(totalMs), privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public) postRollMs=\(postRollMs, privacy: .public) fallbackTotalMs=\(Int(fallbackTotalMs), privacy: .public)")
+                            self.logger.debug("Latency summary pasteFallbackDispatchMs=\(Int(totalMs), privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public) postRollMs=\(postRollMs, privacy: .public) fallbackTotalMs=\(Int(fallbackTotalMs), privacy: .public)")
                         }
-                        self.logger.info("Fallback paste dispatched totalDelayMs=\(Int((pasteDelay + fallbackAdditionalDelay) * 1000), privacy: .public)")
+                        if KalamDiagnosticFlags.verboseAudio {
+                            self.logger.debug("Fallback paste dispatched totalDelayMs=\(Int((pasteDelay + fallbackAdditionalDelay) * 1000), privacy: .public)")
+                        }
                     } catch {
                         self.logger.warning("Fallback paste failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
                         await MainActor.run {
@@ -1870,7 +1941,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func activateCapturedApp(_ pid: pid_t) async -> NSRunningApplication? {
         guard let app = NSRunningApplication(processIdentifier: pid) else { return nil }
         if app.activate() { return app }
-        logger.info("Plain activate refused; trying LaunchServices openApplication pid=\(pid, privacy: .public)")
+        if KalamDiagnosticFlags.verboseAudio {
+            logger.debug("Plain activate refused; trying LaunchServices openApplication pid=\(pid, privacy: .public)")
+        }
         do {
             let configuration = NSWorkspace.OpenConfiguration()
             try await NSWorkspace.shared.openApplication(at: app.bundleURL ?? URL(fileURLWithPath: "/"), configuration: configuration)

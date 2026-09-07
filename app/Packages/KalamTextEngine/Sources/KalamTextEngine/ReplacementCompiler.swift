@@ -1,5 +1,4 @@
 import Foundation
-import OSLog
 
 public struct CompiledRule: @unchecked Sendable {
     public let entry: DictionaryEntry
@@ -96,8 +95,6 @@ public struct CompiledReplacementEngine: @unchecked Sendable {
 }
 
 public enum ReplacementCompiler {
-    private static let logger = Logger(subsystem: "singhkays.Kalam", category: "CustomDictionary")
-
     public static func compile(entries: [DictionaryEntry]) -> CompiledReplacementEngine {
         let cleaned = entries
             .filter { $0.isEnabled }
@@ -137,8 +134,9 @@ public enum ReplacementCompiler {
             }
         }
 
-        let enabledCount = entries.filter(\.isEnabled).count
-        Self.logger.info("Custom dictionary compiled phraseRules=\(phraseRules.count, privacy: .public) wordRules=\(wordRules.count, privacy: .public) enabledEntries=\(enabledCount, privacy: .public)")
+        // Per-compile logging removed: compile() runs on every transcription
+        // (via TranscriptPostProcessor), so one line per dictation. Rule counts
+        // are derivable from the compiled engine when debugging.
         return CompiledReplacementEngine(phraseRules: phraseRules, wordRules: wordRules)
     }
 

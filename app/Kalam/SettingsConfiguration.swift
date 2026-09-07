@@ -115,8 +115,26 @@ struct MicrophoneDeviceDescriptor: Identifiable, Equatable {
     var isWakeable: Bool = false
 }
 
+/// Diagnostic log gating: `Logger.debug` still prints in Xcode when attached,
+/// so high-frequency audio/enumeration telemetry must be gated (not merely
+/// demoted) to actually quiet the console. Enable with:
+/// `defaults write singhkays.Kalam internal.logging.verboseAudio -bool YES`
+enum KalamDiagnosticFlags {
+    static let verboseAudioKey = "internal.logging.verboseAudio"
+    /// High-frequency audio/enumeration telemetry. Default OFF.
+    static var verboseAudio: Bool {
+        UserDefaults.standard.bool(forKey: verboseAudioKey)
+    }
+}
+
 enum MicrophoneDeviceService {
     private static let logger = Logger(subsystem: "singhkays.Kalam", category: "MicPriority")
+    // Dedup for the OFFLINE-fallback line: mergedPriorityList runs on every
+    // press/wake/prewarm, so an absent priority mic would otherwise spam once
+    // per enumeration. Log once per UID per launch; Settings UI still shows
+    // the row every time.
+    private static nonisolated(unsafe) var loggedOfflineFallbackUIDs = Set<String>()
+    private static let offlineFallbackLogLock = NSLock()
 
     static func availableInputDevices() -> [MicrophoneDeviceDescriptor] {
         let infos = (try? AudioDeviceDebug.allInputDeviceInfos()) ?? []
@@ -167,7 +185,13 @@ enum MicrophoneDeviceService {
                     seen.insert(uid)
                     continue
                 }
-                logger.info("Mic priority: uid=\(uid, privacy: .public) ('\("\(fallbackName)", privacy: .public)') not in live enumeration — showing OFFLINE fallback")
+                offlineFallbackLogLock.lock()
+                let alreadyLogged = loggedOfflineFallbackUIDs.contains(uid)
+                if !alreadyLogged { loggedOfflineFallbackUIDs.insert(uid) }
+                offlineFallbackLogLock.unlock()
+                if !alreadyLogged, KalamDiagnosticFlags.verboseAudio {
+                    logger.debug("Mic priority: uid=\(uid, privacy: .public) ('\("\(fallbackName)", privacy: .public)') not in live enumeration — showing OFFLINE fallback")
+                }
                 // Idle-BT presence can hide under a sibling UID: the stored
                 // priority UID is the HFP-live "<base>:input" form, while the
                 // parked A2DP object enumerates as "<base>"/"<base>:output".
@@ -177,8 +201,8 @@ enum MicrophoneDeviceService {
                 let presentTag = presentTransportTags[uid]
                     ?? uidCandidates.dropFirst().compactMap { presentTransportTags[$0] }.first
                 let isWakeable = uidCandidates.contains { presentTransportTags[$0] == "bluetooth" }
-                if isWakeable, presentTransportTags[uid] == nil {
-                    logger.info("Mic priority: uid=\(uid, privacy: .public) idle Bluetooth present under a sibling UID — offering wake")
+                if isWakeable, presentTransportTags[uid] == nil, KalamDiagnosticFlags.verboseAudio {
+                    logger.debug("Mic priority: uid=\(uid, privacy: .public) idle Bluetooth present under a sibling UID — offering wake")
                 }
                 result.append(
                     MicrophoneDeviceDescriptor(
@@ -253,6 +277,7 @@ enum AudioDeviceDebug {
     }
     
     static func logDefaultInputDeviceSummary() {
+        guard KalamDiagnosticFlags.verboseAudio else { return }
         let info: DeviceInfo?
         do {
             info = try defaultInputDeviceInfo()
@@ -263,9 +288,9 @@ enum AudioDeviceDebug {
         if let info = info {
             let isLogitech = info.name.localizedCaseInsensitiveContains("logitech") ||
             info.name.localizedCaseInsensitiveContains("c920")
-            logger.info("Input device name=\(info.name, privacy: .public) channels=\(info.inputChannels) sampleRate=\(info.nominalSampleRate) logitech=\(isLogitech)")
+            logger.debug("Input device name=\(info.name, privacy: .public) channels=\(info.inputChannels) sampleRate=\(info.nominalSampleRate) logitech=\(isLogitech)")
         } else {
-            logger.info("Could not query input device details (non-fatal, proceeding with defaults)")
+            logger.debug("Could not query input device details (non-fatal, proceeding with defaults)")
         }
     }
     
@@ -371,10 +396,18 @@ enum AudioDeviceDebug {
                 guard channels > 0 else {
                     // Drop-reason diagnostics: Bluetooth headsets idle in A2DP expose
                     // NO input stream (mic not live) even though System Settings
-                    // lists them as a selectable input. This is the branch that
-                    // fires for them — confirmable via Console.app filter.
-                    let transport = try? getUInt32(id, selector: kAudioDevicePropertyTransportType, scope: kAudioObjectPropertyScopeGlobal)
-                    logger.info("Input enumeration: dropped id=\(id, privacy: .public) — 0 input channels (output-only or Bluetooth A2DP-idle) transport=\(transport ?? 0, privacy: .public)")
+                    // lists them as a selectable input. Gated + deduped: same id
+                    // logs once per launch, only when verbose audio is on.
+                    if KalamDiagnosticFlags.verboseAudio {
+                        enumerationLogLock.lock()
+                        let seen = loggedDropIDs.contains(id)
+                        if !seen { loggedDropIDs.insert(id) }
+                        enumerationLogLock.unlock()
+                        if !seen {
+                            let transport = try? getUInt32(id, selector: kAudioDevicePropertyTransportType, scope: kAudioObjectPropertyScopeGlobal)
+                            logger.debug("Input enumeration: dropped id=\(id, privacy: .public) — 0 input channels (output-only or Bluetooth A2DP-idle) transport=\(transport ?? 0, privacy: .public)")
+                        }
+                    }
                     return nil
                 }
                 let name = try getCFString(id, selector: kAudioObjectPropertyName)
@@ -396,13 +429,28 @@ enum AudioDeviceDebug {
                     isVirtualLike: isVirtualLike
                 )
             } catch {
-                logger.warning("Input enumeration: dropped id=\(id, privacy: .public) status=\((error as NSError).code, privacy: .public)")
+                if KalamDiagnosticFlags.verboseAudio {
+                    logger.debug("Input enumeration: dropped id=\(id, privacy: .public) status=\((error as NSError).code, privacy: .public)")
+                }
                 return nil
             }
         }
-        logger.info("Input enumeration: \(ids.count) CoreAudio devices → \(infos.count) usable inputs [\(infos.map { "\($0.name)/\($0.inputChannels)ch" }.joined(separator: ", "), privacy: .public)]")
+        // Summary logs only on topology change (and only when verbose): one
+        // press previously cost 2-3 identical summaries.
+        let summary = "\(ids.count)→\(infos.count):\(infos.map { "\($0.name)/\($0.inputChannels)ch" }.joined(separator: ","))"
+        enumerationLogLock.lock()
+        let changed = summary != lastEnumerationSummary
+        if changed { lastEnumerationSummary = summary }
+        enumerationLogLock.unlock()
+        if changed, KalamDiagnosticFlags.verboseAudio {
+            logger.debug("Input enumeration: \(ids.count) CoreAudio devices → \(infos.count) usable inputs [\(infos.map { "\($0.name)/\($0.inputChannels)ch" }.joined(separator: ", "), privacy: .public)]")
+        }
         return infos
     }
+
+    private static nonisolated(unsafe) var lastEnumerationSummary = ""
+    private static nonisolated(unsafe) var loggedDropIDs = Set<AudioDeviceID>()
+    private static let enumerationLogLock = NSLock()
 
     static func isLikelyVirtualOrAggregate(uid: String, name: String?, transportType: UInt32?) -> Bool {
         if transportType == kAudioDeviceTransportTypeAggregate || transportType == kAudioDeviceTransportTypeVirtual {
@@ -507,7 +555,9 @@ enum AudioDeviceDebug {
         status = AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &size, ablPtr)
         guard status == noErr else {
             if status == -10877 {
-                logger.info("Non-fatal invalid property (-10877) for input channels; assuming default (2)")
+                if KalamDiagnosticFlags.verboseAudio {
+                    logger.debug("Non-fatal invalid property (-10877) for input channels; assuming default (2)")
+                }
                 return 2
             }
             throw error(status)

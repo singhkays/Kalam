@@ -18,7 +18,7 @@ enum AccessibilityWaker {
     @discardableResult
     static func wakeIfNeeded(bundleID: String?, pid: pid_t?) -> Bool {
         guard let pid else {
-            logger.debug("AccessibilityWaker: no pid, skip")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("AccessibilityWaker: no pid, skip") }
             return false
         }
         let appElement = AXUIElementCreateApplication(pid)
@@ -26,10 +26,10 @@ enum AccessibilityWaker {
         var value: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &value)
         if result == .success {
-            logger.debug("AccessibilityWaker: warmed pid=\(pid, privacy: .public) bundleID=\(bundleID ?? "nil", privacy: .public) result=success")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("AccessibilityWaker: warmed pid=\(pid, privacy: .public) bundleID=\(bundleID ?? "nil", privacy: .public) result=success") }
             return true
         } else {
-            logger.debug("AccessibilityWaker: warm attempt pid=\(pid, privacy: .public) result=\(result.rawValue, privacy: .public)")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("AccessibilityWaker: warm attempt pid=\(pid, privacy: .public) result=\(result.rawValue, privacy: .public)") }
             return false
         }
     }

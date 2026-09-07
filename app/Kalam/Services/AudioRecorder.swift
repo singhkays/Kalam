@@ -128,7 +128,7 @@ final class AudioRecorder: @unchecked Sendable {
             retentionLock.unlock()
             exchange.setRetentionSink(nil)
             try? prevWriter.close()
-            logger.info("Retention superseded close prev folder=\(prevFolder.lastPathComponent, privacy: .public)")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("Retention superseded close prev folder=\(prevFolder.lastPathComponent, privacy: .public)") }
             retentionLock.lock()
         }
         defer { retentionLock.unlock() }
@@ -149,7 +149,7 @@ final class AudioRecorder: @unchecked Sendable {
             let meta = SessionMeta(sessionID: sessionID, deviceUID: deviceUID, deviceName: nil, sampleRate: 16_000, timestamp: timestamp, segmentEstimateMs: nil, isComplete: false)
             let data = try JSONEncoder().encode(meta)
             try data.write(to: FileLayout.metaURL(for: folder), options: .atomic)
-            logger.info("Retention begin folder=\(folder.lastPathComponent, privacy: .public) session=\(sessionID.uuidString.prefix(8), privacy: .public)")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("Retention begin folder=\(folder.lastPathComponent, privacy: .public) session=\(sessionID.uuidString.prefix(8), privacy: .public)") }
             return folder
         } catch {
             logger.warning("Retention begin failed error=\(error.localizedDescription, privacy: .public)")
@@ -184,7 +184,7 @@ final class AudioRecorder: @unchecked Sendable {
         }
         if let writer {
             try? writer.close()
-            logger.info("Retention end markComplete=\(markComplete, privacy: .public) folder=\(folder?.lastPathComponent ?? "nil", privacy: .public)")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("Retention end markComplete=\(markComplete, privacy: .public) folder=\(folder?.lastPathComponent ?? "nil", privacy: .public)") }
         }
     }
 
@@ -246,7 +246,7 @@ final class AudioRecorder: @unchecked Sendable {
                 preparedInputDeviceID = preferredInputDeviceID
                 preparedStateInvalidated = false
                 timingMarks.setTransportTag(AudioTransportTag.label(forDeviceID: preferredInputDeviceID))
-                logger.info("Adopted warm pool graph for deviceID=\(preferredInputDeviceID.map { String($0) } ?? "nil", privacy: .public)")
+                if KalamDiagnosticFlags.verboseAudio { logger.debug("Adopted warm pool graph for deviceID=\(preferredInputDeviceID.map { String($0) } ?? "nil", privacy: .public)") }
                 return
             }
         }
@@ -256,7 +256,7 @@ final class AudioRecorder: @unchecked Sendable {
             preferredDeviceID: preferredInputDeviceID,
             invalidated: preparedStateInvalidated
         ) {
-            logger.debug("Audio graph already prepared; skipping reconfigure")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("Audio graph already prepared; skipping reconfigure") }
             return
         }
         preparedStateInvalidated = false
@@ -325,7 +325,7 @@ final class AudioRecorder: @unchecked Sendable {
             }
             boundDeviceID = (qStatus == noErr) ? bound : nil
             if boundDeviceID == nil {
-                logger.info("Device ring shrink skipped: bound-device query failed osStatus=\(qStatus.map { Int($0) } ?? -1, privacy: .public)")
+                if KalamDiagnosticFlags.verboseAudio { logger.debug("Device ring shrink skipped: bound-device query failed osStatus=\(qStatus.map { Int($0) } ?? -1, privacy: .public)") }
             }
         } else {
             var def = AudioDeviceID(0)
@@ -338,7 +338,7 @@ final class AudioRecorder: @unchecked Sendable {
                 AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &def)
             boundDeviceID = (qStatus == noErr) ? def : nil
             if boundDeviceID == nil {
-                logger.info("Device ring shrink skipped: default-input query failed osStatus=\(Int(qStatus), privacy: .public)")
+                if KalamDiagnosticFlags.verboseAudio { logger.debug("Device ring shrink skipped: default-input query failed osStatus=\(Int(qStatus), privacy: .public)") }
             }
         }
         // Task 0: classify the bound device's transport once per graph build
@@ -346,9 +346,9 @@ final class AudioRecorder: @unchecked Sendable {
         timingMarks.setTransportTag(AudioTransportTag.label(forDeviceID: boundDeviceID))
         if let boundDeviceID {
             if let applied = Self.shrinkDeviceRingBuffer(deviceID: boundDeviceID) {
-                logger.info("Device ring buffer applied frames=\(applied, privacy: .public)")
+                if KalamDiagnosticFlags.verboseAudio { logger.debug("Device ring buffer applied frames=\(applied, privacy: .public)") }
             } else {
-                logger.info("Device ring buffer shrink failed (set or read-back); leaving device default")
+                if KalamDiagnosticFlags.verboseAudio { logger.debug("Device ring buffer shrink failed (set or read-back); leaving device default") }
             }
         }
 
@@ -358,11 +358,11 @@ final class AudioRecorder: @unchecked Sendable {
             throw AudioRecorderError.invalidInputFormat
         }
         
-        logger.info("Input format sampleRate=\(inputFormat.sampleRate, privacy: .public) channels=\(inputFormat.channelCount, privacy: .public)")
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("Input format sampleRate=\(inputFormat.sampleRate, privacy: .public) channels=\(inputFormat.channelCount, privacy: .public)") }
         
         // Prepare engine but don't start it yet - we'll start it when recording begins
         engine.prepare()
-        logger.info("Audio engine prepared tapBufferSize=\(self.tapBufferSizeFrames, privacy: .public)")
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("Audio engine prepared tapBufferSize=\(self.tapBufferSizeFrames, privacy: .public)") }
         isPrepared = true
         preparedInputDeviceID = preferredInputDeviceID
     }
@@ -411,11 +411,11 @@ final class AudioRecorder: @unchecked Sendable {
         if !engine.isRunning {
             do {
                 try engine.start()
-                logger.info("Audio engine started for recording")
+                if KalamDiagnosticFlags.verboseAudio { logger.debug("Audio engine started for recording") }
                 let liveOutputFormat = engine.inputNode.outputFormat(forBus: 0)
                 let liveInputBusFormat = engine.inputNode.inputFormat(forBus: 0)
-                logger.info("Live input output format sampleRate=\(liveOutputFormat.sampleRate, privacy: .public) channels=\(liveOutputFormat.channelCount, privacy: .public)")
-                logger.info("Live input bus format sampleRate=\(liveInputBusFormat.sampleRate, privacy: .public) channels=\(liveInputBusFormat.channelCount, privacy: .public)")
+                if KalamDiagnosticFlags.verboseAudio { logger.debug("Live input output format sampleRate=\(liveOutputFormat.sampleRate, privacy: .public) channels=\(liveOutputFormat.channelCount, privacy: .public)") }
+                if KalamDiagnosticFlags.verboseAudio { logger.debug("Live input bus format sampleRate=\(liveInputBusFormat.sampleRate, privacy: .public) channels=\(liveInputBusFormat.channelCount, privacy: .public)") }
             } catch {
                 // One recovery attempt: invalidate the stale graph binding
                 // (sleep/wake, dock reconnect) and retry from a fresh prepare.
@@ -424,7 +424,7 @@ final class AudioRecorder: @unchecked Sendable {
                 do {
                     try prepare(preferredInputDeviceID: preparedInputDeviceID)
                     try engine.start()
-                    logger.info("Audio engine started after re-prepare")
+                    if KalamDiagnosticFlags.verboseAudio { logger.debug("Audio engine started after re-prepare") }
                 } catch {
                     throw AudioRecorderError.engineStartFailed(error)
                 }
@@ -437,7 +437,7 @@ final class AudioRecorder: @unchecked Sendable {
         if !tapInstalled {
             // For input node taps, AVAudioEngine expects the input bus hardware format.
             let tapFormat = engine.inputNode.inputFormat(forBus: 0)
-            logger.info("Installing tap sampleRate=\(tapFormat.sampleRate, privacy: .public) channels=\(tapFormat.channelCount, privacy: .public)")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("Installing tap sampleRate=\(tapFormat.sampleRate, privacy: .public) channels=\(tapFormat.channelCount, privacy: .public)") }
             engine.inputNode.installTap(onBus: 0, bufferSize: tapBufferSizeFrames, format: tapFormat) { [weak self] (buffer, _) in
                 self?.process(buffer: buffer)
             }
@@ -449,10 +449,10 @@ final class AudioRecorder: @unchecked Sendable {
                 inputSampleRate: tapFormat.sampleRate,
                 inputChannelCount: tapFormat.channelCount
             )
-            logger.info("Converter pre-built ok=\(prebuilt, privacy: .public) inputSampleRate=\(tapFormat.sampleRate, privacy: .public)")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("Converter pre-built ok=\(prebuilt, privacy: .public) inputSampleRate=\(tapFormat.sampleRate, privacy: .public)") }
         }
 
-        logger.info("Started collecting audio samples")
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("Started collecting audio samples") }
     }
     
     // Post-roll capture is applied before stopping and fetching samples.
@@ -475,7 +475,7 @@ final class AudioRecorder: @unchecked Sendable {
     /// empty WITHOUT touching the newer session's buffers or engine.
     func finishStop(expectedGeneration: Int) -> [Float] {
         guard exchange.currentGeneration() == expectedGeneration else {
-            logger.info("Stop superseded by a newer capture session; skipping teardown")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("Stop superseded by a newer capture session; skipping teardown") }
             return []
         }
 
@@ -486,26 +486,26 @@ final class AudioRecorder: @unchecked Sendable {
             let stopStart = CFAbsoluteTimeGetCurrent()
             engine.stop()
             let stopElapsed = (CFAbsoluteTimeGetCurrent() - stopStart) * 1000
-            logger.info("Audio engine stopped stopMs=\(Int(stopElapsed), privacy: .public)")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("Audio engine stopped stopMs=\(Int(stopElapsed), privacy: .public)") }
         }
 
         // Drain any residual frames from the converter (resampler tail) and reset it
         let drainedTail = exchange.drainConverterRemainder(expectedGeneration: expectedGeneration)
         if !drainedTail.isEmpty {
-            logger.info("Drained converter tail samples=\(drainedTail.count, privacy: .public) durationMs=\(Int(Double(drainedTail.count) / 16_000.0 * 1000), privacy: .public)")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("Drained converter tail samples=\(drainedTail.count, privacy: .public) durationMs=\(Int(Double(drainedTail.count) / 16_000.0 * 1000), privacy: .public)") }
         }
 
         out.append(contentsOf: drainedTail)
 
         let durationMs = out.isEmpty ? 0 : Int(Double(out.count) / 16_000.0 * 1000)
         let (callbacks, dropped) = exchange.stats()
-        logger.info("Stopped collecting samples=\(out.count, privacy: .public) durationMs=\(durationMs, privacy: .public) callbacks=\(callbacks, privacy: .public) dropped=\(dropped, privacy: .public)")
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("Stopped collecting samples=\(out.count, privacy: .public) durationMs=\(durationMs, privacy: .public) callbacks=\(callbacks, privacy: .public) dropped=\(dropped, privacy: .public)") }
 
         // Debug: Check non-zero and max amplitude
         let nonZeroCount = out.lazy.filter { abs($0) > 0.0001 }.count
-        logger.info("Audio sample summary nonZeroSamples=\(nonZeroCount, privacy: .public) totalSamples=\(out.count, privacy: .public)")
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("Audio sample summary nonZeroSamples=\(nonZeroCount, privacy: .public) totalSamples=\(out.count, privacy: .public)") }
         if let maxAmplitude = out.map({ abs($0) }).max() {
-            logger.info("Audio sample maxAmplitude=\(maxAmplitude, privacy: .public)")
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("Audio sample maxAmplitude=\(maxAmplitude, privacy: .public)") }
         }
         return out
     }
@@ -665,6 +665,6 @@ final class AudioRecorder: @unchecked Sendable {
         if engine.isRunning {
             engine.stop()
         }
-        logger.info("AudioRecorder deinitialized; engine stopped and tap removed")
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("AudioRecorder deinitialized; engine stopped and tap removed") }
     }
 }

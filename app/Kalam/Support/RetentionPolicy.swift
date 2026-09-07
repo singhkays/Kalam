@@ -27,7 +27,7 @@ final class RetentionPolicy {
         timer = Timer.scheduledTimer(withTimeInterval: Self.sweepIntervalSeconds, repeats: true) { [weak self] _ in
             self?.sweep()
         }
-        Self.logger.info("Retention sweep timer started interval=\(Self.sweepIntervalSeconds, privacy: .public)s")
+        Self.logger.debug("Retention sweep timer started interval=\(Self.sweepIntervalSeconds, privacy: .public)s")
     }
 
     @MainActor
@@ -52,14 +52,14 @@ final class RetentionPolicy {
                 do {
                     try fileManager.removeItem(at: folder)
                     removed.append(folder)
-                    Self.logger.info("Retention purge removed folder=\(folder.lastPathComponent, privacy: .public) ageDays=\(Int(self.now().timeIntervalSince(modDate)/86400), privacy: .public)")
+                    Self.logger.debug("Retention purge removed folder=\(folder.lastPathComponent, privacy: .public) ageDays=\(Int(self.now().timeIntervalSince(modDate)/86400), privacy: .public)")
                 } catch {
                     Self.logger.warning("Retention purge failed folder=\(folder.lastPathComponent, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
                 }
             }
         }
         if !removed.isEmpty {
-            Self.logger.info("Retention sweep removed count=\(removed.count, privacy: .public)")
+            Self.logger.debug("Retention sweep removed count=\(removed.count, privacy: .public)")
         }
         return removed
     }
