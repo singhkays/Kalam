@@ -555,11 +555,18 @@ final class AudioRecorder: @unchecked Sendable {
         }()
         if !usesSNRPolicy {
             setLastPostRollSNR(0)
+            // Telemetry: the fixed path was previously silent — log the same
+            // start/done shape as the SNR-aware path so user-provided logs can
+            // distinguish "finished at floor" from "ran to ceiling".
+            // Counts/timings only, never audio content.
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("PostRoll fixed start minMs=\(config.minMs, privacy: .public) maxMs=\(config.maxMs, privacy: .public) pollMs=\(config.pollIntervalMs, privacy: .public) requiredSilentPolls=\(config.requiredSilentPolls, privacy: .public)") }
             let start = CFAbsoluteTimeGetCurrent()
             var consecutiveSilent = 0
+            var pollCount = 0
             while true {
                 try? await Task.sleep(nanoseconds: config.minIntervalNanos)
                 if Task.isCancelled { break }
+                pollCount += 1
                 let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
                 if PostRollDecision.tailIsSilent(
                     samples: recentCaptureSamples(count: 960),
@@ -574,6 +581,8 @@ final class AudioRecorder: @unchecked Sendable {
                     elapsedMs: elapsedMs,
                     consecutiveSilentPolls: consecutiveSilent
                 ) {
+                    let totalMs = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
+                    if KalamDiagnosticFlags.verboseAudio { logger.debug("PostRoll fixed done totalMs=\(totalMs, privacy: .public) polls=\(pollCount, privacy: .public) consecutiveSilent=\(consecutiveSilent, privacy: .public) cancelled=\(Task.isCancelled, privacy: .public)") }
                     break
                 }
             }
@@ -593,12 +602,14 @@ final class AudioRecorder: @unchecked Sendable {
                 return "fixed"
             }
         }()
-        logger.info("PostRoll SNR-aware start snrDb=\(snrDb, privacy: .public) mode=\(mode, privacy: .public) segmentEstimateMs=\(segmentMs, privacy: .public) minMs=\(config.minMs, privacy: .public) maxMs=\(config.maxMs, privacy: .public) effectiveMaxMs=\(PostRollDecision.effectiveMaxMs(config: config, segmentEstimateMs: segmentMs, snrDb: snrDb), privacy: .public)")
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("PostRoll SNR-aware start snrDb=\(snrDb, privacy: .public) mode=\(mode, privacy: .public) segmentEstimateMs=\(segmentMs, privacy: .public) minMs=\(config.minMs, privacy: .public) maxMs=\(config.maxMs, privacy: .public) effectiveMaxMs=\(PostRollDecision.effectiveMaxMs(config: config, segmentEstimateMs: segmentMs, snrDb: snrDb), privacy: .public)") }
         let start = CFAbsoluteTimeGetCurrent()
         var consecutiveSilent = 0
+        var pollCount = 0
         while true {
             try? await Task.sleep(nanoseconds: config.minIntervalNanos)
             if Task.isCancelled { break }
+            pollCount += 1
             let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
             let tail = recentCaptureSamples(count: 960)
             let isSilent = PostRollDecision.tailIsSilent(samples: tail, sampleRate: 16_000)
@@ -627,7 +638,7 @@ final class AudioRecorder: @unchecked Sendable {
             }
         }
         let totalMs = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
-        logger.info("PostRoll SNR-aware done totalMs=\(totalMs, privacy: .public) snrDb=\(snrDb, privacy: .public) mode=\(mode, privacy: .public)")
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("PostRoll SNR-aware done totalMs=\(totalMs, privacy: .public) polls=\(pollCount, privacy: .public) consecutiveSilent=\(consecutiveSilent, privacy: .public) snrDb=\(snrDb, privacy: .public) mode=\(mode, privacy: .public) cancelled=\(Task.isCancelled, privacy: .public)") }
         return finishStop(expectedGeneration: pinnedGeneration)
     }
 

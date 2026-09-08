@@ -1462,13 +1462,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             // noise-clip ASR rejection: never feed noise-only clips to ASR — Parakeet TDT
             // hallucinates filler words ("yeah") on boosted room tone.
-            guard SpeechQualityGuard.isSpeechLike(samples: trimmed, sampleRate: 16_000) else {
-                self.logger.info("Clip rejected by speech-quality guard")
+            // Telemetry reports the guard's floor/threshold/run so a rejected
+            // quiet-voice clip (small floor-to-peak delta) reads differently
+            // from true silence in user-provided logs. Counts/levels only.
+            let guardDiag = SpeechQualityGuard.diagnose(samples: trimmed, sampleRate: 16_000)
+            guard guardDiag.verdict else {
+                // User-visible no-paste outcome: one info line with the reason.
+                self.logger.info("Clip rejected by speech-quality guard floorDb=\(guardDiag.noiseFloorDb, privacy: .public) thresholdDb=\(guardDiag.speechThresholdDb, privacy: .public) peakDb=\(guardDiag.peakDb, privacy: .public) maxRun=\(guardDiag.maxRunWindows, privacy: .public)/\(guardDiag.requiredWindows, privacy: .public) windows=\(guardDiag.totalWindows, privacy: .public) trimmedMs=\(trimmedMs, privacy: .public) holdMs=\(segmentEstimateMs, privacy: .public)")
                 await MainActor.run {
                     self.dispatchLifecycle(.captureEnded(session: stopSessionID, result: .noSpeech), context: "quality-reject")
                     self.overlay.showInfoAndAutoHide("No speech detected")
                 }
                 return
+            }
+            if KalamDiagnosticFlags.verboseAudio {
+                self.logger.debug("Clip accepted by speech-quality guard floorDb=\(guardDiag.noiseFloorDb, privacy: .public) thresholdDb=\(guardDiag.speechThresholdDb, privacy: .public) peakDb=\(guardDiag.peakDb, privacy: .public) maxRun=\(guardDiag.maxRunWindows, privacy: .public)/\(guardDiag.requiredWindows, privacy: .public) windows=\(guardDiag.totalWindows, privacy: .public)")
             }
             
             do {

@@ -58,4 +58,38 @@ final class SpeechQualityGuardTests: XCTestCase {
     func testEmptyIsRejected() {
         XCTAssertFalse(SpeechQualityGuard.isSpeechLike(samples: [], sampleRate: 16_000))
     }
+
+    // Telemetry seam: diagnose() must agree with isSpeechLike on every
+    // existing fixture (behavior-preserving refactor check).
+    func testDiagnoseParityWithVerdict() {
+        var burst = whiteNoise(amplitude: 0.001, durationMs: 500)
+        burst.append(contentsOf: sine(amplitude: 0.1, durationMs: 300))
+        burst.append(contentsOf: whiteNoise(amplitude: 0.001, durationMs: 200))
+        let fixtures: [[Float]] = [
+            [Float](repeating: 0, count: 16_000),
+            whiteNoise(amplitude: 0.001, durationMs: 800),
+            whiteNoise(amplitude: 0.01, durationMs: 800),
+            burst,
+            [],
+        ]
+        for clip in fixtures {
+            XCTAssertEqual(
+                SpeechQualityGuard.diagnose(samples: clip, sampleRate: 16_000).verdict,
+                SpeechQualityGuard.isSpeechLike(samples: clip, sampleRate: 16_000))
+        }
+    }
+
+    // Characterization: documents the quiet-tail cutoff mechanism behind the
+    // "cutting off early" report — a uniform quiet tail below the -35 dBFS
+    // absolute cap self-classifies as silent. Pins CURRENT behavior (do not
+    // retune thresholds until pipeline telemetry from affected sessions
+    // confirms the operating point).
+    func testQuietUniformTailClassifiesAsSilent_Characterization() {
+        // 60 ms of quiet sine (~-43 dBFS RMS) —quieter than the cap.
+        let quietTail = sine(amplitude: 0.01, durationMs: 60)
+        XCTAssertTrue(PostRollDecision.tailIsSilent(samples: quietTail, sampleRate: 16_000))
+        XCTAssertFalse(PostRollDecision.tailIsSpeechLike(samples: quietTail, sampleRate: 16_000))
+        // Loud tail stays non-silent (absolute-cap guard works as designed).
+        XCTAssertFalse(PostRollDecision.tailIsSilent(samples: sine(amplitude: 0.4, durationMs: 60), sampleRate: 16_000))
+    }
 }
