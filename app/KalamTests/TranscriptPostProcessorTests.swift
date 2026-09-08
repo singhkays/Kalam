@@ -13,9 +13,11 @@ final class TranscriptPostProcessorTests: XCTestCase {
         entries: [DictionaryEntry] = [],
         config: TextCleanupConfiguration = .defaults
     ) -> TranscriptPostProcessor {
+        // Test-only compile is fine; tests are not the perf path. Production
+        // snapshots the manager's already-current engine instead.
         TranscriptPostProcessor(
             cleanupConfig: config,
-            dictionaryEntries: entries
+            dictionaryEngine: ReplacementCompiler.compile(entries: entries)
         )
     }
 
@@ -81,5 +83,23 @@ final class TranscriptPostProcessorTests: XCTestCase {
 
     func testCurrencyWithoutTerminalPunctuationUnchanged() {
         XCTAssertEqual(makeProcessor().process("five dollars and fifty cents").text, "$5.50")
+    }
+
+    // Snapshot-engine parity: a once-compiled engine applied by the processor
+    // must match per-call compile output across phrase rules, single-word
+    // case mimicry, disabled entries, and empty input. (All pre-existing tests
+    // above already pin this — their bodies are unchanged and now run on a
+    // snapshot — this one covers the disabled/empty corners explicitly.)
+    func testSnapshotEngineMatchesFreshCompileOutput() {
+        let processor = makeProcessor(entries: [
+            DictionaryEntry(trigger: "open ai", replacement: "OpenAI"),
+            DictionaryEntry(trigger: "apple", replacement: "orange"),
+            DictionaryEntry(trigger: "kalam", replacement: "KALAM", isEnabled: false),
+        ])
+        XCTAssertEqual(processor.process("i use open ai daily").text, "i use OpenAI daily")
+        XCTAssertEqual(processor.process("I want an Apple").text, "I want an Orange")
+        XCTAssertEqual(processor.process("kalam rules").text, "kalam rules")
+        let empty = processor.process("")
+        XCTAssertEqual(empty.replacements, 0)
     }
 }

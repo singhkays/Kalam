@@ -121,7 +121,7 @@ final class ValidationGateTripTests: XCTestCase {
         // Now test the processor's fallback: we need a case where TextCleanupEngine actually produces divergent output.
         // For a normal short input like "hello world", the processor will NOT diverge, so it will NOT fallback.
         // We can test that a normal input does not fallback:
-        let proc = TranscriptPostProcessor(cleanupConfig: .defaults, dictionaryEntries: [])
+        let proc = TranscriptPostProcessor(cleanupConfig: .defaults, dictionaryEngine: .empty)
         let out = proc.process("hello world")
         XCTAssertFalse(out.gateRawFallback)
         XCTAssertEqual(out.gateVerdict, .accept)

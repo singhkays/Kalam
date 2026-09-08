@@ -24,11 +24,17 @@ struct TranscriptPostProcessor: Sendable {
     }
 
     private let cleanupConfig: TextCleanupConfiguration
-    private let dictionaryEntries: [DictionaryEntry]
+    private let dictionaryEngine: CompiledReplacementEngine
 
-    init(cleanupConfig: TextCleanupConfiguration, dictionaryEntries: [DictionaryEntry]) {
+    init(cleanupConfig: TextCleanupConfiguration, dictionaryEngine: CompiledReplacementEngine) {
         self.cleanupConfig = cleanupConfig
-        self.dictionaryEntries = dictionaryEntries
+        self.dictionaryEngine = dictionaryEngine
+    }
+
+    /// Shim for not-yet-migrated call sites: compiles on every call. Delete
+    /// once the transcription call site snapshots the manager's engine.
+    init(cleanupConfig: TextCleanupConfiguration, dictionaryEntries: [DictionaryEntry]) {
+        self.init(cleanupConfig: cleanupConfig, dictionaryEngine: ReplacementCompiler.compile(entries: dictionaryEntries))
     }
 
     func process(_ input: String) -> Output {
@@ -59,8 +65,7 @@ struct TranscriptPostProcessor: Sendable {
             // Normal path: ITN (gated by cleanup master) → dictionary
             let itn = Self.applyITN(to: cleanupResult.text, masterEnabled: cleanupConfig.enabled)
             itnResult = itn
-            let compiled = ReplacementCompiler.compile(entries: dictionaryEntries)
-            let (postProcessed, replaceCount) = compiled.apply(to: itn.text)
+            let (postProcessed, replaceCount) = dictionaryEngine.apply(to: itn.text)
             replacements = replaceCount
             finalText = postProcessed
         }

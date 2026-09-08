@@ -25,7 +25,7 @@ final class ITNShapeProbeTests: XCTestCase {
     private func fullPipeline(_ text: String) -> String {
         let processor = TranscriptPostProcessor(
             cleanupConfig: .defaults,
-            dictionaryEntries: []
+            dictionaryEngine: .empty
         )
         return processor.process(text).text
     }
