@@ -336,6 +336,11 @@ struct Microphone: Identifiable, Hashable, Sendable {
     /// (Bluetooth headset parked in A2DP). Rendered "TAP TO WAKE"; tapping asks
     /// the store to engage the mic-side (HFP) profile.
     var isWakeable: Bool = false
+    /// Privacy-safe transport bucket ("builtin"/"usb"/"bluetooth"/"unknown") —
+    /// surfaced in the support bundle without device names or UIDs.
+    var transportTag: String = "unknown"
+    /// Live input channel count (0 when offline). Count only, no identifiers.
+    var inputChannels: UInt32 = 0
 }
 
 struct ReplacementRule: Identifiable, Hashable, Codable, Sendable {

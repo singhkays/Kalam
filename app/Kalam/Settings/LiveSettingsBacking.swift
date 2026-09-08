@@ -181,7 +181,14 @@ final class LiveSettingsBacking: SettingsBacking {
         let config = MicrophonePriorityConfiguration.load(from: defaults)
         let merged = MicrophoneDeviceService.mergedPriorityList(config: config)
         cachedMics = merged.map {
-            Microphone(id: $0.uid, name: $0.name, isConnected: $0.isAvailable, isWakeable: $0.isWakeable)
+            Microphone(
+                id: $0.uid,
+                name: $0.name,
+                isConnected: $0.isAvailable,
+                isWakeable: $0.isWakeable,
+                transportTag: $0.transportTag,
+                inputChannels: $0.channelCount
+            )
         }
         ping()
     }
