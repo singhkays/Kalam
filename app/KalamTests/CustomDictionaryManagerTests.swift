@@ -177,4 +177,14 @@ final class CustomDictionaryManagerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(
             atPath: store.deletingPathExtension().appendingPathExtension("json.bak").path))
     }
+
+    func testCurrentCompiledEngineReflectsLatestMutation() throws {
+        let (manager, _) = try makeIsolatedManager()
+        manager.bootstrap()
+        manager.addEntry(DictionaryEntry(trigger: "open ai", replacement: "OpenAI"))
+        let engine = manager.currentCompiledEngine
+        let (out, count) = engine.apply(to: "i use open ai daily")
+        XCTAssertEqual(out, "i use OpenAI daily")
+        XCTAssertEqual(count, 1)
+    }
 }

@@ -39,6 +39,12 @@ final class CustomDictionaryManager: ObservableObject {
 
     private var compiled: CompiledReplacementEngine = .empty
 
+    /// Read-only snapshot of the current compiled engine for the off-main
+    /// post-processor to apply directly instead of recompiling per
+    /// transcription. Snapshot on the main actor alongside the other
+    /// pipeline inputs; the engine itself is Sendable.
+    var currentCompiledEngine: CompiledReplacementEngine { compiled }
+
     private var debounceWork: DispatchWorkItem?
 
     var isFirstLaunch: Bool {
