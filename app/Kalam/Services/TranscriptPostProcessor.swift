@@ -31,12 +31,6 @@ struct TranscriptPostProcessor: Sendable {
         self.dictionaryEngine = dictionaryEngine
     }
 
-    /// Shim for not-yet-migrated call sites: compiles on every call. Delete
-    /// once the transcription call site snapshots the manager's engine.
-    init(cleanupConfig: TextCleanupConfiguration, dictionaryEntries: [DictionaryEntry]) {
-        self.init(cleanupConfig: cleanupConfig, dictionaryEngine: ReplacementCompiler.compile(entries: dictionaryEntries))
-    }
-
     func process(_ input: String) -> Output {
         let rawInput = input
         let cleanupResult = TextCleanupEngine().clean(input, configuration: cleanupConfig)

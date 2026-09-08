@@ -1544,7 +1544,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }()
                 let processor = TranscriptPostProcessor(
                     cleanupConfig: effectiveCleanupConfig,
-                    dictionaryEntries: CustomDictionaryManager.shared.entries
+                    dictionaryEngine: CustomDictionaryManager.shared.currentCompiledEngine
                 )
                 let post = await Self.postProcessTranscript(processor, trimmedText)
                 stageMark("cleanup+itn+dictionary")
