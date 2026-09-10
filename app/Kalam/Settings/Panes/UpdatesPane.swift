@@ -9,7 +9,7 @@ struct UpdatesPane: View {
     @State private var diagnosticsCopyGeneration = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
             Text("Maintenance")
                 .font(SettingsType.styleDiveKicker)
                 .compassTracking(SettingsType.trackDiveKicker)
@@ -80,19 +80,30 @@ struct UpdatesPane: View {
             .cornerRadius(SettingsLayout.cardRadius)
             .padding(.top, 14)
 
-            VStack(alignment: .leading, spacing: 7) {
-                Text("Why there is no auto update")
-                    .font(SettingsFont.mono(9))
-                    .tracking(2.0)
-                    .textCase(.uppercase)
-                    .foregroundStyle(Color.kInk3)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("Why there is no auto update")
+                        .font(SettingsType.styleCardHeaderLabel)
+                        .compassTracking(SettingsType.trackCardHeaderLabel)
+                        .textCase(.uppercase)
+                        .foregroundStyle(Color.kInk3)
+                    Spacer()
+                }
+                .padding(SettingsLayout.diveCardHeaderPad)
+                // Header casts its own shadow into its bottom padding
+                // (v1.3.8): matches the Setup / Active model / Key headers.
+                .overlay(alignment: .bottom) {
+                    HeaderWash()
+                }
+
                 Text("Kalam makes no outbound requests for telemetry, crash reports, license checks, or update pings. Audio and transcripts stay on this Mac, which is simpler to guarantee with no network code in the app. Release notes open in the browser so you can read what changed before you replace the build.")
                     .font(SettingsFont.body(12.5))
                     .foregroundStyle(Color.kInk2)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 8)
+                    .padding(.bottom, 14)
             }
-            .padding(18)
-            .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.kPanel)
             .overlay(RoundedRectangle(cornerRadius: SettingsLayout.cardRadius).stroke(Color.kHair))
             .cornerRadius(SettingsLayout.cardRadius)

@@ -111,8 +111,10 @@ Core files:
    - Optional beep
    - Optional system ducking
    - Audio engine capture + conversion to 16 kHz mono Float32
+   - Mid-hold stall watchdog (`MicStallMonitor`, 2.5 s grace + warn after 2 s with no tap callbacks): replaces the pill with a mic error live so a dead Bluetooth stream wastes seconds, not the whole hold; warn-only, capture/paste unchanged
 4. Recording stops:
    - Adaptive post-roll
+   - Capture-health gate (`CaptureHealthGuard`: refuses to paste when the mic delivered far less audio than the hold implies, or near-total digital silence — Bluetooth-dropout hardening; mic-settings error instead of a wrong transcript)
    - Silence trimming + peak normalization
    - ASR transcription
    - Text cleanup

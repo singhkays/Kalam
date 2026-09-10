@@ -52,16 +52,6 @@ struct ContentsNav: View {
                     Text(dest.subtitle)
                         .font(SettingsType.styleContentsSubtitle)
                         .foregroundStyle(Color.kInk3)
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(on ? Color.kGreen : Color.kInk3)
-                            .frame(width: 6, height: 6)
-                        Text(model.contentsState(for: dest))
-                            .font(SettingsType.styleContentsState)
-                            // mixed case for ⌘ and short states
-                            .foregroundStyle(on ? Color.kGreen : Color.kInk3)
-                    }
-                    .padding(.top, 6)
                 }
                 .padding(.leading, 8)
                 Spacer(minLength: 0)

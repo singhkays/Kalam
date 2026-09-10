@@ -16,7 +16,7 @@ public enum ASRModelVersion: String, CaseIterable, Identifiable, Sendable {
         case .v2:
             return "Parakeet TDT v2 (English-only)"
         case .v3:
-            return "Parakeet TDT v3 (Multilingual - 25+ languages)"
+            return "Parakeet TDT v3 (Multilingual - 25 European languages)"
         case .tdtCtc110m:
             return "Parakeet TDT-CTC 110M (Lightweight)"
         }

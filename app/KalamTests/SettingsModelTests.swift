@@ -369,4 +369,177 @@ final class SettingsModelTests: XCTestCase {
             XCTFail("expected verified")
         }
     }
+
+    // MARK: - Option D wizard routing (Task 1: backing contract + derived routing)
+
+    func testSetupStep1ActiveOnFirstRun() {
+        let model = makeModel(InMemorySettingsStore.fixtureSetupMissingDefault())
+        // Bookmark-unresolvable renders this same figure (no bookmark stored,
+        // so no not-found branch — the Step-1 body shows the default-path sub).
+        XCTAssertFalse(model.isFolderMissingOnDisk)
+        XCTAssertFalse(model.hasConfirmedHFCLIInstall)
+        XCTAssertEqual(model.setupStep.activeStep, .folder)
+        XCTAssertTrue(model.setupStep.isToolLocked)
+        XCTAssertTrue(model.setupStep.isDownloadLocked)
+        XCTAssertEqual(model.setupStep.headerTrailing, "1 of 3 · ~450 MB")
+        XCTAssertEqual(model.setupStep.headerTone, .neutral)
+        XCTAssertEqual(
+            model.setupStep.lede,
+            "No model in this folder yet. 3 steps · ~5 min · Terminal once — Kalam verifies the folder automatically."
+        )
+    }
+
+    func testSetupStep2ActiveWhenFolderChosen() {
+        let model = makeModel(InMemorySettingsStore.fixtureSetupFolderChosen())
+        XCTAssertFalse(model.isFolderMissingOnDisk)
+        XCTAssertEqual(model.setupStep.activeStep, .tool)
+        XCTAssertFalse(model.setupStep.isToolLocked)
+        XCTAssertTrue(model.setupStep.isDownloadLocked)
+        XCTAssertEqual(model.setupStep.headerTrailing, "2 of 3 · ~450 MB")
+        XCTAssertEqual(model.setupStep.lede, "Folder chosen. Install the tool, then download a model into it.")
+    }
+
+    func testSetupConfirmFlagAdvancesToStep3() {
+        let store = InMemorySettingsStore.fixtureSetupFolderChosen()
+        let model = makeModel(store)
+        XCTAssertFalse(model.hasConfirmedHFCLIInstall)
+        model.hasConfirmedHFCLIInstall = true
+        XCTAssertTrue(store.hasConfirmedHFCLIInstall)
+        XCTAssertEqual(model.setupStep.activeStep, .download)
+        XCTAssertFalse(model.setupStep.isToolLocked)
+        XCTAssertFalse(model.setupStep.isDownloadLocked)
+        XCTAssertEqual(model.setupStep.headerTrailing, "3 of 3 · ~450 MB")
+        XCTAssertEqual(
+            model.setupStep.lede,
+            "Tool confirmed. Pick how you dictate, then run one command in Terminal."
+        )
+    }
+
+    func testSetupIncompleteRoutesToStep3WithCounts() {
+        let store = InMemorySettingsStore.fixtureSetupIncomplete()
+        let model = makeModel(store)
+        XCTAssertFalse(model.isFolderMissingOnDisk)
+        XCTAssertEqual(model.setupStep.activeStep, .download)
+        XCTAssertFalse(model.setupStep.isToolLocked)
+        XCTAssertFalse(model.setupStep.isDownloadLocked)
+        let manifest = model.modelFileManifest(for: .v2)
+        XCTAssertEqual(manifest.count, ModelSetupSupport.requiredModelFiles(for: .v2).count)
+        XCTAssertEqual(manifest.filter(\.isPresent).count, 3)
+        XCTAssertEqual(model.setupStep.headerTrailing, "Incomplete — 3 of \(manifest.count)")
+        XCTAssertEqual(model.setupStep.headerTone, .warn)
+        XCTAssertEqual(
+            model.setupStep.lede,
+            "This folder has part of a model. Run the command again — it skips files already on disk."
+        )
+    }
+
+    func testSetupVerifiedSingleCollapses() {
+        let model = makeModel(InMemorySettingsStore.fixtureSetupVerifiedSingle())
+        XCTAssertFalse(model.isFolderMissingOnDisk)
+        XCTAssertEqual(model.setupStep.activeStep, .done)
+        XCTAssertFalse(model.setupStep.isToolLocked)
+        XCTAssertFalse(model.setupStep.isDownloadLocked)
+        XCTAssertEqual(model.setupStep.headerTrailing, "Verified")
+        XCTAssertEqual(model.setupStep.headerTone, .ok)
+        XCTAssertEqual(
+            model.setupStep.lede,
+            "You supply the model and Kalam loads it locally on the Apple Neural Engine."
+        )
+    }
+
+    func testSetupVerifiedMultiCollapses() {
+        let model = makeModel(InMemorySettingsStore.fixtureSetupVerifiedMulti())
+        XCTAssertEqual(model.setupStep.activeStep, .done)
+        XCTAssertFalse(model.setupStep.isToolLocked)
+        XCTAssertFalse(model.setupStep.isDownloadLocked)
+        XCTAssertEqual(model.setupStep.headerTrailing, "Verified")
+        XCTAssertEqual(model.setupStep.headerTone, .ok)
+        XCTAssertEqual(model.setupStep.lede, "Two models in this folder — pick which one Kalam loads.")
+    }
+
+    func testSetupFolderDeletedRoutesToStep1WithNotFound() {
+        let store = InMemorySettingsStore.fixtureSetupFolderDeleted()
+        let model = makeModel(store)
+        XCTAssertTrue(model.isFolderMissingOnDisk)
+        // The Step-2 attestation is machine-wide: it stays confirmed even
+        // though routing falls back to Step 1 (completion ≠ routing).
+        XCTAssertTrue(store.hasConfirmedHFCLIInstall)
+        XCTAssertEqual(model.setupStep.activeStep, .folder)
+        XCTAssertTrue(model.setupStep.isToolLocked)
+        XCTAssertTrue(model.setupStep.isDownloadLocked)
+        XCTAssertEqual(model.setupStep.headerTrailing, "Folder not found")
+        XCTAssertEqual(model.setupStep.headerTone, .bad)
+        XCTAssertEqual(
+            model.setupStep.lede,
+            "The chosen folder is gone. Pick it again or choose a new one — Kalam will verify automatically."
+        )
+    }
+
+    func testSetupRepoGuardRoutesToStep1() {
+        let model = makeModel(InMemorySettingsStore.fixtureSetupRepoGuard())
+        XCTAssertFalse(model.isFolderMissingOnDisk)
+        XCTAssertEqual(model.setupStep.activeStep, .folder)
+        XCTAssertTrue(model.setupStep.isToolLocked)
+        XCTAssertTrue(model.setupStep.isDownloadLocked)
+        XCTAssertTrue(model.setupStep.isRepoGuard)
+        XCTAssertEqual(model.setupStep.headerTrailing, "1 of 3 · ~450 MB")
+    }
+
+    func testSetupChangeFolderReactivatesStep3() {
+        let store = InMemorySettingsStore.fixtureSetupVerifiedSingle()
+        let model = makeModel(store)
+        XCTAssertEqual(model.setupStep.activeStep, .done)
+        let newURL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("NewModels")
+        store.applyModelFolderForTesting(newURL, presence: .missing)
+        XCTAssertTrue(store.hasConfirmedHFCLIInstall, "folder change must not reset the machine-wide tool attestation")
+        XCTAssertEqual(model.modelFolder, newURL)
+        XCTAssertEqual(model.setupStep.activeStep, .download)
+        XCTAssertFalse(model.setupStep.isToolLocked, "Step 2 stays complete after Change")
+        XCTAssertFalse(model.setupStep.isDownloadLocked)
+        XCTAssertEqual(model.setupStep.headerTrailing, "3 of 3 · ~450 MB")
+    }
+
+    func testSetupPickerChangeRederivesRouting() {
+        // Header size follows the picker with no engine change.
+        let store = InMemorySettingsStore.fixtureSetupMissingDefault()
+        let model = makeModel(store)
+        XCTAssertEqual(model.setupStep.headerTrailing, "1 of 3 · ~450 MB")
+        store.selectedDownloadVersion = .tdtCtc110m
+        XCTAssertEqual(model.setupStep.headerTrailing, "1 of 3 · ~220 MB")
+
+        // Live picker coupling: writing asrVersion can flip engine
+        // verified→missing; routing must re-derive on that change.
+        let verified = InMemorySettingsStore.fixtureSetupVerifiedSingle()
+        let verifiedModel = makeModel(verified)
+        XCTAssertEqual(verifiedModel.setupStep.activeStep, .done)
+        verified.selectedDownloadVersion = .v3
+        verified.testSetEnginePresence(.missing)
+        XCTAssertEqual(verifiedModel.setupStep.activeStep, .download)
+        XCTAssertFalse(verifiedModel.setupStep.isToolLocked)
+        XCTAssertFalse(verifiedModel.setupStep.isDownloadLocked)
+        XCTAssertEqual(verifiedModel.setupStep.headerTrailing, "3 of 3 · ~450 MB")
+    }
+
+    func testSetupManifestPassthrough() {
+        let store = InMemorySettingsStore.fixtureSetupIncomplete()
+        store.testSetManifest(presentCount: 3, totalFor: .v2)
+        let model = makeModel(store)
+        let manifest = model.modelFileManifest(for: .v2)
+        XCTAssertEqual(manifest.map(\.name), ModelSetupSupport.requiredModelFiles(for: .v2))
+        XCTAssertEqual(manifest.filter(\.isPresent).count, 3)
+        XCTAssertTrue(manifest.dropFirst(3).allSatisfy { !$0.isPresent })
+    }
+
+    func testSetupDiskSpaceSummary() {
+        let store = InMemorySettingsStore.fixtureSetupFolderChosen()
+        store.engineFolderFreeBytes = 410_000_000
+        let model = makeModel(store)
+        XCTAssertEqual(model.engineDiskSpace.freeBytes, 410_000_000)
+        XCTAssertEqual(model.engineDiskSpace.neededDescription, "~450 MB")
+        XCTAssertTrue(model.engineDiskSpace.summary.hasPrefix("Needed ~450 MB · Free "))
+        XCTAssertTrue(model.engineDiskSpace.summary.contains("410"))
+        store.selectedDownloadVersion = .tdtCtc110m
+        XCTAssertEqual(model.engineDiskSpace.neededDescription, "~220 MB")
+        XCTAssertTrue(model.engineDiskSpace.summary.hasPrefix("Needed ~220 MB · Free "))
+    }
 }

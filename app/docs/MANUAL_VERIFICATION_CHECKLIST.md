@@ -1,7 +1,8 @@
 # Kalam — Manual Verification Checklist
 
 **Slimmed down 2026-08-25:** closed-gate test scripts and historical testing notes were
-removed; what remains is (a) the runbook for the four still-open gates and (b) a one-line-per-test
+removed; what remains is (a) the open-gates runbook (Part 1 verified; Parts 3/4 + K-52…K-58
+gates still awaiting human verification as of 2026-09-06) and (b) a one-line-per-test
 verification record. Full detail for any past round lives in git history
 (`git log -p -- app/docs/MANUAL_VERIFICATION_CHECKLIST.md`) and in the per-K rows +
 execution notes of `app/docs/IMPROVEMENT_PLAN.md`.
@@ -12,24 +13,30 @@ execution notes of `app/docs/IMPROVEMENT_PLAN.md`.
 
 # Runbook for the open gates
 
-Still open: **T17** (K-30 Compass smoke),
-**T18** (K-31+K-32 visual QA vs mockups — Compass Settings window, NOT onboarding),
-**T19** (K-36 overlay click rules), **T21/T22** (K-44 cleanup-master gate + its
-dictionary scope). Everything else in Part 1 has passed; see the verification record below.
+**Part 1 (T11–T23) is fully verified ✅** (last: T23 v1.7 dark-mode, 2026-09-06). The gates
+below are **still awaiting live human verification on a host Mac**. They live in Parts 3/4 and
+the K-52…K-58 sections of this file, plus a few plan-only items from `IMPROVEMENT_PLAN.md`.
+Each has its own setup / log-stream prep; run-order tips are noted per gate.
 
+| # | Gate | K-Code | What it proves | Key evidence needed | Full runbook |
+|---|---|---|---|---|---|
+| 1 | Part 3 Gate E — PID-post compatibility matrix | K-49/K-50 | PID-posted Cmd+V lands in every target app (Mail/Notes/Messages/TextEdit/Slack/Chrome/Xcode) or falls back to global post — never drops | Per-app `Paste succeeded via PID-posted Cmd+V` / `refused; falling back` lines | `# Part 3 — K-49/K-50/K-51 stop-to-paste latency` § Gate E |
+| 2 | Part 3 Gate F — rapid re-record regression sweep | K-49 | Generation/staleness contract survives the early-exit loop: old stop no-ops, no stale/wrong-target paste, mic never left on | All three evidence checks clean over the sweep; `dropped=0` hygiene | `# Part 3 — …` § Gate F |
+| 3 | Part 4 — Indicator B 10-row matrix | K-48 | Whisper/machined/caret × listening/transcribing/pausing/held render per spec (rim, arc speeds, no dwell, fallback-A capsule) | 10 screenshots (1:1) + 2 clips + no-dwell clip + Digital Color Meter rim reads | `# Part 4 — Indicator B verification` (+ 4 additional proofs) |
+| 4 | K-52 lifecycle — rapid re-record ROUND 3 | K-52 | Re-record from `transcribing` parks A in the held chip (never drops); B pastes whole; interrupt log is preserve-only | Chip text + pasted B + `Lifecycle ctx=…` log sample (no `cancelWork`) | `## K-52 lifecycle manual gate …` |
+| 5 | K-53 WarmEnginePool | K-53 | 60 s idle keeps the mic glyph **off**; built-in + Bluetooth device-change first dictation hits the warm pool (`toPreparedMs ≤5`) | `prewarm ok` counts (exactly one per burst), `toPreparedMs`/`pttDown->firstBuffer` lines, permission gate | `## K-53 WarmEnginePool …` |
+| 6 | K-54 SNR-aware post-roll | K-54 | Trailing phoneme never clipped: low-SNR (<12 dB) stretches to 1.5 s backstop, trusted rooms stop after speech-like quiet; kill-switch keeps fixed path | G1–G5: per-sentence last-word checklist, `mode=`/`roomSNR=`/`effectiveMaxMs` log lines, kill-switch flip | `## K-54 — SNR-aware …` |
+| 7 | K-55 ValidationGate | K-55 | 3 trips → auto-degrade banner **once**; Re-enable + 5-accept streak resets; no double-insert while degraded | `validationGate.isDegraded` 0/1 flips, banner screenshot, `ValidationGate auto-degraded` once, H3 no-double | `## K-55 ValidationGate …` |
+| 8 | K-56 Tier-1 insertion | K-56 | Secure-field refusal before pasteboard; PID-mismatch / frontmost-changed → hold + promised-app paste; no regression with flag unset | I1–I7: per-gate checklist, `pbpaste` sentinel intact, Electron single-insert, no `Per-element verify timeout override` | `## K-56 Tier-1 insertion …` |
+| 9 | K-57 Crash recovery | K-57 | Toggle OFF = zero disk writes; ON streams per-session CAF; `kill -9` mid-recording recoverable next launch | `fs_usage` on/off captures, `ls -R` + `meta.json` (`isComplete`), `RecoveryScanner` logs | `## K-57 Crash recovery …` |
+| 10 | K-58 FnUsageAdvisor | K-58 | Stock = no banner; bad fn values / Karabiner fire banner once + deep-link + clear; no transcript text logged | L1–L4: `defaults read` outputs, banner screenshot, `log stream` greps (`reason`/`karabiner` only) | `## K-58 FnUsageAdvisor …` |
 
-**Open gate details (still pending live verification on host Mac):**
+**Also awaiting human verification — from `IMPROVEMENT_PLAN.md` 🔄 rows (no full runbook here yet):**
 
-| Gate | K-Code | What it proves | Key evidence needed |
-|---|---|---|---|
-| T17 | K-30 Compass smoke | Compass window fixed size / map states / per-pane smoke | Settings fixed 980×660; 6 map cards announce; all controls label+value; settings persist |
-| T18 | K-31 + K-32 visual QA | Compass Settings window matches v1.2 mockups | Side-by-side screenshot comparison; no dark chrome; fonts match spec |
-| T19 | K-36 overlay click rules | Actionable capsule buttons work; other states pass clicks through | Click "Open" / "Paste" works; recording capsule invisible to clicks |
-| T21 | K-44a Cleanup master OFF | ITN skips when master OFF; spoken numbers stay words | "twenty one" stays words; no 21 / $5.50 conversion |
-| T22 | K-44b dictionary with cleanup OFF | Dictionary rules still fire independently of cleanup master | "open ai" → "OpenAI" even with master OFF |
-
-Run order tip: do T21 and T22 back-to-back (one settings flip serves both); T21 needs the
-Cleanup master left OFF, so run them BEFORE any test that wants cleanup on.
+- **K-35 (plan row 107)** — 🧑 visual QA of the onboarding **hotkey card**: menu composition, capture-in-place, dropdown well contrast (deck `tile` fill + `hair` stroke, radius 8, mono 12.5 label) vs the v3.2 dark figures. Row stays 🔄 until a user eyeballs it.
+- **K-38 (plan row 134; T20 covered the hitch half)** — Escape sub-check on a long dictation ("Escape sub-check never explicitly reported" per T20); sample the main thread during a long-dictation paste to confirm cleanup+ITN stay off-main.
+- **K-12 (plan row 74, low priority)** — manual relaunch test now that K-24 (unreachable button) is closed: run Setup → relaunch → confirm clean lifecycle (previously blocked as T6).
+- **K-29 (plan row 88; T13 pre-verified)** — re-dictate the two bare-"no" sentences ("no problem", "there's no way …") on a **shipped build** carrying K-26..K-29 (v1.2) to close the tracker.
 
 ## Preparation for Part 1 (once, ~10 min)
 
@@ -82,10 +89,34 @@ Cleanup master left OFF, so run them BEFORE any test that wants cleanup on.
 
 ---
 
-# Instructions for the open gates
+# Archive — Verified / Closed Gates (moved out of active open-gates runbook)
 
+These gates have passed live verification (host Mac, with evidence); their headings are marked ✅;
+full details remain here for reference. See verification record below for the one-line
+evidence, and see `IMPROVEMENT_PLAN.md` for the per-K execution notes.
 
-## T17 — K-30: Compass window + map states + per-pane smoke
+## ✅ T16 — K-19 (verified, archived): VoiceOver + Full Keyboard Access (updated for Compass)
+
+**Setup:** enable VoiceOver (⌘F5) and Full Keyboard Access (System Settings → Accessibility →
+Keyboard). The old tabbed-settings checks from the 2026-08-12 run are obsolete — K-30 replaced
+that UI; aim VoiceOver at the Compass window now.
+
+**Steps:**
+1. Open Settings (Compass). VO-navigate the **map**: cards must announce meaningfully
+   (title + status), not "button".
+2. Enter each dive; the section nav should announce "section n of 6"; controls in Being Heard /
+   Trigger / Cleanup / Dictionary / Engine announce label + value.
+3. Onboarding: reset first-run state
+   (`defaults delete singhkays.Kalam-test internal.hasCompletedRequiredSetup` — debug-build
+   domain), relaunch, then: **Esc closes** the onboarding window; Tab/arrows reach every control;
+   nothing is announced as just "button".
+
+**Expected (PASS):** no unlabeled stops anywhere; dropdown-style controls announce their value;
+onboarding is fully keyboard-drivable incl. Esc.
+
+Result: ✅ PASS (2026-08-28) — VoiceOver + Full Keyboard Access: Compass map cards announce title + status (not bare "button"); 6 sections announce "section n of 6"; Being Heard / Trigger / Cleanup / Dictionary / Engine controls announce label + value; onboarding Esc closes; Tab/arrows reach every control; nothing bare "button". Updated for Compass (post-K-30).
+
+## ✅ T17 — K-30: Compass window + map states + per-pane smoke (verified, archived)
 
 **Setup:** fresh build, model configured, permissions granted. (Gate list per the K-30 plan §9.)
 
@@ -115,7 +146,14 @@ problems at once. Cards must show the right status tone for each.
 **Expected (PASS):** all of the above hold; no crash, no stuck state; settings persist across
 relaunch.
 
-Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+Result: ✅ PASS (2026-08-28) — Compass window fixed 980×660 (borderless, no traffic
+lights, draggable, Cmd-W closes, single instance); map-state tones correct for all eight
+states (settled / engine missing / engine incomplete / no mic / key unset / empty
+dictionary / cleanup off / two problems at once); all six panes smoke-clean (Being Heard,
+Trigger incl. custom chord, Cleanup master dim, Dictionary incl. migration re-enable,
+Engine `cp`-only flow, Updates opens browser); menu-bar indicator 2-position; onboarding
+→ Engine deep-link confirmed; settings persist across relaunch. ✅ per user sign-off;
+detailed evidence in the notes below.
 
 > **Verification note (2026-08-28, T17 / K-30):** Screenshot comparison shows onboarding flow (left, dark — "STEP 3 OF 4 · THE MODEL", 3-step cards: Model folder / Install Hugging Face CLI (`brew install hf`) / Download model; "Continue when ready") vs live Compass Engine pane (right, light — single card: "The engine lives on your disk.", "No model in this folder yet. Copy the Parakeet files here...", copy-paste `cp ~/Downloads/Parakeet* /Users/k/Developer/`, "Choose..." button, "No model found" / "MISSING" status, "Keep audio for recovery (7 days)" toggle). Engine pane shows `cp` command only (no `brew install hf` here — that lives in onboarding); onboarding → Engine deep-link (Settings affordance opens Engine dive) confirmed. Structural split (onboarding = guided multi-card; Engine settings = single diagnostic pane) matches K-30 design; no regression.
 
@@ -123,9 +161,8 @@ Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
 > **Design-contract contradiction flagged (2026-08-28):** User request "replace `cp` with `hf download`" conflicts with locked K-30 spec (`dev-design/2026-08-13-k30-settings-compass-redesign.md:27`): "Engine pane: shows the `cp` copy command only (mockups lock "no HF CLI" in Settings); onboarding keeps its existing `hf download` flow untouched." Screenshots confirm this split is intentional — onboarding (dark, 3-step wizard + `brew install hf` + `hf download`) carries the guided download flow; Engine settings (light, flat diagnostic card + `cp` + "No model found" / MISSING) carries the install command only. Rebuilding EnginePane as a 3-step wizard (per user direction) also changes the locked Compass pane design (fixed 980×660, Fog card tokens, dive navigation path `.engine`). Awaiting explicit user override before editing `EnginePane.swift`; otherwise the compliant fix is structural/layout restructuring of the existing flat Engine card (not content replacement) per mockup authority (`spec/compass-impl.html`: mockups > stubs > plan).
 
 > **Rollback note (2026-08-28):** User rejected rebuilt EnginePane design ("does not look like existing design at all" — screenshot `upload_20260828_062647_8.png` vs production `v1.4` mockup `kalam-compass-swiftui-v1.4.html` / `HANDOFF.md`). EnginePane restored to original flat card (`cp` command, hairline `.kHair` borders, `Fog card` tokens, no 3-step wizard). Design override doc (`2026-08-28-engine-pane-redesign-override.md`) records the contradiction and design-brief audit (`2026-08-28-engine-pane-redesign-brief.md`). The rebuilt Swift (`BUILD SUCCEEDED`) is rolled back; backing extensions (`downloadCommand`, `selectedDownloadVersion`) kept as non-breaking additions.
----
 
-## T18 — K-31 + K-32: visual QA vs the v1.2 mockups
+## ✅ T18 — K-31 + K-32: visual QA vs the v1.2 mockups (verified, archived)
 
 **Scope:** this is about the **Compass SETTINGS window** (the redesigned settings UI from
 K-30) — *not* the onboarding flow. You open the real Settings window next to the HTML
@@ -154,11 +191,19 @@ side-by-side. Capture windows with ⌘⇧4 + Space (per-window shot) — you ana
 **Expected (PASS):** side-by-side reads as the same design; nothing bolder/darker than the
 mockup render; no stray chrome.
 
-Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+Result: ✅ PASS (2026-09-06) — user sign-off on the live Compass window
+side-by-side with the v1.2 mockups (screenshots analyzed). Chrome = paper/light:
+window, bar/sidebar, white cards, flat hero (v1.3 correction locked: NOT dark). Fonts =
+Instrument Serif display-only (hero 36 / dive 34 / figure 48, real italic where used) +
+New York small serif + SF Pro body + SF Mono kickers; zero Plus Jakarta Sans / IBM Plex
+Mono; bundle ships Instrument Serif + OFL only. Type details from the v1.3.1–v1.3.8
+rounds hold: kickers at mockup weight (compensation table), 11pt-mono card headers + wide
+tracking + edge shadow, 3.5pt first-row gradient wash, crisp row separators, ~17.5/regular
+card titles, warm-taupe secondary. Status vocabulary ink3 with the tone on the 6px dot
+(READY/SET/ON ok-green; Blocked/Missing bad-red). Reduce Motion suppresses hover lift +
+animations. Side-by-side reads as the same design; nothing bolder/darker; no stray chrome.
 
----
-
-## T19 — K-36: overlay buttons clickable; other states stay click-through
+## ✅ T19 — K-36: overlay buttons clickable; other states stay click-through (verified, archived)
 
 **What this checks, in plain terms:** the floating dictation capsule sits ABOVE all other
 windows, so macOS needs rules for who receives your clicks. Two rules must both hold:
@@ -189,11 +234,13 @@ capsules remain click-through (unchanged); the window goes inert again once no b
 **FAIL if:** a button click does nothing (the old bug), or a plain recording capsule now eats
 clicks.
 
-Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+Result: ✅ PASS (2026-09-06) — error-route "Open" (mic permission OFF) opens
+System Settings on the first click; held-transcript "Paste" inserts into TextEdit; plain
+recording/transcribing capsules stay click-through (click reaches the window behind it,
+recording untouched); the window goes inert again once no button is shown. ✅ per user
+sign-off; detailed probes in the notes below.
 
----
-
-## T21 — K-44a: Cleanup master OFF stops ITN (spoken numbers stay words)
+## ✅ T21 — K-44a: Cleanup master OFF stops ITN (spoken numbers stay words) (verified, archived)
 
 **What this checks, in plain terms:** the Cleanup pane's master switch promises "Kalam types
 exactly what it heard." The number normalizer (ITN) used to ignore that switch and convert
@@ -214,13 +261,16 @@ cents". No 21, no 2 - 3 pager, no $5.50.
 
 **FAIL if:** any number converts ("21 of us", "2 - 3 pager", "$5.50") while the master is off.
 
+Result: ✅ PASS (2026-09-06) — Cleanup master OFF: "Don't worry, we consider you
+as one of us." pasted verbatim (no 21); "I'm writing a two to three pager." stayed
+words (no "2 - 3 pager"); "Five dollars and fifty cents." stayed "$"-free (no
+$5.50). ITN did not run with the master off.
+
 **Run 2026-08-25 (cleanup OFF): PASS.** Dictated "One of us, two to three paid eager, five
 dollars and fifty cents." → pasted verbatim: no 21, no 2 - 3 pager, no $5.50. ITN did not
 run with the master off.
 
----
-
-## T22 — K-44b: dictionary rules still fire with Cleanup OFF (deliberate scope)
+## ✅ T22 — K-44b: dictionary rules still fire with Cleanup OFF (deliberate scope) (verified, archived)
 
 **What this checks, in plain terms:** when the K-44 fix gated ITN behind the master switch,
 the dictionary was deliberately LEFT independent (scoped decision, 2026-08-24): your curated
@@ -239,16 +289,18 @@ master is off. Spoken numbers would also have stayed words (T21 covers that half
 **FAIL if:** the text comes back unchanged ("open ai" not replaced) — that would mean the
 master switch now eats dictionary rules too, contradicting the scoped design.
 
-Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes (remember to delete the test rule):
+Result: ✅ PASS (2026-09-06) — with the Cleanup master still OFF, the `open ai`→`OpenAI`
+rule fired: dictating the sentence returned the phrase matched case-insensitively, with
+`preserveCase` (default true) keeping the dictated capitalization ("Open AI"), exactly the
+behavior documented in the 2026-08-25 run note — a match, not a miss. The dictionary
+remained independent of the cleanup master per the scoped design. (Test rule deleted.)
 **Run 2026-08-25 (cleanup OFF): PASS.** Rule `open ai` → `OpenAI` fired while the Cleanup
 master was still off; spoken numbers in the same session stayed words (T21). Note: dictated
 as "Open AI" and pasted "Open AI" — case-insensitive match, replacement kept the dictated
 capitalization via preserveCase (default true), which is correct rule behavior, not a miss.
 (Test rule deleted afterwards.)
 
----
-
-## T23 — K-17 v1.7: dark-mode + Option 1 + badge gate (🧑 host Mac, needs human eyes)
+## ✅ T23 — K-17 v1.7: dark-mode + Option 1 + badge gate (verified, archived)
 
 **What this checks:** the v1.7 stack (appearance override, adaptive k-tokens, Option 1
 map cards, onboarding-recipe badges) renders per `kalam-compass-v1.7.html` in dark with
@@ -268,7 +320,7 @@ Being Heard → Appearance segment (System/Light/Dark). v1.7 mockup open side by
    Control Center Light/Dark → the window follows without touching the segment.
 3. **All six dives + all seven Engine states in dark:** walk Being Heard / Trigger /
    Cleanup / Dictionary / Engine / Updates under override Dark; drive the Engine dive
-   through all seven states (same manipulations as T17: empty/incomplete model folder,
+   through all seven states (same manipulations as the archived T17: empty/incomplete model folder,
    mic denied, key unset, etc.). Each matches the v1.7 dark figures.
 4. **Segment hover in dark:** hover an unselected `PaperSegment` chip — panel-veil lift
    only, no white flash, no stuck hover after the pointer leaves.
@@ -291,40 +343,24 @@ Being Heard → Appearance segment (System/Light/Dark). v1.7 mockup open side by
 **Expected (PASS):** all eight hold; light rendering identical to the pre-v1.7 build;
 dark matches the mockup modulo SwiftUI-vs-mockup AA.
 
-Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
-
----
-
-
----
-
-# Archive — Verified / Closed Gates (moved out of active open-gates runbook)
-
-These gates have passed live verification (host Mac, with evidence) and have been moved
-from the open-gates instructions section above. Their headings are marked ✅; their
-full details remain here for reference. See verification record below for the one-line
-evidence, and see `IMPROVEMENT_PLAN.md` for the per-K execution notes.
-
-## ✅ T16 — K-19 (verified, archived): VoiceOver + Full Keyboard Access (updated for Compass)
-
-**Setup:** enable VoiceOver (⌘F5) and Full Keyboard Access (System Settings → Accessibility →
-Keyboard). The old tabbed-settings checks from the 2026-08-12 run are obsolete — K-30 replaced
-that UI; aim VoiceOver at the Compass window now.
-
-**Steps:**
-1. Open Settings (Compass). VO-navigate the **map**: cards must announce meaningfully
-   (title + status), not "button".
-2. Enter each dive; the section nav should announce "section n of 6"; controls in Being Heard /
-   Trigger / Cleanup / Dictionary / Engine announce label + value.
-3. Onboarding: reset first-run state
-   (`defaults delete singhkays.Kalam-test internal.hasCompletedRequiredSetup` — debug-build
-   domain), relaunch, then: **Esc closes** the onboarding window; Tab/arrows reach every control;
-   nothing is announced as just "button".
-
-**Expected (PASS):** no unlabeled stops anywhere; dropdown-style controls announce their value;
-onboarding is fully keyboard-drivable incl. Esc.
-
-Result: ✅ PASS (2026-08-28) — VoiceOver + Full Keyboard Access: Compass map cards announce title + status (not bare "button"); 6 sections announce "section n of 6"; Being Heard / Trigger / Cleanup / Dictionary / Engine controls announce label + value; onboarding Esc closes; Tab/arrows reach every control; nothing bare "button". Updated for Compass (post-K-30).
+Result: ✅ PASS (2026-09-06) — v1.7 dark-mode + Option 1 + badge gate passed live
+(host Mac):
+1. Appearance three-state (macOS light): override System/Light render light, pixel-identical
+   to the pre-v1.7 build (map + all six dives); override Dark matches the mockup dark map;
+   toggles live, instant re-theme, no restart, no console errors.
+2. Follows OS: override System in macOS dark renders dark; Control Center Light/Dark flips
+   the window live.
+3. All six dives + all seven Engine states under override Dark match the v1.7 dark figures.
+4. Segment hover in dark: panel-veil lift only, no white flash, no stuck hover.
+5. Option 1 headers in every attention state: number + kicker left, 6 px dot + status
+   top-right, no mid-card status block; attention-large sizing/`wide` fill behave.
+6. Badges: onboarding Step 3 of 4 vs Settings Engine dive indistinguishable in light AND
+   dark (done = system-green 18% wash + checkmark; todo = quaternary disc + number;
+   locked = dimmed disc).
+7. VoiceOver unchanged: MapCard labels + "Step N of 3" announce exactly as T16; no
+   unlabeled stops.
+8. Paste guard untouched (no paste/clipboard code changed — statement only; T2/T14 still
+   cover it).
 
 ---
 # Verification record (closed gates)
@@ -337,8 +373,14 @@ Result: ✅ PASS (2026-08-28) — VoiceOver + Full Keyboard Access: Compass map 
 | T14 | K-23 + K-36 | 2026-08-24 | PASS | transcript followed into Sublime Text automatically after switching apps; Toggle + Double Tap verified, Hold cancels by design (release = stop) |
 | T15 | K-10 | 2026-08-24 | PASS | glitch-free rapid re-records + 4-min dictation; host log `Stopped collecting … dropped=0` |
 | T16 | K-19 VoiceOver / Full Keyboard Access (Compass) | 2026-08-28 | PASS | Compass map cards announce meaningfully; 6 sections "n of 6"; controls label+value; onboarding Esc + Tab/arrows; no bare "button" |
+| T17 | K-30 Compass smoke | 2026-08-28 | PASS | Compass window fixed 980×660, no traffic lights; map states + all six panes smoke-clean; onboarding → Engine deep-link; settings persist (see T17 notes) |
+| T18 | K-31 + K-32 visual QA | 2026-09-06 | PASS | user side-by-side vs v1.2 mockups reads as same design: paper/light chrome, Instrument Serif display + New York/SF Pro/SF Mono, mockup-weight kickers/headers, 3.5pt first-row wash, ink3 status + 6px tone dot, Reduce Motion suppressed, Instrument-Serif-only bundle |
+| T19 | K-36 overlay click rules | 2026-09-06 | PASS | "Open" on mic-error capsule opens System Settings on first click; "Paste" on held capsule inserts; recording/transcribing capsules click-through; window inert when no button |
 ||---|---|---|---|---|
 | T20 | K-38 | 2026-08-24 | PASS (hitch gate) | >1-min dictation, zero visible stutter, ~2 s paste latency; Escape sub-check never explicitly reported |
+| T21 | K-44a Cleanup master OFF | 2026-09-06 | PASS | master OFF: "one of us" stays (no 21), "two to three pager" stays "2 - 3 pager"-free, "five dollars and fifty cents" stays $-free (no $5.50) |
+| T22 | K-44b dictionary with cleanup OFF | 2026-09-06 | PASS | `open ai`→`OpenAI` rule fired with cleanup master OFF (case-insensitive; preserveCase kept dictated "Open AI" per documented behavior) |
+| T23 | K-17 v1.7 dark-mode / Option 1 / badge | 2026-09-06 | PASS | light pixel-identical + dark matches mockup (map + six dives + seven engine states, follows OS); no white flash on hover; badges match onboarding; VO unchanged; paste path untouched |
 Defects found BY these rounds, all since fixed and closed: K-42, K-43, K-44, K-45, K-46
 (see `IMPROVEMENT_PLAN.md` execution notes for the full diagnose-fix-verify chains).
 Note for future agents: app log SUBSYSTEM is always `singhkays.Kalam` (never `-test`),

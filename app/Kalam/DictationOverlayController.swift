@@ -1,14 +1,31 @@
 import Foundation
 import AppKit
 import ApplicationServices
+import SwiftUI
+import OSLog
 
 /// K-48 machined palette: brand green #52B788.
 private let indicatorBrandGreen = NSColor(srgbRed: 82/255.0, green: 183/255.0, blue: 136/255.0, alpha: 1.0)
-// Task 4: green clockwise arc — two speeds, no dwell
+// Green ring — clockwise conic arc (transparent 0→255deg, brand green 255→360deg),
+// two speeds, no dwell. Only the arc position rotates: the mask is a centered
+// stadium stroke, so the border shape itself never moves.
 private let ringListeningDuration: CFTimeInterval = 3.6
 private let ringTranscribingDuration: CFTimeInterval = 2.4
 private let ringLineWidth: CGFloat = 1.5
 private enum RingSpeed { case listening, transcribing }
+
+/// Xcode-console diagnostics for the indicator ring/shimmer (geometry + flags only,
+/// never transcript content). `.debug` level: visible when run from Xcode.
+private let indicatorDiag = Logger(subsystem: "singhkays.Kalam", category: "Indicator")
+
+#if DEBUG
+/// Phase 3 parity flag: launch with KALAM_SWIFTUI_INDICATOR=1 to render the
+/// SwiftUI surfaces (plan §3.6). The default stays AppKit until the parity
+/// matrix passes; production builds never take this branch.
+private let usesSwiftUISurfaces = ProcessInfo.processInfo.environment["KALAM_SWIFTUI_INDICATOR"] == "1"
+#else
+private let usesSwiftUISurfaces = false
+#endif
 
 // MARK: - Dictation Overlay
 @MainActor
@@ -39,7 +56,6 @@ final class DictationOverlayController {
         case recordingHold
         case recordingToggle
         case transcribing
-        case success
         case info(message: String)
         case error(message: String, action: OverlayAction?)
     }
@@ -76,6 +92,13 @@ final class DictationOverlayController {
     private var caretAnchorElement: AXUIElement?
     private var caretChipWindow: NSWindow?
     private var caretChipContentView: CaretChipView?
+    /// Phase 2/3: published presentation for the SwiftUI parity surfaces.
+    private let presentationState = IndicatorPresentationState()
+    private var capsuleHostingView: NSHostingView<IndicatorCapsuleRootView>?
+    private var chipHostingView: NSHostingView<IndicatorChipRootView>?
+    /// K-52 discard: held-chip Discard handler, mirrored into the published
+    /// state because the SwiftUI path has no AppKit contentView to receive it.
+    private var heldSecondaryAction: (() -> Void)?
 
     func setWaveformProvider(_ provider: @escaping () -> [Float]) {
         waveformProvider = provider
@@ -120,10 +143,6 @@ final class DictationOverlayController {
         transition(to: .transcribing, autoHideAfter: nil)
     }
 
-    func showSuccessAndAutoHide() {
-        transition(to: .success, autoHideAfter: 0.35)
-    }
-
     func showInfoAndAutoHide(_ message: String) {
         transition(to: .info(message: message), autoHideAfter: 0.7)
     }
@@ -145,6 +164,7 @@ final class DictationOverlayController {
             title: "Discard",
             handler: { [weak self] in self?.handle(action: .destroyHeldTranscript) }
         )
+        heldSecondaryAction = { [weak self] in self?.handle(action: .destroyHeldTranscript) }
         // The transition sized the frame for message + Paste. Add the Discard
         // link's contribution so the row is never clipped. Widths are already
         // measured by Auto Layout now that Discard is shown.
@@ -167,9 +187,9 @@ final class DictationOverlayController {
         stopTimerUpdates()
         caretAnchorElement = nil
         hideCaretChip()
-        // Task 6 offscreen leak guard: strip infinite CAAnimations while hidden so no
+        // Offscreen leak guard: strip infinite CAAnimations while hidden so no
         // CABasicAnimation renders in background between sessions. Both views get both
-        // teardown calls — hideGreenRing strips spin + breathe and removes layers,
+        // teardown calls — hideGreenRing strips spin/breathe keys and removes the ring layers,
         // removeSessionAnimations strips dot/shimmer and also calls hideGreenRing.
         contentView?.hideGreenRing()
         contentView?.removeSessionAnimations()
@@ -232,7 +252,9 @@ final class DictationOverlayController {
         if let screen = placementScreen ?? fallbackScreen() {
             positionWindow(on: screen)
         }
-        guard let w = window, let view = contentView else { return }
+        guard let w = window else { return }
+        // Corner-halo geometry diagnostics removed (hunt is over): re-add behind
+        // KalamDiagnosticFlags.verboseAudio if window geometry is ever suspect again.
         // K-48 Task 7: when the caret chip owns feedback, the corner window stays hidden
         // but BOTH feedback loops still run — they drive the chip's clock, level glyph,
         // and 500ms re-anchoring. If anchoring fails, the fallback law applies: hide the
@@ -242,7 +264,7 @@ final class DictationOverlayController {
             if caretChipWindow?.isVisible == true {
                 // Chip is live: corner window stays hidden; loops drive clock/levels/re-anchor.
                 // Task 5 B gating: caret listening never shows a ring; machined listening never (waveform is hero).
-                // Strip ring offscreen while chip owns feedback — chip never spins, deck stays hidden.
+                // Strip ring while chip owns feedback — chip stays static, deck stays hidden.
                 if let mapped = indicatorState(for: state), mapped == .listening {
                     contentView?.hideGreenRing()
                     caretChipContentView?.hideGreenRing()
@@ -261,10 +283,11 @@ final class DictationOverlayController {
         } else {
             hideCaretChip()
         }
-        view.setWaveformVisible(showsWaveform && !compact)
+        contentView?.setWaveformVisible(showsWaveform && !compact)
         // K-48 Task 5: per-session surface switch — pill styling vs machined deck.
-        view.setCompactSurface(active: compact, darkAppearance: sessionUsesDarkAppearance, reduceMotion: sessionReduceMotion)
-        // Task 5 B gating: whisper listening slow 3.6s, all transcribing fast 2.4s, caret/machined listening never; strip ring offscreen.
+        contentView?.setCompactSurface(active: compact, darkAppearance: sessionUsesDarkAppearance, reduceMotion: sessionReduceMotion)
+        // Ring policy (owner decision): static hairline for transcribing only.
+        // Listening never shows a ring in any style; all other states strip it.
         do {
             let mapped = indicatorState(for: state)
             if let s = mapped, s == .transcribing {
@@ -273,9 +296,6 @@ final class DictationOverlayController {
                 } else if !(caretChipOwnsFeedback(for: state) && caretChipWindow?.isVisible == true) {
                     contentView?.showGreenRing(speed: .transcribing)
                 }
-                caretChipContentView?.hideGreenRing()
-            } else if mapped == .listening, sessionStyle == .whisper {
-                contentView?.showGreenRing(speed: .listening)
                 caretChipContentView?.hideGreenRing()
             } else {
                 contentView?.hideGreenRing()
@@ -290,7 +310,19 @@ final class DictationOverlayController {
         // (held-transcript "Paste", error "Open") is presented — with
         // ignoresMouseEvents stuck on, those buttons can never be clicked.
         w.ignoresMouseEvents = (presentation.action == nil)
-        view.apply(presentation: presentation)
+        if usesSwiftUISurfaces {
+            publish(to: presentationState, overlayState: state, presentation: presentation)
+            // Telemetry (DEBUG, Xcode console): confirms the new UI consumed this
+            // transition. The ring/glow law is the published state's: ringPeriod
+            // is non-nil only for transcribing; listening/pausing/held/blocked
+            // carry no ring and no glow in ANY style (owner ruling 2026-09-09).
+            let canonical = indicatorState(for: state)
+            let ringOn = IndicatorTokens.ringPeriod(style: sessionStyle, canonicalState: canonical) != nil
+            let glowOn = IndicatorTokens.ringGlowVisible(style: sessionStyle, canonicalState: canonical)
+            indicatorDiag.debug("SwiftUI indicator presented style=\(self.sessionStyle.rawValue, privacy: .public) state=\(String(describing: canonical), privacy: .public) ring=\(ringOn, privacy: .public) glow=\(glowOn, privacy: .public)")
+        } else {
+            contentView?.apply(presentation: presentation)
+        }
         w.alphaValue = 0.0
         w.orderFrontRegardless()
         let presentDuration = isRecordingState(state) ? recordingFadeDuration : fadeDuration
@@ -320,6 +352,9 @@ final class DictationOverlayController {
             stopWaveformUpdates()
             stopTimerUpdates()
             contentView?.updateWaveform(samples: [], active: false)
+            if usesSwiftUISurfaces {
+                presentationState.waveform.reset()
+            }
         }
     }
 
@@ -338,7 +373,7 @@ final class DictationOverlayController {
         switch state {
         case .recordingHold, .recordingToggle: return .listening
         case .transcribing: return .transcribing
-        case .success, .info, .error: return nil
+        case .info, .error: return nil
         }
     }
 
@@ -370,8 +405,6 @@ final class DictationOverlayController {
                          targetAppName: targetAppName, targetAppIcon: targetAppIcon, isRecording: true)
         case .transcribing:
             return .init(message: "Transcribing…", actionTitle: nil, action: nil)
-        case .success:
-            return .init(message: "Inserted", actionTitle: nil, action: nil)
         case .info(let message):
             return .init(message: message, actionTitle: nil, action: nil)
         case .error(let message, let action):
@@ -426,6 +459,10 @@ final class DictationOverlayController {
             while !Task.isCancelled {
                 let samples = self.waveformProvider?() ?? []
                 await MainActor.run {
+                    if usesSwiftUISurfaces {
+                        self.presentationState.waveform.ingest(samples: samples, active: true)
+                        self.presentationState.waveform.ingestGlyph(samples: samples)
+                    }
                     self.contentView?.updateWaveform(samples: samples, active: true)
                     self.contentView?.updatePillLevel(samples: samples)
                     self.caretChipContentView?.updateLevel(samples: samples)
@@ -450,6 +487,9 @@ final class DictationOverlayController {
                 let ss = elapsed % 60
                 let formatted = String(format: "%02d:%02d", mm, ss)
                 await MainActor.run {
+                    if usesSwiftUISurfaces {
+                        self.presentationState.publishElapsed(formatted)
+                    }
                     self.contentView?.updateElapsedTime(formatted)
                     self.updateCaretChipForTick(formattedTime: formatted)
                 }
@@ -483,24 +523,64 @@ final class DictationOverlayController {
         } else if !chipVisibleNow && chipVisibleBefore {
             // Anchor died mid-recording: restore the deck, never indicator-less.
             window?.alphaValue = 1.0
-            // Task 5: fallback to deck — re-apply gating. Listening (this tick is listening-only) hides ring;
-            // if transcribing after fallback, show fast ring on deck.
+            // Fallback to deck — re-apply gating. This tick is listening-only so the
+            // ring stays hidden; the transcribing branch is kept for correctness
+            // if this path ever widens beyond listening.
             // Note: tick models listening; reuse transcribing gate for correctness if state ever widens.
             let mapped: IndicatorState? = .listening
             if mapped == .transcribing {
                 contentView?.showGreenRing(speed: .transcribing)
                 caretChipContentView?.hideGreenRing()
             } else {
-                // Caret/machined listening never shows ring even on fallback deck
+                // Listening never shows a ring, even on the fallback deck
                 contentView?.hideGreenRing()
                 caretChipContentView?.hideGreenRing()
             }
         }
     }
 
+    /// Phase 2: exactly one publish per transition. The SwiftUI parity surfaces
+    /// read this; the AppKit path keeps its direct view calls while the flag is
+    /// off (plan §3.6, §10 Phase 2).
+    private func publish(to state: IndicatorPresentationState,
+                         overlayState: OverlayState,
+                         presentation: OverlayCapsuleView.Presentation) {
+        state.publish(
+            presentation: IndicatorPresentationState.Presentation(
+                message: presentation.message,
+                primaryActionTitle: presentation.actionTitle,
+                secondaryActionTitle: presentation.secondaryActionTitle,
+                primaryAction: presentation.action,
+                secondaryAction: presentation.secondaryAction ?? heldSecondaryAction,
+                targetAppName: presentation.targetAppName,
+                targetAppIcon: presentation.targetAppIcon,
+                isRecording: presentation.isRecording,
+                canonicalState: indicatorState(for: overlayState)
+            ),
+            session: IndicatorPresentationState.Session(
+                style: sessionStyle,
+                usesDarkAppearance: sessionUsesDarkAppearance,
+                reduceMotion: sessionReduceMotion
+            )
+        )
+    }
+
     private func ensureWindow() {
         guard window == nil else { return }
-        let view = OverlayCapsuleView(frame: NSRect(origin: .zero, size: currentWindowSize))
+        let view: NSView
+        if usesSwiftUISurfaces {
+            // Telemetry (DEBUG, Xcode console): confirms the SwiftUI parity
+            // content path built this window. AppKit path never logs here.
+            indicatorDiag.debug("SwiftUI indicator surfaces ACTIVE (capsule hosting view)")
+            let host = NSHostingView(rootView: IndicatorCapsuleRootView(state: presentationState))
+            host.frame = NSRect(origin: .zero, size: currentWindowSize)
+            capsuleHostingView = host
+            view = host
+        } else {
+            let capsule = OverlayCapsuleView(frame: NSRect(origin: .zero, size: currentWindowSize))
+            contentView = capsule
+            view = capsule
+        }
         let w = NSWindow(
             contentRect: NSRect(origin: .zero, size: currentWindowSize),
             styleMask: [.borderless],
@@ -512,9 +592,14 @@ final class DictationOverlayController {
         w.level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)
         w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         w.ignoresMouseEvents = true
-        w.hasShadow = false
+        // Corner-halo fix: elevation moves to the WindowServer. A CALayer shadow on the
+        // content view cannot render past the window's own backing rect, so it was clipped
+        // SQUARE at the frame edges — that was the translucent rectangle behind the pill.
+        // A window shadow is composited OUTSIDE the frame and derives from the content's
+        // alpha shape (the stadium) automatically; invalidateShadow() after setFrame keeps
+        // the shape synced across the 290<->200<->150 width switches.
+        w.hasShadow = true
         w.contentView = view
-        contentView = view
         window = w
     }
 
@@ -524,6 +609,9 @@ final class DictationOverlayController {
         let placement = GeneralSettingsConfiguration.load().indicatorPlacement
         let frame = frameForPlacement(placement, visibleFrame: screenFrame)
         w.setFrame(frame, display: false)
+        // Re-derive the WindowServer shadow from the content alpha after every frame
+        // change (surface switches resize the window; stale shape = wrong halo).
+        w.invalidateShadow()
     }
 
     private func frameForPlacement(_ placement: IndicatorPlacement, visibleFrame: CGRect) -> CGRect {
@@ -657,11 +745,13 @@ final class DictationOverlayController {
             return
         }
         ensureCaretChipWindow()
-        guard let chipWindow = caretChipWindow, let chipView = caretChipContentView else { return }
+        guard let chipWindow = caretChipWindow else { return }
         chipWindow.setFrame(
             NSRect(x: anchor.x, y: anchor.y, width: Metrics.caretChipWidth, height: Metrics.pillHeight),
             display: true)
-        chipView.applySurfaceStylingForSession(dark: sessionUsesDarkAppearance, reduceMotion: sessionReduceMotion)
+        // Shadow shape follows the content alpha; re-derive after any frame change.
+        chipWindow.invalidateShadow()
+        caretChipContentView?.applySurfaceStylingForSession(dark: sessionUsesDarkAppearance, reduceMotion: sessionReduceMotion)
         // Review gap 1: the chip carries its own full visibility — ordered front here,
         // ordered out by hideCaretChip(). It must NOT mirror the corner window's alpha,
         // which is 0 while the chip owns feedback.
@@ -671,8 +761,21 @@ final class DictationOverlayController {
 
     private func ensureCaretChipWindow() {
         guard caretChipWindow == nil else { return }
-        let view = CaretChipView(frame: NSRect(origin: .zero,
-                                               size: CGSize(width: Metrics.caretChipWidth, height: Metrics.pillHeight)))
+        let view: NSView
+        if usesSwiftUISurfaces {
+            // Telemetry (DEBUG, Xcode console): caret chip on the SwiftUI path.
+            indicatorDiag.debug("SwiftUI indicator surfaces ACTIVE (chip hosting view)")
+            let host = NSHostingView(rootView: IndicatorChipRootView(state: presentationState))
+            host.frame = NSRect(origin: .zero,
+                                size: CGSize(width: Metrics.caretChipWidth, height: Metrics.pillHeight))
+            chipHostingView = host
+            view = host
+        } else {
+            let chip = CaretChipView(frame: NSRect(origin: .zero,
+                                                   size: CGSize(width: Metrics.caretChipWidth, height: Metrics.pillHeight)))
+            caretChipContentView = chip
+            view = chip
+        }
         let w = NSWindow(
             contentRect: NSRect(origin: .zero,
                                 size: CGSize(width: Metrics.caretChipWidth, height: Metrics.pillHeight)),
@@ -684,9 +787,9 @@ final class DictationOverlayController {
         w.level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 2)
         w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         w.ignoresMouseEvents = true
-        w.hasShadow = false
+        // WindowServer shadow (see ensureWindow) — no CALayer shadow anywhere.
+        w.hasShadow = true
         w.contentView = view
-        caretChipContentView = view
         caretChipWindow = w
     }
 
@@ -725,12 +828,11 @@ private final class OverlayCapsuleView: NSView {
         var isRecording: Bool = false
     }
 
-    // Container clip for obsidian glass: NSVisualEffectView behindWindow ignores layer.mask/cornerRadius,
-    // so stadium rounding must be provided by a clipping container (wantsLayer + masksToBounds + cornerCurve).
+    // Container clip for the obsidian surface: rounds every subview to the
+    // stadium (wantsLayer + masksToBounds + cornerCurve). Single source of truth.
     private let clipContainer = NSView()
     // Shared subviews
-    private let blurView = NSVisualEffectView()
-    private let tintView = NSView()
+    private let surfaceView = NSView()
 
         // Non-recording row
     private let messageLabel = NSTextField(labelWithString: "")
@@ -772,15 +874,17 @@ private final class OverlayCapsuleView: NSView {
     private var shimmerStack: NSStackView?
     private var dots: [NSView] { [shimmerDot0, shimmerDot1, shimmerDot2] }
 
-    // Task 3: universal rim — inner via blurView border (1px), outer via shape layer, shadow for elevation
+    // Task 3: universal rim — inner via surfaceView border (1px), outer via shape layer, shadow for elevation
     private let outerStrokeLayer = CAShapeLayer()
-    private let innerStroke = CALayer() // kept for verifier parity: inner 1px is blurView.layer border
+    private let innerStroke = CALayer() // kept for verifier parity: inner 1px is surfaceView.layer border
     private let outerStroke = CAShapeLayer() // alias for spec naming
-    // Fix: explicit mask for NSVisualEffectView rounding — cornerRadius/masksToBounds alone does not clip backdrop
-    private let blurMaskLayer = CAShapeLayer()
-    // Task 4: green clockwise arc — conic gradient + glow, two speeds (3.6 listening, 2.4 transcribing), no dwell
-    private let ringLayer = CAGradientLayer()
-    private let ringGlowLayer = CAGradientLayer()
+    // Ring = fixed stadium-stroke mask on a plain container; only the conic-gradient
+    // child spins inside it. (Rotating the masked layer itself tumbles the whole
+    // stadium outline through the pill interior on a non-square pill.)
+    private let ringLayer = CALayer()
+    private let ringSpinLayer = CAGradientLayer()
+    private let ringGlowLayer = CALayer()
+    private let ringGlowSpinLayer = CAGradientLayer()
     private var ringIsInstalled = false
 
     override init(frame frameRect: NSRect) {
@@ -826,6 +930,8 @@ private final class OverlayCapsuleView: NSView {
                 messageLabel.isHidden = false
                 actionButton.isHidden = true
                 shimmerStack?.isHidden = false
+                let compactNow = isCompactSurface
+                indicatorDiag.debug("transcribing pill shown compact=\(compactNow, privacy: .public)")
             } else {
                 shimmerStack?.isHidden = true
                 messageLabel.stringValue = presentation.message
@@ -871,33 +977,33 @@ private final class OverlayCapsuleView: NSView {
 
     private func setup() {
         wantsLayer = true
-        // Task 3: universal rim — elevation + double-stroke. Self hosts shadow/outer stroke, blurView clips inner.
-        // FIX: whisper pill square corners — self must not clip shadow, and must stay transparent (no square bg).
+        // Task 3: universal rim — double-stroke. surfaceView clips inner; elevation is the
+        // WindowServer window shadow (hasShadow=true). NO CALayer shadow here: a layer
+        // shadow is clipped to the window's backing rect and paints a square halo in the
+        // transparent corners (the window IS the stadium's bounding box).
         layer?.masksToBounds = false
         layer?.backgroundColor = nil
         layer?.cornerCurve = .continuous
-        layer?.shadowColor = NSColor.black.cgColor
-        layer?.shadowOpacity = 0.28
-        layer?.shadowRadius = 10
-        layer?.shadowOffset = CGSize(width: 0, height: 10)
         // Outer 1px stroke sits on self.layer so its outer half lifts off the background (white/dark).
         outerStrokeLayer.fillColor = NSColor.clear.cgColor
         outerStrokeLayer.strokeColor = NSColor.black.withAlphaComponent(0.18).cgColor
         outerStrokeLayer.lineWidth = 1
         outerStrokeLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
         layer?.addSublayer(outerStrokeLayer)
-        // Initial stadium paths so first frame before layout is already clipped (prewarm)
+        // Initial outer-stroke path so the first frame before layout already has its rim (prewarm)
         let initialRadius = Metrics.cornerRadius
-        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: initialRadius, cornerHeight: initialRadius, transform: nil)
         outerStrokeLayer.frame = bounds
         outerStrokeLayer.path = CGPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), cornerWidth: max(0, initialRadius - 0.5), cornerHeight: max(0, initialRadius - 0.5), transform: nil)
-        // Task 4: green clockwise arc — conic gradient ring + glow (configured here, installed in showGreenRing)
-        ringLayer.type = .conic
-        ringLayer.colors = [NSColor.clear.cgColor, NSColor.clear.cgColor, indicatorBrandGreen.cgColor]
-        ringLayer.locations = [0.0, 0.71, 1.0]
-        ringLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
-        ringLayer.endPoint = CGPoint(x: 1, y: 0.5)
-        ringLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        // Green clockwise arc — fixed 1px stadium mask on a container; only the
+        // conic-gradient child spins inside it (mask never rotates, so the border
+        // shape can't tumble through the pill interior).
+        ringSpinLayer.type = .conic
+        ringSpinLayer.colors = [NSColor.clear.cgColor, NSColor.clear.cgColor, indicatorBrandGreen.cgColor]
+        ringSpinLayer.locations = [0.0, 0.71, 1.0]
+        ringSpinLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+        ringSpinLayer.endPoint = CGPoint(x: 1, y: 0.5)
+        ringSpinLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        ringLayer.addSublayer(ringSpinLayer)
         let ringMask = CAShapeLayer()
         ringMask.fillColor = NSColor.clear.cgColor
         ringMask.strokeColor = NSColor.white.cgColor
@@ -905,13 +1011,13 @@ private final class OverlayCapsuleView: NSView {
         ringMask.lineCap = .round
         ringMask.lineJoin = .round
         ringLayer.mask = ringMask
-        ringGlowLayer.type = .conic
-        ringGlowLayer.colors = [NSColor.clear.cgColor, NSColor.clear.cgColor, indicatorBrandGreen.cgColor]
-        ringGlowLayer.locations = [0.0, 0.71, 1.0]
-        ringGlowLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
-        ringGlowLayer.endPoint = CGPoint(x: 1, y: 0.5)
-        ringGlowLayer.opacity = 0.38
-        ringGlowLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        ringGlowSpinLayer.type = .conic
+        ringGlowSpinLayer.colors = [NSColor.clear.cgColor, NSColor.clear.cgColor, indicatorBrandGreen.cgColor]
+        ringGlowSpinLayer.locations = [0.0, 0.71, 1.0]
+        ringGlowSpinLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+        ringGlowSpinLayer.endPoint = CGPoint(x: 1, y: 0.5)
+        ringGlowSpinLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        ringGlowLayer.addSublayer(ringGlowSpinLayer)
         let glowMask = CAShapeLayer()
         glowMask.fillColor = NSColor.clear.cgColor
         glowMask.strokeColor = NSColor.white.cgColor
@@ -921,9 +1027,8 @@ private final class OverlayCapsuleView: NSView {
         glowMask.opacity = 0.38
         ringGlowLayer.mask = glowMask
 
-        // Container clip: NSVisualEffectView with behindWindow ignores layer.mask/cornerRadius for its backdrop.
-        // Clip via a container NSView that provides the stadium cornerRadius; blurView itself still carries
-        // an explicit mask as a secondary guarantee but the container is the source-of-truth for clipping.
+        // Container clip: rounds every subview to the stadium so nothing square
+        // can peek past the corners. The container is the single source of truth.
         clipContainer.wantsLayer = true
         clipContainer.layer?.masksToBounds = true
         clipContainer.layer?.cornerCurve = .continuous
@@ -931,38 +1036,28 @@ private final class OverlayCapsuleView: NSView {
         clipContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(clipContainer)
 
-        // Blur background — dark material, higher translucency
-        // Fix: wantsLayer BEFORE material/cornerRadius so layer exists; mask guarantees clip for NSVisualEffectView backdrop
-        blurView.wantsLayer = true
-        blurView.material = .hudWindow
-        blurView.blendingMode = .behindWindow
-        blurView.state = .active
-        blurView.appearance = NSAppearance(named: .darkAqua)
-        blurView.alphaValue = 1.0
-        blurView.layer?.cornerRadius = Metrics.cornerRadius
-        blurView.layer?.masksToBounds = true
-        blurView.layer?.cornerCurve = .continuous
-        blurView.layer?.borderWidth = 1
-        blurView.layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
-        // Explicit mask: NSVisualEffectView's backdrop ignores cornerRadius/masksToBounds on some builds
-        // Retained as secondary guarantee; primary clip is clipContainer.
-        blurMaskLayer.fillColor = NSColor.black.cgColor
-        blurView.layer?.mask = blurMaskLayer
-        blurView.translatesAutoresizingMaskIntoConstraints = false
-        clipContainer.addSubview(blurView)
-
-        // Dark tint layer — more translucent for a grey look
-        tintView.wantsLayer = true
-        tintView.layer?.backgroundColor = NSColor(srgbRed: 20/255.0, green: 20/255.0, blue: 18/255.0, alpha: 0.55).cgColor
-        tintView.translatesAutoresizingMaskIntoConstraints = false
-        blurView.addSubview(tintView, positioned: .below, relativeTo: nil)
+        // Flat obsidian surface (mockup `.cap-e-dark .blur`: rgba(28,28,30)).
+        // Deliberately NOT a live blur: behindWindow vibrancy is composited by
+        // the WindowServer outside the app's layers, so no in-app clip can shape
+        // it — that unshapable square backdrop was the corner halo. A plain
+        // opaque layer rounds deterministically via cornerRadius/masksToBounds.
+        surfaceView.wantsLayer = true
+        surfaceView.layer?.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 1.0).cgColor
+        surfaceView.alphaValue = 1.0
+        surfaceView.layer?.cornerRadius = Metrics.cornerRadius
+        surfaceView.layer?.masksToBounds = true
+        surfaceView.layer?.cornerCurve = .continuous
+        surfaceView.layer?.borderWidth = 1
+        surfaceView.layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+        surfaceView.translatesAutoresizingMaskIntoConstraints = false
+        clipContainer.addSubview(surfaceView)
 
         // ── Non-recording message label ──
         messageLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         messageLabel.textColor = .white
         messageLabel.lineBreakMode = .byTruncatingTail
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
-        blurView.addSubview(messageLabel)
+        surfaceView.addSubview(messageLabel)
 
         actionButton.bezelStyle = .rounded
         actionButton.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
@@ -970,7 +1065,7 @@ private final class OverlayCapsuleView: NSView {
         actionButton.action = #selector(didTapAction)
         actionButton.isHidden = true
         actionButton.translatesAutoresizingMaskIntoConstraints = false
-        blurView.addSubview(actionButton)
+        surfaceView.addSubview(actionButton)
 
         // K-52 discard: link-style secondary button (Discard) on the held chip.
         secondaryButton.bezelStyle = .regularSquare
@@ -983,7 +1078,7 @@ private final class OverlayCapsuleView: NSView {
         secondaryButton.isHidden = true
         secondaryButton.translatesAutoresizingMaskIntoConstraints = false
         secondaryButton.setContentHuggingPriority(.required, for: .horizontal)
-        blurView.addSubview(secondaryButton)
+        surfaceView.addSubview(secondaryButton)
 
         // ── Recording-mode top row ──
         // App icon
@@ -993,10 +1088,10 @@ private final class OverlayCapsuleView: NSView {
         appIconView.layer?.cornerRadius = 4
         appIconView.layer?.masksToBounds = true
         appIconView.isHidden = true
-        blurView.addSubview(appIconView)
+        surfaceView.addSubview(appIconView)
 
-        let iconTop = appIconView.topAnchor.constraint(equalTo: blurView.topAnchor, constant: Metrics.topRowTopPadding)
-        let iconCenterY = appIconView.centerYAnchor.constraint(equalTo: blurView.centerYAnchor)
+        let iconTop = appIconView.topAnchor.constraint(equalTo: surfaceView.topAnchor, constant: Metrics.topRowTopPadding)
+        let iconCenterY = appIconView.centerYAnchor.constraint(equalTo: surfaceView.centerYAnchor)
         let iconWidth = appIconView.widthAnchor.constraint(equalToConstant: Metrics.topRowHeight)
         let iconHeight = appIconView.heightAnchor.constraint(equalToConstant: Metrics.topRowHeight)
         appIconTopConstraint = iconTop
@@ -1010,7 +1105,7 @@ private final class OverlayCapsuleView: NSView {
         appNameLabel.lineBreakMode = .byTruncatingMiddle
         appNameLabel.translatesAutoresizingMaskIntoConstraints = false
         appNameLabel.isHidden = true
-        blurView.addSubview(appNameLabel)
+        surfaceView.addSubview(appNameLabel)
 
         // Recording status dot — brand green fill with soft glow (K-48 machined surface).
         recordingDotView.wantsLayer = true
@@ -1026,7 +1121,7 @@ private final class OverlayCapsuleView: NSView {
         // without this its zero-size autoresizing mask fights those constraints and
         // Auto Layout breaks unrelated rows to recover.
         recordingDotView.translatesAutoresizingMaskIntoConstraints = false
-        blurView.addSubview(recordingDotView)
+        surfaceView.addSubview(recordingDotView)
         // K-48 review finding I-1: Reduce Motion is evaluated PER SESSION (showRecording),
         // not here — updateBreatheAnimation() applies the session value whenever the surface flips.
         updateBreatheAnimation()
@@ -1037,36 +1132,30 @@ private final class OverlayCapsuleView: NSView {
         timerLabel.alignment = .right
         timerLabel.translatesAutoresizingMaskIntoConstraints = false
         timerLabel.isHidden = true
-        blurView.addSubview(timerLabel)
+        surfaceView.addSubview(timerLabel)
 
         // Waveform
         waveformView.translatesAutoresizingMaskIntoConstraints = false
         waveformView.wantsLayer = true
-        waveformView.layer?.zPosition = 100 // Keep bars above the dark tint surface
-        blurView.addSubview(waveformView)
+        waveformView.layer?.zPosition = 100 // Keep bars above the dark surface
+        surfaceView.addSubview(waveformView)
 
         NSLayoutConstraint.activate([
-            // Container clip fills capsule; blur fills container (container provides stadium clip for behindWindow)
+            // Container clip fills capsule; surface fills container (container rounds everything to the stadium)
             clipContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
             clipContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
             clipContainer.topAnchor.constraint(equalTo: topAnchor),
             clipContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            blurView.leadingAnchor.constraint(equalTo: clipContainer.leadingAnchor),
-            blurView.trailingAnchor.constraint(equalTo: clipContainer.trailingAnchor),
-            blurView.topAnchor.constraint(equalTo: clipContainer.topAnchor),
-            blurView.bottomAnchor.constraint(equalTo: clipContainer.bottomAnchor),
-
-            // Tint fills blur
-            tintView.leadingAnchor.constraint(equalTo: blurView.leadingAnchor),
-            tintView.trailingAnchor.constraint(equalTo: blurView.trailingAnchor),
-            tintView.topAnchor.constraint(equalTo: blurView.topAnchor),
-            tintView.bottomAnchor.constraint(equalTo: blurView.bottomAnchor),
+            surfaceView.leadingAnchor.constraint(equalTo: clipContainer.leadingAnchor),
+            surfaceView.trailingAnchor.constraint(equalTo: clipContainer.trailingAnchor),
+            surfaceView.topAnchor.constraint(equalTo: clipContainer.topAnchor),
+            surfaceView.bottomAnchor.constraint(equalTo: clipContainer.bottomAnchor),
 
             // Non-recording message label
-            messageLabel.leadingAnchor.constraint(equalTo: blurView.leadingAnchor, constant: Metrics.hPadding),
-            messageLabel.centerYAnchor.constraint(equalTo: blurView.centerYAnchor),
-            actionButton.trailingAnchor.constraint(equalTo: blurView.trailingAnchor, constant: -10),
+            messageLabel.leadingAnchor.constraint(equalTo: surfaceView.leadingAnchor, constant: Metrics.hPadding),
+            messageLabel.centerYAnchor.constraint(equalTo: surfaceView.centerYAnchor),
+            actionButton.trailingAnchor.constraint(equalTo: surfaceView.trailingAnchor, constant: -10),
             actionButton.centerYAnchor.constraint(equalTo: messageLabel.centerYAnchor),
             messageLabel.trailingAnchor.constraint(lessThanOrEqualTo: actionButton.leadingAnchor, constant: -8),
             // K-52 discard: the message must stop before the Discard link, not
@@ -1077,7 +1166,7 @@ private final class OverlayCapsuleView: NSView {
             secondaryButton.centerYAnchor.constraint(equalTo: messageLabel.centerYAnchor),
 
             // Recording top row — icon
-            appIconView.leadingAnchor.constraint(equalTo: blurView.leadingAnchor, constant: Metrics.hPadding),
+            appIconView.leadingAnchor.constraint(equalTo: surfaceView.leadingAnchor, constant: Metrics.hPadding),
             iconTop,
             iconWidth,
             iconHeight,
@@ -1094,13 +1183,13 @@ private final class OverlayCapsuleView: NSView {
             recordingDotView.trailingAnchor.constraint(equalTo: timerLabel.leadingAnchor, constant: -8),
 
             // Recording top row — timer
-            timerLabel.trailingAnchor.constraint(equalTo: blurView.trailingAnchor, constant: -Metrics.hPadding),
+            timerLabel.trailingAnchor.constraint(equalTo: surfaceView.trailingAnchor, constant: -Metrics.hPadding),
             timerLabel.centerYAnchor.constraint(equalTo: appIconView.centerYAnchor),
             timerLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 38),
 
             // Waveform horizontal insets
-            waveformView.leadingAnchor.constraint(equalTo: blurView.leadingAnchor, constant: Metrics.hPadding),
-            waveformView.trailingAnchor.constraint(equalTo: blurView.trailingAnchor, constant: -Metrics.hPadding)
+            waveformView.leadingAnchor.constraint(equalTo: surfaceView.leadingAnchor, constant: Metrics.hPadding),
+            waveformView.trailingAnchor.constraint(equalTo: surfaceView.trailingAnchor, constant: -Metrics.hPadding)
         ])
 
         waveformTopConstraint = waveformView.topAnchor.constraint(equalTo: appIconView.bottomAnchor, constant: Metrics.waveformTopSpacing)
@@ -1118,9 +1207,9 @@ private final class OverlayCapsuleView: NSView {
     private func setupPillChrome() {
         // Drawn glyph: one custom view, no per-bar constraints to churn.
         pillLevelGlyph.translatesAutoresizingMaskIntoConstraints = false
-        blurView.addSubview(pillLevelGlyph)
+        surfaceView.addSubview(pillLevelGlyph)
         NSLayoutConstraint.activate([
-            pillLevelGlyph.centerYAnchor.constraint(equalTo: blurView.centerYAnchor),
+            pillLevelGlyph.centerYAnchor.constraint(equalTo: surfaceView.centerYAnchor),
             pillLevelGlyph.trailingAnchor.constraint(equalTo: timerLabel.leadingAnchor, constant: -8),
             pillLevelGlyph.widthAnchor.constraint(equalToConstant: 14),
             pillLevelGlyph.heightAnchor.constraint(equalToConstant: 12)
@@ -1131,11 +1220,15 @@ private final class OverlayCapsuleView: NSView {
             dot.wantsLayer = true
             dot.layer?.backgroundColor = indicatorBrandGreen.cgColor
             dot.layer?.cornerRadius = Metrics.shimmerDotSize / 2
-            dot.alphaValue = 0.35
+            // No base dimmer: the visibility floor lives in the shimmer curve (0.55).
+            dot.alphaValue = 1.0
             // Visibility is owned by shimmerStack; dots must stay visible inside it.
             dot.isHidden = false
             dot.translatesAutoresizingMaskIntoConstraints = false
-            blurView.addSubview(dot)
+            // Plain NSViews have no intrinsic size: pin 4x4 or the stack collapses them to zero.
+            dot.widthAnchor.constraint(equalToConstant: Metrics.shimmerDotSize).isActive = true
+            dot.heightAnchor.constraint(equalToConstant: Metrics.shimmerDotSize).isActive = true
+            surfaceView.addSubview(dot)
         }
         let shimmerStack = NSStackView(views: dots)
         shimmerStack.orientation = .horizontal
@@ -1143,37 +1236,39 @@ private final class OverlayCapsuleView: NSView {
         shimmerStack.spacing = 3
         shimmerStack.translatesAutoresizingMaskIntoConstraints = false
         shimmerStack.isHidden = true
-        blurView.addSubview(shimmerStack)
+        surfaceView.addSubview(shimmerStack)
         self.shimmerStack = shimmerStack
         NSLayoutConstraint.activate([
-            shimmerStack.centerYAnchor.constraint(equalTo: blurView.centerYAnchor),
-            shimmerStack.trailingAnchor.constraint(equalTo: blurView.trailingAnchor, constant: -Metrics.hPadding)
+            shimmerStack.centerYAnchor.constraint(equalTo: surfaceView.centerYAnchor),
+            shimmerStack.trailingAnchor.constraint(equalTo: surfaceView.trailingAnchor, constant: -Metrics.hPadding),
+            // Keep the Transcribing label clear of the dots.
+            shimmerStack.leadingAnchor.constraint(greaterThanOrEqualTo: messageLabel.trailingAnchor, constant: 8)
         ])
     }
 
     override func layout() {
         super.layout()
-        // Task 3: keep shadowPath + outer stroke synced to current bounds+cornerRadius (14 machined /15 pill)
-        // obsidian fix: container clip provides true stadium clipping for behindWindow; blurView mask is secondary
+        // Task 3: keep the outer stroke synced to current bounds+cornerRadius (14 machined /15 pill).
+        // No shadowPath: elevation is the WindowServer window shadow, not a CALayer shadow.
         let radius: CGFloat = isCompactSurface ? Metrics.pillCornerRadius : Metrics.cornerRadius
-        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
         outerStrokeLayer.frame = bounds
         let insetBounds = bounds.insetBy(dx: 0.5, dy: 0.5)
         let innerRadius = max(0, radius - 0.5)
         outerStrokeLayer.path = CGPath(roundedRect: insetBounds, cornerWidth: innerRadius, cornerHeight: innerRadius, transform: nil)
-        // Container clip — source-of-truth for stadium clip (behindWindow ignores blurView.layer.mask)
+        // Container clip + surface round every subview to the stadium.
         clipContainer.layer?.cornerRadius = radius
         clipContainer.layer?.masksToBounds = true
         clipContainer.layer?.cornerCurve = .continuous
-        // Explicit mask guarantees stadium clip even when NSVisualEffectView ignores cornerRadius (secondary)
-        blurMaskLayer.frame = blurView.bounds
-        blurMaskLayer.path = CGPath(roundedRect: blurView.bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
-        blurView.layer?.cornerRadius = radius
-        blurView.layer?.masksToBounds = true
-        blurView.layer?.cornerCurve = .continuous
+        surfaceView.layer?.cornerRadius = radius
+        surfaceView.layer?.masksToBounds = true
+        surfaceView.layer?.cornerCurve = .continuous
         layoutRing()
-        // Task 6 offscreen leak guard: if window alpha 0 or view hidden, strip animations so nothing spins offscreen.
-        if window?.alphaValue == 0 || isHidden {
+        // Offscreen guard: strip session animations only while ordered out.
+        // alphaValue hits 0 transiently mid-transition (fade-in), so it must NOT
+        // gate teardown — any layout landing in that window (e.g. a setFrame from
+        // per-app AX placement, which varies between hosts like VS Code and Hermes)
+        // would otherwise strip the just-installed ring + shimmer for the session.
+        if !(window?.isVisible ?? false) || isHidden {
             if ringIsInstalled {
                 hideGreenRing()
             }
@@ -1182,12 +1277,14 @@ private final class OverlayCapsuleView: NSView {
         }
     }
 
-    // MARK: - Task 4: green clockwise arc helpers
+    // MARK: - Green clockwise arc helpers (rotation restores the approved spec)
 
     private func layoutRing() {
         let radius: CGFloat = isCompactSurface ? Metrics.pillCornerRadius : Metrics.cornerRadius
         ringLayer.frame = bounds
         ringGlowLayer.frame = bounds
+        ringSpinLayer.frame = bounds
+        ringGlowSpinLayer.frame = bounds
         if let mask = ringLayer.mask as? CAShapeLayer {
             mask.frame = bounds
             // 1.5px ring inset 0.75: mask stroke sits exactly on stadium clip, not interior smear
@@ -1206,89 +1303,82 @@ private final class OverlayCapsuleView: NSView {
         }
     }
 
+    /// Green clockwise arc for transcribing (2.4s fast; listening never rings per
+    /// current policy). The stadium mask stays fixed on the container — only the
+    /// conic-gradient child spins, so the arc sweeps the border (never the interior).
     func showGreenRing(speed: RingSpeed) {
         guard !sessionReduceMotion else { showStaticGreenHairline(); return }
-        if ringIsInstalled {
-            updateRingSpeed(speed)
-            return
-        }
+        if ringIsInstalled { updateRingSpeed(speed); return }
         ringIsInstalled = true
+        ringLayer.opacity = 1.0
+        ringGlowLayer.opacity = 0.38
         layer?.addSublayer(ringGlowLayer)
         layer?.addSublayer(ringLayer)
         layoutRing()
-        let dur = speed == .listening ? ringListeningDuration : ringTranscribingDuration
-        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
-        spin.fromValue = 0
-        spin.toValue = 2 * Double.pi
-        spin.duration = dur
-        spin.repeatCount = .infinity
-        spin.timingFunction = CAMediaTimingFunction(name: .linear)
-        ringLayer.add(spin, forKey: "spin")
-        ringGlowLayer.add(spin, forKey: "spin")
+        let viewW = bounds.width
+        let viewH = bounds.height
+        let spinW = ringSpinLayer.frame.width
+        let spinH = ringSpinLayer.frame.height
+        let maskBox = (ringLayer.mask as? CAShapeLayer)?.path?.boundingBox ?? .zero
+        indicatorDiag.debug("showGreenRing speed=\(String(describing: speed), privacy: .public) view=\(viewW)x\(viewH, privacy: .public) spin=\(spinW)x\(spinH, privacy: .public) maskPath=\(maskBox.width)x\(maskBox.height, privacy: .public)")
+        startRingSpin(speed: speed)
     }
 
     func hideGreenRing() {
-        ringLayer.removeAnimation(forKey: "spin")
-        ringGlowLayer.removeAnimation(forKey: "spin")
+        ringSpinLayer.removeAnimation(forKey: "spin")
+        ringGlowSpinLayer.removeAnimation(forKey: "spin")
         ringLayer.removeAnimation(forKey: "breathe")
         ringGlowLayer.removeAnimation(forKey: "breathe")
         ringLayer.removeFromSuperlayer()
         ringGlowLayer.removeFromSuperlayer()
         ringIsInstalled = false
+        indicatorDiag.debug("hideGreenRing")
     }
 
+    /// Reduce Motion: static 1px arc at 48% + slow breathe, no rotation.
     func showStaticGreenHairline() {
+        indicatorDiag.debug("static hairline (Reduce Motion path)")
         if ringIsInstalled {
-            ringLayer.removeAnimation(forKey: "spin")
-            ringGlowLayer.removeAnimation(forKey: "spin")
-            // Task 6: convert spinning->static correctly — add breathe if missing
-            if ringLayer.animation(forKey: "breathe") == nil {
-                ringLayer.opacity = 0.48
-                ringGlowLayer.opacity = 0.38
-                let breathe = CABasicAnimation(keyPath: "opacity")
-                breathe.fromValue = 0.3
-                breathe.toValue = 0.6
-                breathe.duration = 3.2
-                breathe.autoreverses = true
-                breathe.repeatCount = .infinity
-                breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                ringLayer.add(breathe, forKey: "breathe")
-                ringGlowLayer.add(breathe, forKey: "breathe")
-            }
-            return
+            ringSpinLayer.removeAnimation(forKey: "spin")
+            ringGlowSpinLayer.removeAnimation(forKey: "spin")
+        } else {
+            ringIsInstalled = true
+            layer?.addSublayer(ringGlowLayer)
+            layer?.addSublayer(ringLayer)
+            layoutRing()
         }
-        ringIsInstalled = true
-        // Static 1px #52B788 at 48% + breathing 3.2s, no rotation
-        layer?.addSublayer(ringGlowLayer)
-        layer?.addSublayer(ringLayer)
-        layoutRing()
         ringLayer.opacity = 0.48
         ringGlowLayer.opacity = 0.38
-        let breathe = CABasicAnimation(keyPath: "opacity")
-        breathe.fromValue = 0.3
-        breathe.toValue = 0.6
-        breathe.duration = 3.2
-        breathe.autoreverses = true
-        breathe.repeatCount = .infinity
-        breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        ringLayer.add(breathe, forKey: "breathe")
-        ringGlowLayer.add(breathe, forKey: "breathe")
+        if ringLayer.animation(forKey: "breathe") == nil {
+            let breathe = CABasicAnimation(keyPath: "opacity")
+            breathe.fromValue = 0.3
+            breathe.toValue = 0.6
+            breathe.duration = 3.2
+            breathe.autoreverses = true
+            breathe.repeatCount = .infinity
+            breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            ringLayer.add(breathe, forKey: "breathe")
+            ringGlowLayer.add(breathe, forKey: "breathe")
+        }
     }
 
     private func updateRingSpeed(_ speed: RingSpeed) {
-        // Task 6: centralize speeds — sole source is ringListeningDuration / ringTranscribingDuration
         guard !sessionReduceMotion else { showStaticGreenHairline(); return }
+        startRingSpin(speed: speed)
+    }
+
+    private func startRingSpin(speed: RingSpeed) {
+        // Clockwise on screen: Core Animation positive z-rotation is
+        // counterclockwise, so sweep 0 → -2π.
         let dur = speed == .listening ? ringListeningDuration : ringTranscribingDuration
-        ringLayer.removeAnimation(forKey: "spin")
-        ringGlowLayer.removeAnimation(forKey: "spin")
         let spin = CABasicAnimation(keyPath: "transform.rotation.z")
         spin.fromValue = 0
-        spin.toValue = 2 * Double.pi
+        spin.toValue = -2 * Double.pi
         spin.duration = dur
         spin.repeatCount = .infinity
         spin.timingFunction = CAMediaTimingFunction(name: .linear)
-        ringLayer.add(spin, forKey: "spin")
-        ringGlowLayer.add(spin, forKey: "spin")
+        ringSpinLayer.add(spin, forKey: "spin")
+        ringGlowSpinLayer.add(spin, forKey: "spin")
     }
 
     /// K-48 Task 5 + review finding I-1: per-session surface switch. Called from
@@ -1304,13 +1394,8 @@ private final class OverlayCapsuleView: NSView {
     }
 
     private func applySurfaceStyling() {
-        guard let layer = blurView.layer else { return }
-        // Ensure mask survives layer recreation (NSVisualEffectView may recreate layer)
-        if blurView.layer?.mask !== blurMaskLayer {
-            blurMaskLayer.fillColor = NSColor.black.cgColor
-            blurView.layer?.mask = blurMaskLayer
-        }
-        // FIX: whisper pill square corners — ensure blurView clips with rounded caps, self stays shadow-only
+        guard let layer = surfaceView.layer else { return }
+        // Surface clips with rounded caps; self stays shadow-only (never a square bg).
         layer.masksToBounds = true
         layer.cornerCurve = .continuous
         self.layer?.masksToBounds = false
@@ -1318,19 +1403,15 @@ private final class OverlayCapsuleView: NSView {
         // outer stroke stays 1px clear-fill rounded
         outerStrokeLayer.fillColor = NSColor.clear.cgColor
         outerStrokeLayer.lineWidth = 1
-        // shadow spec: blur 18 + 0 10px 28px rgba(0,0,0,.28) => radius 10, offset (0,10)
-        self.layer?.shadowColor = NSColor.black.cgColor
-        self.layer?.shadowRadius = 10
-        self.layer?.shadowOffset = CGSize(width: 0, height: 10)
+        // Elevation is the WindowServer window shadow (hasShadow=true); a CALayer shadow
+        // would be clipped square by the window backing rect — the corner-halo root cause.
         if isCompactSurface {
             layer.cornerRadius = Metrics.pillCornerRadius
             layer.borderWidth = 1
-            // Universal obsidian glass: whisper pill always dark, regardless of session appearance
-            blurView.appearance = NSAppearance(named: .darkAqua)
-            tintView.layer?.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 0.62).cgColor
+            // Universal obsidian: whisper pill always dark, regardless of session appearance
+            layer.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 1.0).cgColor
             layer.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
             outerStrokeLayer.strokeColor = NSColor.black.withAlphaComponent(0.18).cgColor
-            self.layer?.shadowOpacity = 0.28
             appIconTopConstraint?.isActive = false
             appIconCenterYConstraint?.isActive = true
             appIconWidthConstraint?.constant = 16
@@ -1343,14 +1424,12 @@ private final class OverlayCapsuleView: NSView {
             timerLabel.textColor = NSColor.white.withAlphaComponent(0.55)
             messageLabel.textColor = .white
         } else {
-            // Machined deck defaults — always dark hudWindow regardless of session appearance
+            // Machined deck defaults — always dark obsidian regardless of session appearance
             layer.cornerRadius = Metrics.cornerRadius
             layer.borderWidth = 1
-            blurView.appearance = NSAppearance(named: .darkAqua)
-            tintView.layer?.backgroundColor = NSColor(srgbRed: 20/255.0, green: 20/255.0, blue: 18/255.0, alpha: 0.55).cgColor
+            layer.backgroundColor = NSColor(srgbRed: 20/255.0, green: 20/255.0, blue: 18/255.0, alpha: 1.0).cgColor
             layer.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
             outerStrokeLayer.strokeColor = NSColor.black.withAlphaComponent(0.18).cgColor
-            self.layer?.shadowOpacity = 0.28
             appIconCenterYConstraint?.isActive = false
             appIconTopConstraint?.isActive = true
             appIconWidthConstraint?.constant = Metrics.topRowHeight
@@ -1368,25 +1447,20 @@ private final class OverlayCapsuleView: NSView {
         recordingDotView.layer?.backgroundColor = indicatorBrandGreen.cgColor
         // B: whisper bars are brand green in BOTH appearances for contrast + brand consistency
         pillLevelGlyph.ink = indicatorBrandGreen
-        // Keep container clip + mask in sync with new radius; layout() finalizes, but seed here for immediate clip
+        // Keep container clip in sync with new radius; layout() finalizes it.
         let currentRadius: CGFloat = isCompactSurface ? Metrics.pillCornerRadius : Metrics.cornerRadius
         clipContainer.layer?.cornerRadius = currentRadius
         clipContainer.layer?.masksToBounds = true
         clipContainer.layer?.cornerCurve = .continuous
-        blurMaskLayer.frame = blurView.bounds
-        if blurView.bounds.width > 0 && blurView.bounds.height > 0 {
-            blurMaskLayer.path = CGPath(roundedRect: blurView.bounds, cornerWidth: currentRadius, cornerHeight: currentRadius, transform: nil)
-        }
         needsLayout = true
-        // Force layout now so shadowPath/outerStroke/clipContainer aren't one frame behind (prevents square flash)
+        // Force layout now so shadowPath/outerStroke aren't one frame behind (prevents square flash)
         layoutSubtreeIfNeeded()
     }
 
     /// K-48 review finding I-1: animations follow the PER-SESSION Reduce Motion value.
     /// Two independent gates: the deck dot breathes on machined surfaces; the shimmer
     /// drives the compact transcribing pill. Neither runs under Reduce Motion or hide().
-    /// Task 6: also strip ring spin under Reduce Motion (convert to static hairline) and
-    /// offscreen (hide) so no CABasicAnimation renders in background.
+    /// Ring is static (no spin/breathe), so nothing to strip for Reduce Motion/offscreen.
     func updateBreatheAnimation() {
         if !isCompactSurface && !sessionReduceMotion {
             if recordingDotView.layer?.animation(forKey: "breathe") == nil {
@@ -1406,70 +1480,50 @@ private final class OverlayCapsuleView: NSView {
         if isCompactSurface && !sessionReduceMotion {
             for (index, dot) in dots.enumerated() {
                 guard dot.layer?.animation(forKey: "shimmer") == nil else { continue }
+                // Opacity pulse + 2px lift, matching the mockup `shim` keyframes.
                 let bounce = CABasicAnimation(keyPath: "opacity")
-                bounce.fromValue = 0.3
+                bounce.fromValue = 0.55
                 bounce.toValue = 1.0
                 bounce.duration = 1.2
                 bounce.autoreverses = true
                 bounce.repeatCount = .infinity
-                bounce.timeOffset = CFTimeInterval(index) * 0.15
                 bounce.timingFunction = CAMediaTimingFunction(controlPoints: 0.32, 0.72, 0.0, 1.0)
-                dot.layer?.add(bounce, forKey: "shimmer")
+                let lift = CABasicAnimation(keyPath: "transform.translation.y")
+                lift.fromValue = 0
+                lift.toValue = -2
+                lift.duration = 1.2
+                lift.autoreverses = true
+                lift.repeatCount = .infinity
+                lift.timingFunction = CAMediaTimingFunction(controlPoints: 0.32, 0.72, 0.0, 1.0)
+                let shimmer = CAAnimationGroup()
+                shimmer.animations = [bounce, lift]
+                shimmer.duration = 1.2
+                shimmer.autoreverses = true
+                shimmer.repeatCount = .infinity
+                shimmer.timeOffset = CFTimeInterval(index) * 0.15
+                shimmer.timingFunction = CAMediaTimingFunction(controlPoints: 0.32, 0.72, 0.0, 1.0)
+                dot.layer?.add(shimmer, forKey: "shimmer")
+                let dotW = dot.frame.width
+                let dotH = dot.frame.height
+                let stackHidden = shimmerStack?.isHidden ?? true
+                indicatorDiag.debug("shimmer dot[\(index, privacy: .public)] frame=\(dotW)x\(dotH, privacy: .public) stackHidden=\(stackHidden, privacy: .public)")
             }
         } else {
             dots.forEach { $0.layer?.removeAnimation(forKey: "shimmer") }
         }
-        // Task 6: Reduce Motion parity — strip ring spin when Reduce Motion is on.
-        // showGreenRing already guards new presentations via showStaticGreenHairline,
-        // but an already-spinning ring (e.g. mid-session Reduce Motion flip) must be
-        // stripped here so nothing spins under Reduce Motion.
-        if sessionReduceMotion, ringIsInstalled {
-            let hasSpin = ringLayer.animation(forKey: "spin") != nil || ringGlowLayer.animation(forKey: "spin") != nil
-            if hasSpin {
-                ringLayer.removeAnimation(forKey: "spin")
-                ringGlowLayer.removeAnimation(forKey: "spin")
-                // Convert spinning ring to static breathing hairline in-place.
-                if ringLayer.animation(forKey: "breathe") == nil {
-                    ringLayer.opacity = 0.48
-                    ringGlowLayer.opacity = 0.38
-                    let breathe = CABasicAnimation(keyPath: "opacity")
-                    breathe.fromValue = 0.3
-                    breathe.toValue = 0.6
-                    breathe.duration = 3.2
-                    breathe.autoreverses = true
-                    breathe.repeatCount = .infinity
-                    breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                    ringLayer.add(breathe, forKey: "breathe")
-                    ringGlowLayer.add(breathe, forKey: "breathe")
-                }
-            }
-        }
-        // Task 6 offscreen leak guard: when window alpha is 0 or view hidden, strip
-        // both spin and breathe so nothing animates offscreen. hide() also calls
-        // removeSessionAnimations, but updateBreatheAnimation may fire while hidden.
-        if window?.alphaValue == 0 || isHidden {
-            if ringIsInstalled && (ringLayer.animation(forKey: "spin") != nil || ringLayer.animation(forKey: "breathe") != nil) {
-                hideGreenRing()
-            }
+        // Reduce Motion mid-session: convert a spinning ring to the static hairline.
+        if sessionReduceMotion, ringIsInstalled,
+           ringSpinLayer.animation(forKey: "spin") != nil || ringGlowSpinLayer.animation(forKey: "spin") != nil {
+            showStaticGreenHairline()
         }
     }
 
-    /// Task 6: hide() + layout() strip infinite animations so nothing animates offscreen.
-    /// Also verifies window alpha 0 strips both spin and breathe (hideGreenRing does both).
+    /// hide() + layout() strip infinite animations so nothing animates offscreen.
+    /// hideGreenRing removes spin/breathe keys and the ring layers.
     func removeSessionAnimations() {
         recordingDotView.layer?.removeAnimation(forKey: "breathe")
         dots.forEach { $0.layer?.removeAnimation(forKey: "shimmer") }
-        // Task 6: explicitly strip both spin and breathe keys; hideGreenRing covers both plus removal
-        ringLayer.removeAnimation(forKey: "spin")
-        ringGlowLayer.removeAnimation(forKey: "spin")
-        ringLayer.removeAnimation(forKey: "breathe")
-        ringGlowLayer.removeAnimation(forKey: "breathe")
         hideGreenRing()
-        // Offscreen leak guard: when window alpha is 0, assert no spin/breathe remains
-        if window?.alphaValue == 0 {
-            assert(ringLayer.animation(forKey: "spin") == nil && ringLayer.animation(forKey: "breathe") == nil,
-                   "Task 6: ring animations must be nil when window hidden")
-        }
     }
 
     /// K-48 Task 5: compact glyph bars track the last three waveform samples.
@@ -1508,14 +1562,9 @@ private final class WaveformView: NSView {
         static let entryFraction: CGFloat = 0.98
     }
 
-    // Maximum number of history bars we ever store.
-    private let maxHistory = 150
-    // Smoothed amplitude to display for each stored bar.
-    private var history: [CGFloat] = []
-    // Current AGC gain.
-    private var gain: CGFloat = 1.0
-    // Smoothed amplitude being built for the NEXT push into history.
-    private var smoothedAmp: CGFloat = 0.0
+    // AGC gain, smoothed amplitude, and bar history: IndicatorWaveformMath
+    // carries the math; this view only renders it.
+    private var envelope = IndicatorWaveformMath.Envelope()
     // Sublayers for history bars
     private var historyLayers: [CALayer] = []
 
@@ -1549,67 +1598,24 @@ private final class WaveformView: NSView {
             return 
         }
         
-        guard active, !samples.isEmpty else {
-            // Fade smoothedAmp toward silence and push a tiny bar
-            smoothedAmp *= 0.4
-            pushHistoryBar(smoothedAmp)
-            applyAllFrames()
-            return
-        }
-
-        // Compute envelope peak
-        let peak = samples.reduce(0.0) { max($0, abs($1)) }
-        let peakCG = CGFloat(peak)
-
-        // AGC
-        let targetGain = peakCG > 0.00001 ? min(90.0, 1.50 / peakCG) : 1.0
-        gain += (targetGain - gain) * 0.35
-
-        let avg = samples.reduce(0, { $0 + abs($1) }) / Float(max(1, samples.count))
-
-        // Balanced noise gate floor (0.5% full-scale)
-        guard peakCG > 0.005 else {
-            smoothedAmp *= 0.5
-            pushHistoryBar(smoothedAmp)
-            applyAllFrames()
-            return
-        }
-        // Slightly more restrictive noise gate tracking
-        let noiseGate = CGFloat(max(0.003, min(0.018, Double(avg) * 2.0)))
-        let boosted = max(0.0, min(1.0, (peakCG - noiseGate) * gain * 3.5))
-        let eased = boosted > 0 ? pow(boosted, 0.38) : 0
-        let target = eased * 0.96
-
-        // Smooth toward target
-        smoothedAmp += (target - smoothedAmp) * 0.50
-
-        pushHistoryBar(smoothedAmp)
+        IndicatorWaveformMath.ingest(samples: samples, active: active, into: &envelope)
         applyAllFrames()
     }
 
     /// Called when waveform is hidden — resets history so next recording starts fresh.
     func reset() {
-        history.removeAll()
-        smoothedAmp = 0
-        gain = 1.0
+        IndicatorWaveformMath.reset(&envelope)
         applyAllFrames()
     }
 
     // MARK: - Private
-
-    private func pushHistoryBar(_ amp: CGFloat) {
-        history.append(max(0.0, min(1.0, amp)))
-        if history.count > maxHistory {
-            history.removeFirst(history.count - maxHistory)
-        }
-    }
 
     private func rebuildLayersIfNeeded() {
         guard let root = layer else { return }
 
         // Manage Historical Bar Layers
         let barsNeededForWidth = Int(bounds.width / (Metrics.barWidth + Metrics.barGap)) + 2
-        let barsNeeded = min(maxHistory, barsNeededForWidth)
+        let barsNeeded = min(IndicatorWaveformMath.maxHistory, barsNeededForWidth)
 
         while historyLayers.count < barsNeeded {
             let l = CALayer()
@@ -1657,8 +1663,8 @@ private final class WaveformView: NSView {
             }
             layer.isHidden = false
             
-            let historyIdx = history.count - 1 - barsFromRightEdge
-            let amp: CGFloat = historyIdx >= 0 ? history[historyIdx] : 0.0
+            let historyIdx = envelope.history.count - 1 - barsFromRightEdge
+            let amp: CGFloat = historyIdx >= 0 ? envelope.history[historyIdx] : 0.0
             let h = minH + (maxH - minH) * amp
             let y = centerY - h / 2.0
             layer.frame = CGRect(x: x, y: y, width: bw, height: h)
@@ -1673,65 +1679,6 @@ private final class WaveformView: NSView {
 
 }
 
-/// Computes 3 normalized levels [0.0...1.0] from PCM audio samples with AGC gain and attack/release smoothing.
-enum LevelGlyphCalculator {
-    static func process(
-        samples: [Float],
-        gain: inout CGFloat,
-        smoothed: inout [CGFloat]
-    ) -> [CGFloat] {
-        guard !samples.isEmpty else {
-            for i in 0..<3 {
-                smoothed[i] *= 0.75
-            }
-            return smoothed
-        }
-
-        // Divide 512 samples into 3 time slices
-        let count = samples.count
-        let chunkSize = max(1, count / 3)
-        var slicePeaks: [CGFloat] = []
-        for i in 0..<3 {
-            let start = i * chunkSize
-            let end = (i == 2) ? count : min(count, (i + 1) * chunkSize)
-            var slicePeak: Float = 0.0
-            for j in start..<end {
-                let mag = abs(samples[j])
-                if mag > slicePeak { slicePeak = mag }
-            }
-            slicePeaks.append(CGFloat(slicePeak))
-        }
-
-        let framePeak = slicePeaks.reduce(0.0, max)
-        let frameAvg = CGFloat(samples.reduce(0.0) { $0 + abs($1) }) / CGFloat(count)
-
-        // Adaptive AGC: boosts quiet speech up to 60x, scales down for loud speech
-        let targetGain = framePeak > 0.0001 ? min(60.0, 1.50 / framePeak) : 1.0
-        gain += (targetGain - gain) * 0.25
-
-        // Noise gate tracking (0.3% - 1.5%)
-        let noiseGate = max(0.003, min(0.015, frameAvg * 1.8))
-
-        for i in 0..<3 {
-            let peak = slicePeaks[i]
-            let target: CGFloat
-            if framePeak < noiseGate {
-                target = 0.0
-            } else {
-                let rawAmp = max(0.0, peak - noiseGate) * gain
-                let boosted = min(1.0, rawAmp * 1.8)
-                target = boosted > 0.0 ? pow(boosted, 0.40) : 0.0
-            }
-
-            // Fast attack (0.65), smooth decay (0.22)
-            let coeff: CGFloat = target > smoothed[i] ? 0.65 : 0.22
-            smoothed[i] += (target - smoothed[i]) * coeff
-        }
-
-        return smoothed
-    }
-}
-
 /// K-48 Task 5: the whisper pill's three-bar level glyph, drawn in one view.
 /// Custom draw instead of constraint-swapped subviews: no layout churn at 30Hz,
 /// nothing to unhide, ink switchable per session appearance.
@@ -1744,7 +1691,7 @@ final class PillLevelGlyphView: NSView {
     private var smoothed: [CGFloat] = [0.0, 0.0, 0.0]
 
     func update(samples: [Float]) {
-        levels = LevelGlyphCalculator.process(
+        levels = IndicatorWaveformMath.glyphLevels(
             samples: samples,
             gain: &gain,
             smoothed: &smoothed
@@ -1785,10 +1732,9 @@ private final class CaretChipView: NSView {
         static let timerMinWidth: CGFloat = 34
     }
 
-    // Container clip for obsidian glass (mirrors OverlayCapsuleView): behindWindow ignores blurView.layer.mask
+    // Container clip for the obsidian surface (mirrors OverlayCapsuleView).
     private let clipContainer = NSView()
-    private let blurView = NSVisualEffectView()
-    private let tintView = NSView()
+    private let surfaceView = NSView()
     private let dotView = NSView()
     private let bar0 = NSView()
     private let bar1 = NSView()
@@ -1803,11 +1749,12 @@ private final class CaretChipView: NSView {
     private let outerStrokeLayer = CAShapeLayer()
     private let innerStroke = CALayer()
     private let outerStroke = CAShapeLayer()
-    // Fix: explicit mask for NSVisualEffectView rounding — mirrors OverlayCapsuleView
-    private let blurMaskLayer = CAShapeLayer()
-    // Task 4: green clockwise arc — conic gradient + glow (mirrors OverlayCapsuleView)
-    private let ringLayer = CAGradientLayer()
-    private let ringGlowLayer = CAGradientLayer()
+    // Ring = fixed stadium-stroke mask on a plain container; only the conic-gradient
+    // child spins inside it (mirrors OverlayCapsuleView).
+    private let ringLayer = CALayer()
+    private let ringSpinLayer = CAGradientLayer()
+    private let ringGlowLayer = CALayer()
+    private let ringGlowSpinLayer = CAGradientLayer()
     private var ringIsInstalled = false
     private var sessionReduceMotion = false
 
@@ -1822,32 +1769,30 @@ private final class CaretChipView: NSView {
 
     private func setup() {
         wantsLayer = true
-        // Task 3: universal rim — self hosts shadow/outer stroke (chip radius 15 pill / ~8 if compact)
-        // FIX: square corners — self transparent, no clipping, shadow spec rounded
+        // Task 3: universal rim — outer stroke; elevation is the WindowServer window
+        // shadow (hasShadow=true). NO CALayer shadow: clipped square by the window
+        // backing rect = the corner halo (same root cause as the whisper pill).
         layer?.masksToBounds = false
         layer?.backgroundColor = nil
         layer?.cornerCurve = .continuous
-        layer?.shadowColor = NSColor.black.cgColor
-        layer?.shadowOpacity = 0.28
-        layer?.shadowRadius = 10
-        layer?.shadowOffset = CGSize(width: 0, height: 10)
         outerStrokeLayer.fillColor = NSColor.clear.cgColor
         outerStrokeLayer.strokeColor = NSColor.black.withAlphaComponent(0.18).cgColor
         outerStrokeLayer.lineWidth = 1
         outerStrokeLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
         layer?.addSublayer(outerStrokeLayer)
-        // Initial stadium paths so first frame before layout is already clipped
+        // Initial outer-stroke path so the first frame before layout already has its rim
         let initialRadius: CGFloat = 15
-        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: initialRadius, cornerHeight: initialRadius, transform: nil)
         outerStrokeLayer.frame = bounds
         outerStrokeLayer.path = CGPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), cornerWidth: max(0, initialRadius - 0.5), cornerHeight: max(0, initialRadius - 0.5), transform: nil)
-        // Task 4: green clockwise arc — conic gradient ring + glow (mirrors OverlayCapsuleView)
-        ringLayer.type = .conic
-        ringLayer.colors = [NSColor.clear.cgColor, NSColor.clear.cgColor, indicatorBrandGreen.cgColor]
-        ringLayer.locations = [0.0, 0.71, 1.0]
-        ringLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
-        ringLayer.endPoint = CGPoint(x: 1, y: 0.5)
-        ringLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        // Green clockwise arc — fixed mask on a container; only the gradient child
+        // spins (mirrors OverlayCapsuleView).
+        ringSpinLayer.type = .conic
+        ringSpinLayer.colors = [NSColor.clear.cgColor, NSColor.clear.cgColor, indicatorBrandGreen.cgColor]
+        ringSpinLayer.locations = [0.0, 0.71, 1.0]
+        ringSpinLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+        ringSpinLayer.endPoint = CGPoint(x: 1, y: 0.5)
+        ringSpinLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        ringLayer.addSublayer(ringSpinLayer)
         let ringMask = CAShapeLayer()
         ringMask.fillColor = NSColor.clear.cgColor
         ringMask.strokeColor = NSColor.white.cgColor
@@ -1855,13 +1800,13 @@ private final class CaretChipView: NSView {
         ringMask.lineCap = .round
         ringMask.lineJoin = .round
         ringLayer.mask = ringMask
-        ringGlowLayer.type = .conic
-        ringGlowLayer.colors = [NSColor.clear.cgColor, NSColor.clear.cgColor, indicatorBrandGreen.cgColor]
-        ringGlowLayer.locations = [0.0, 0.71, 1.0]
-        ringGlowLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
-        ringGlowLayer.endPoint = CGPoint(x: 1, y: 0.5)
-        ringGlowLayer.opacity = 0.38
-        ringGlowLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        ringGlowSpinLayer.type = .conic
+        ringGlowSpinLayer.colors = [NSColor.clear.cgColor, NSColor.clear.cgColor, indicatorBrandGreen.cgColor]
+        ringGlowSpinLayer.locations = [0.0, 0.71, 1.0]
+        ringGlowSpinLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+        ringGlowSpinLayer.endPoint = CGPoint(x: 1, y: 0.5)
+        ringGlowSpinLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        ringGlowLayer.addSublayer(ringGlowSpinLayer)
         let glowMask = CAShapeLayer()
         glowMask.fillColor = NSColor.clear.cgColor
         glowMask.strokeColor = NSColor.white.cgColor
@@ -1871,7 +1816,7 @@ private final class CaretChipView: NSView {
         glowMask.opacity = 0.38
         ringGlowLayer.mask = glowMask
 
-        // Container clip: behindWindow ignores blurView.layer.mask — clipContainer provides stadium rounding
+        // Container clip (mirrors OverlayCapsuleView): rounds everything to the stadium.
         clipContainer.wantsLayer = true
         clipContainer.layer?.masksToBounds = true
         clipContainer.layer?.cornerCurve = .continuous
@@ -1879,37 +1824,29 @@ private final class CaretChipView: NSView {
         clipContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(clipContainer)
 
-        // Fix: wantsLayer BEFORE material/cornerRadius; mask guarantees NSVisualEffectView clip
-        blurView.wantsLayer = true
-        blurView.material = .hudWindow
-        blurView.blendingMode = .behindWindow
-        blurView.state = .active
-        blurView.appearance = NSAppearance(named: .darkAqua)
-        blurView.layer?.cornerRadius = 15
-        blurView.layer?.masksToBounds = true
-        blurView.layer?.cornerCurve = .continuous
-        blurView.layer?.borderWidth = 1
-        // Explicit mask: backdrop ignores cornerRadius on some builds (secondary to container)
-        blurMaskLayer.fillColor = NSColor.black.cgColor
-        blurView.layer?.mask = blurMaskLayer
-        blurView.translatesAutoresizingMaskIntoConstraints = false
-        clipContainer.addSubview(blurView)
-
-        tintView.wantsLayer = true
-        tintView.translatesAutoresizingMaskIntoConstraints = false
-        blurView.addSubview(tintView, positioned: .below, relativeTo: nil)
+        // Flat obsidian surface (mirrors OverlayCapsuleView): opaque, so no
+        // backdrop path exists to leak past the corners.
+        surfaceView.wantsLayer = true
+        surfaceView.layer?.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 1.0).cgColor
+        surfaceView.layer?.cornerRadius = 15
+        surfaceView.layer?.masksToBounds = true
+        surfaceView.layer?.cornerCurve = .continuous
+        surfaceView.layer?.borderWidth = 1
+        surfaceView.layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+        surfaceView.translatesAutoresizingMaskIntoConstraints = false
+        clipContainer.addSubview(surfaceView)
 
         dotView.wantsLayer = true
         dotView.layer?.backgroundColor = indicatorBrandGreen.cgColor
         dotView.layer?.cornerRadius = ChipMetrics.dotSize / 2
         dotView.translatesAutoresizingMaskIntoConstraints = false
-        blurView.addSubview(dotView)
+        surfaceView.addSubview(dotView)
 
         for bar in bars {
             bar.wantsLayer = true
             bar.layer?.cornerRadius = ChipMetrics.barWidth / 2
             bar.translatesAutoresizingMaskIntoConstraints = false
-            blurView.addSubview(bar)
+            surfaceView.addSubview(bar)
         }
         barHeightConstraints = bars.map { $0.heightAnchor.constraint(equalToConstant: ChipMetrics.glyphHeight) }
         NSLayoutConstraint.activate(barHeightConstraints + [
@@ -1922,7 +1859,7 @@ private final class CaretChipView: NSView {
         timerLabel.textColor = NSColor.white.withAlphaComponent(0.75)
         timerLabel.alignment = .right
         timerLabel.translatesAutoresizingMaskIntoConstraints = false
-        blurView.addSubview(timerLabel)
+        surfaceView.addSubview(timerLabel)
 
         NSLayoutConstraint.activate([
             clipContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -1930,31 +1867,26 @@ private final class CaretChipView: NSView {
             clipContainer.topAnchor.constraint(equalTo: topAnchor),
             clipContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            blurView.leadingAnchor.constraint(equalTo: clipContainer.leadingAnchor),
-            blurView.trailingAnchor.constraint(equalTo: clipContainer.trailingAnchor),
-            blurView.topAnchor.constraint(equalTo: clipContainer.topAnchor),
-            blurView.bottomAnchor.constraint(equalTo: clipContainer.bottomAnchor),
+            surfaceView.leadingAnchor.constraint(equalTo: clipContainer.leadingAnchor),
+            surfaceView.trailingAnchor.constraint(equalTo: clipContainer.trailingAnchor),
+            surfaceView.topAnchor.constraint(equalTo: clipContainer.topAnchor),
+            surfaceView.bottomAnchor.constraint(equalTo: clipContainer.bottomAnchor),
 
-            tintView.leadingAnchor.constraint(equalTo: blurView.leadingAnchor),
-            tintView.trailingAnchor.constraint(equalTo: blurView.trailingAnchor),
-            tintView.topAnchor.constraint(equalTo: blurView.topAnchor),
-            tintView.bottomAnchor.constraint(equalTo: blurView.bottomAnchor),
-
-            dotView.leadingAnchor.constraint(equalTo: blurView.leadingAnchor, constant: ChipMetrics.hPadding),
-            dotView.centerYAnchor.constraint(equalTo: blurView.centerYAnchor),
+            dotView.leadingAnchor.constraint(equalTo: surfaceView.leadingAnchor, constant: ChipMetrics.hPadding),
+            dotView.centerYAnchor.constraint(equalTo: surfaceView.centerYAnchor),
             dotView.widthAnchor.constraint(equalToConstant: ChipMetrics.dotSize),
             dotView.heightAnchor.constraint(equalToConstant: ChipMetrics.dotSize),
 
             bar0.leadingAnchor.constraint(equalTo: dotView.trailingAnchor, constant: 5),
             bar1.leadingAnchor.constraint(equalTo: bar0.trailingAnchor, constant: 2),
             bar2.leadingAnchor.constraint(equalTo: bar1.trailingAnchor, constant: 2),
-            bar0.centerYAnchor.constraint(equalTo: blurView.centerYAnchor),
-            bar1.centerYAnchor.constraint(equalTo: blurView.centerYAnchor),
-            bar2.centerYAnchor.constraint(equalTo: blurView.centerYAnchor),
+            bar0.centerYAnchor.constraint(equalTo: surfaceView.centerYAnchor),
+            bar1.centerYAnchor.constraint(equalTo: surfaceView.centerYAnchor),
+            bar2.centerYAnchor.constraint(equalTo: surfaceView.centerYAnchor),
 
             timerLabel.leadingAnchor.constraint(greaterThanOrEqualTo: bar2.trailingAnchor, constant: 5),
-            timerLabel.trailingAnchor.constraint(equalTo: blurView.trailingAnchor, constant: -ChipMetrics.hPadding),
-            timerLabel.centerYAnchor.constraint(equalTo: blurView.centerYAnchor),
+            timerLabel.trailingAnchor.constraint(equalTo: surfaceView.trailingAnchor, constant: -ChipMetrics.hPadding),
+            timerLabel.centerYAnchor.constraint(equalTo: surfaceView.centerYAnchor),
             timerLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: ChipMetrics.timerMinWidth)
         ])
         applySurfaceStylingForSession(dark: true)
@@ -1962,39 +1894,36 @@ private final class CaretChipView: NSView {
 
     override func layout() {
         super.layout()
-        // Task 3: sync shadowPath + outer stroke to bounds (chip 15 / fallback 8)
-        // obsidian fix: container clip is primary for behindWindow; mask secondary
-        let radius: CGFloat = 15 // chip uses pill radius (height 30 -> 15); keeps 1:1 with blurView
-        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        // Sync outer stroke to bounds (chip radius 15). No shadowPath — window-shadow elevation.
+        let radius: CGFloat = 15 // chip uses pill radius (height 30 -> 15); keeps 1:1 with surfaceView
         outerStrokeLayer.frame = bounds
         let insetBounds = bounds.insetBy(dx: 0.5, dy: 0.5)
         let innerRadius = max(0, radius - 0.5)
         outerStrokeLayer.path = CGPath(roundedRect: insetBounds, cornerWidth: innerRadius, cornerHeight: innerRadius, transform: nil)
-        // Container clip — source-of-truth for stadium (behindWindow ignores blurView.layer.mask)
+        // Container clip + surface round every subview to the stadium.
         clipContainer.layer?.cornerRadius = radius
         clipContainer.layer?.masksToBounds = true
         clipContainer.layer?.cornerCurve = .continuous
-        // Explicit mask guarantees stadium clip for NSVisualEffectView (secondary)
-        blurMaskLayer.frame = blurView.bounds
-        blurMaskLayer.path = CGPath(roundedRect: blurView.bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
-        blurView.layer?.cornerRadius = radius
-        blurView.layer?.masksToBounds = true
-        blurView.layer?.cornerCurve = .continuous
+        surfaceView.layer?.cornerRadius = radius
+        surfaceView.layer?.masksToBounds = true
+        surfaceView.layer?.cornerCurve = .continuous
         layoutRing()
-        // Task 6 offscreen leak guard: if window alpha 0 or view hidden, strip ring so nothing spins offscreen.
-        if window?.alphaValue == 0 || isHidden {
+        // Ordered-out only (see OverlayCapsuleView.layout): alpha 0 is transient mid-fade.
+        if !(window?.isVisible ?? false) || isHidden {
             if ringIsInstalled {
                 hideGreenRing()
             }
         }
     }
 
-    // MARK: - Task 4: green clockwise arc helpers (mirrors OverlayCapsuleView)
+    // MARK: - Green clockwise arc helpers (rotation restores the approved spec, mirrors OverlayCapsuleView)
 
     private func layoutRing() {
         let radius: CGFloat = 15
         ringLayer.frame = bounds
         ringGlowLayer.frame = bounds
+        ringSpinLayer.frame = bounds
+        ringGlowSpinLayer.frame = bounds
         if let mask = ringLayer.mask as? CAShapeLayer {
             mask.frame = bounds
             let inset: CGFloat = ringLineWidth / 2 // 0.75
@@ -2011,30 +1940,27 @@ private final class CaretChipView: NSView {
         }
     }
 
+    /// Green clockwise arc (mirrors OverlayCapsuleView). The chip never rings while
+    /// listening — transition() strips it; the deck owns the transcribing fallback.
+    /// Only the arc position rotates — the stadium mask stays fixed.
     func showGreenRing(speed: RingSpeed) {
         guard !sessionReduceMotion else { showStaticGreenHairline(); return }
-        if ringIsInstalled {
-            updateRingSpeed(speed)
-            return
-        }
+        if ringIsInstalled { updateRingSpeed(speed); return }
         ringIsInstalled = true
+        ringLayer.opacity = 1.0
+        ringGlowLayer.opacity = 0.38
         layer?.addSublayer(ringGlowLayer)
         layer?.addSublayer(ringLayer)
         layoutRing()
-        let dur = speed == .listening ? ringListeningDuration : ringTranscribingDuration
-        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
-        spin.fromValue = 0
-        spin.toValue = 2 * Double.pi
-        spin.duration = dur
-        spin.repeatCount = .infinity
-        spin.timingFunction = CAMediaTimingFunction(name: .linear)
-        ringLayer.add(spin, forKey: "spin")
-        ringGlowLayer.add(spin, forKey: "spin")
+        let chipW = bounds.width
+        let chipH = bounds.height
+        indicatorDiag.debug("chip showGreenRing speed=\(String(describing: speed), privacy: .public) view=\(chipW)x\(chipH, privacy: .public)")
+        startRingSpin(speed: speed)
     }
 
     func hideGreenRing() {
-        ringLayer.removeAnimation(forKey: "spin")
-        ringGlowLayer.removeAnimation(forKey: "spin")
+        ringSpinLayer.removeAnimation(forKey: "spin")
+        ringGlowSpinLayer.removeAnimation(forKey: "spin")
         ringLayer.removeAnimation(forKey: "breathe")
         ringGlowLayer.removeAnimation(forKey: "breathe")
         ringLayer.removeFromSuperlayer()
@@ -2042,85 +1968,64 @@ private final class CaretChipView: NSView {
         ringIsInstalled = false
     }
 
+    /// Reduce Motion: static 1px arc at 48% + slow breathe, no rotation.
     func showStaticGreenHairline() {
+        indicatorDiag.debug("chip static hairline (Reduce Motion path)")
         if ringIsInstalled {
-            ringLayer.removeAnimation(forKey: "spin")
-            ringGlowLayer.removeAnimation(forKey: "spin")
-            // Task 6: convert spinning->static — add breathe if missing
-            if ringLayer.animation(forKey: "breathe") == nil {
-                ringLayer.opacity = 0.48
-                ringGlowLayer.opacity = 0.38
-                let breathe = CABasicAnimation(keyPath: "opacity")
-                breathe.fromValue = 0.3
-                breathe.toValue = 0.6
-                breathe.duration = 3.2
-                breathe.autoreverses = true
-                breathe.repeatCount = .infinity
-                breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                ringLayer.add(breathe, forKey: "breathe")
-                ringGlowLayer.add(breathe, forKey: "breathe")
-            }
-            return
+            ringSpinLayer.removeAnimation(forKey: "spin")
+            ringGlowSpinLayer.removeAnimation(forKey: "spin")
+        } else {
+            ringIsInstalled = true
+            layer?.addSublayer(ringGlowLayer)
+            layer?.addSublayer(ringLayer)
+            layoutRing()
         }
-        ringIsInstalled = true
-        layer?.addSublayer(ringGlowLayer)
-        layer?.addSublayer(ringLayer)
-        layoutRing()
         ringLayer.opacity = 0.48
         ringGlowLayer.opacity = 0.38
-        let breathe = CABasicAnimation(keyPath: "opacity")
-        breathe.fromValue = 0.3
-        breathe.toValue = 0.6
-        breathe.duration = 3.2
-        breathe.autoreverses = true
-        breathe.repeatCount = .infinity
-        breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        ringLayer.add(breathe, forKey: "breathe")
-        ringGlowLayer.add(breathe, forKey: "breathe")
+        if ringLayer.animation(forKey: "breathe") == nil {
+            let breathe = CABasicAnimation(keyPath: "opacity")
+            breathe.fromValue = 0.3
+            breathe.toValue = 0.6
+            breathe.duration = 3.2
+            breathe.autoreverses = true
+            breathe.repeatCount = .infinity
+            breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            ringLayer.add(breathe, forKey: "breathe")
+            ringGlowLayer.add(breathe, forKey: "breathe")
+        }
     }
 
     private func updateRingSpeed(_ speed: RingSpeed) {
-        // Task 6: centralize speeds — sole source is ringListeningDuration / ringTranscribingDuration
         guard !sessionReduceMotion else { showStaticGreenHairline(); return }
+        startRingSpin(speed: speed)
+    }
+
+    private func startRingSpin(speed: RingSpeed) {
+        // Clockwise on screen (see OverlayCapsuleView.startRingSpin): 0 → -2π.
         let dur = speed == .listening ? ringListeningDuration : ringTranscribingDuration
-        ringLayer.removeAnimation(forKey: "spin")
-        ringGlowLayer.removeAnimation(forKey: "spin")
         let spin = CABasicAnimation(keyPath: "transform.rotation.z")
         spin.fromValue = 0
-        spin.toValue = 2 * Double.pi
+        spin.toValue = -2 * Double.pi
         spin.duration = dur
         spin.repeatCount = .infinity
         spin.timingFunction = CAMediaTimingFunction(name: .linear)
-        ringLayer.add(spin, forKey: "spin")
-        ringGlowLayer.add(spin, forKey: "spin")
+        ringSpinLayer.add(spin, forKey: "spin")
+        ringGlowSpinLayer.add(spin, forKey: "spin")
     }
 
-    /// Task 6: teardown strips both spin and breathe; verify window alpha 0 leaves no animation
+    /// Teardown removes the ring; hideGreenRing strips spin/breathe keys first.
     func removeSessionAnimations() {
-        ringLayer.removeAnimation(forKey: "spin")
-        ringGlowLayer.removeAnimation(forKey: "spin")
-        ringLayer.removeAnimation(forKey: "breathe")
-        ringGlowLayer.removeAnimation(forKey: "breathe")
         hideGreenRing()
-        if window?.alphaValue == 0 {
-            assert(ringLayer.animation(forKey: "spin") == nil && ringLayer.animation(forKey: "breathe") == nil,
-                   "Task 6: caret ring animations must be nil when window hidden")
-        }
     }
 
     /// Per-session surface (mirrors the whisper pill tokens).
-    /// Task 6: idempotently handles appearance flips + ReduceMotion without early returns;
-    /// propagates ReduceMotion and strips ring spin in-place so nothing spins under Reduce Motion or offscreen.
+    /// Idempotently handles appearance flips + ReduceMotion without early returns.
+    /// Reduce Motion converts a spinning ring via showStaticGreenHairline at show time.
     func applySurfaceStylingForSession(dark: Bool, reduceMotion: Bool? = nil) {
         _ = dark // universal obsidian: always dark, param retained for call-site compatibility
         if let rm = reduceMotion { sessionReduceMotion = rm }
-        guard let layer = blurView.layer else { return }
-        // Ensure mask survives layer recreation
-        if blurView.layer?.mask !== blurMaskLayer {
-            blurMaskLayer.fillColor = NSColor.black.cgColor
-            blurView.layer?.mask = blurMaskLayer
-        }
-        // FIX: square corners — blurView rounded clip + self shadow-only
+        guard let layer = surfaceView.layer else { return }
+        // FIX: square corners — surfaceView rounded clip + self shadow-only
         layer.masksToBounds = true
         layer.cornerCurve = .continuous
         layer.cornerRadius = 15
@@ -2128,54 +2033,24 @@ private final class CaretChipView: NSView {
         self.layer?.backgroundColor = nil
         outerStrokeLayer.fillColor = NSColor.clear.cgColor
         outerStrokeLayer.lineWidth = 1
-        self.layer?.shadowColor = NSColor.black.cgColor
-        self.layer?.shadowRadius = 10
-        self.layer?.shadowOffset = CGSize(width: 0, height: 10)
         layer.borderWidth = 1
-        // Universal obsidian glass: caret chip always dark
-        blurView.appearance = NSAppearance(named: .darkAqua)
-        tintView.layer?.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 0.62).cgColor
+        // Universal obsidian: caret chip always dark
+        layer.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 1.0).cgColor
         layer.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
         outerStrokeLayer.strokeColor = NSColor.black.withAlphaComponent(0.18).cgColor
-        self.layer?.shadowOpacity = 0.28
         timerLabel.textColor = NSColor.white.withAlphaComponent(0.75)
-        // B: caret glyph/dot stay brand green on both paper and obsidian; border/tint already differentiate
+        // B: caret glyph/dot stay brand green on both paper and obsidian; border already differentiates
         let ink = indicatorBrandGreen
         bars.forEach { $0.layer?.backgroundColor = ink.cgColor }
         dotView.layer?.backgroundColor = ink.cgColor
-        // Keep container clip + mask in sync; layout() will finalize frame, seed here for immediate clip
+        // Keep container clip in sync; layout() finalizes it.
         clipContainer.layer?.cornerRadius = 15
         clipContainer.layer?.masksToBounds = true
         clipContainer.layer?.cornerCurve = .continuous
-        blurMaskLayer.frame = blurView.bounds
-        if blurView.bounds.width > 0 && blurView.bounds.height > 0 {
-            blurMaskLayer.path = CGPath(roundedRect: blurView.bounds, cornerWidth: 15, cornerHeight: 15, transform: nil)
-        }
         needsLayout = true
         layoutSubtreeIfNeeded()
-        // Task 6: Reduce Motion parity — if Reduce Motion just turned on, convert any spinning ring to static breathing
-        if sessionReduceMotion, ringIsInstalled {
-            let hasSpin = ringLayer.animation(forKey: "spin") != nil || ringGlowLayer.animation(forKey: "spin") != nil
-            if hasSpin {
-                ringLayer.removeAnimation(forKey: "spin")
-                ringGlowLayer.removeAnimation(forKey: "spin")
-                if ringLayer.animation(forKey: "breathe") == nil {
-                    ringLayer.opacity = 0.48
-                    ringGlowLayer.opacity = 0.38
-                    let breathe = CABasicAnimation(keyPath: "opacity")
-                    breathe.fromValue = 0.3
-                    breathe.toValue = 0.6
-                    breathe.duration = 3.2
-                    breathe.autoreverses = true
-                    breathe.repeatCount = .infinity
-                    breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                    ringLayer.add(breathe, forKey: "breathe")
-                    ringGlowLayer.add(breathe, forKey: "breathe")
-                }
-            }
-        }
-        // Task 6 offscreen guard: if window hidden, strip ring animations so nothing leaks offscreen
-        if window?.alphaValue == 0 || isHidden {
+        // Ordered-out only (see OverlayCapsuleView.layout): alpha 0 is transient mid-fade.
+        if !(window?.isVisible ?? false) || isHidden {
             if ringIsInstalled {
                 hideGreenRing()
             }
@@ -2187,7 +2062,7 @@ private final class CaretChipView: NSView {
     }
 
     func updateLevel(samples: [Float]) {
-        let levels = LevelGlyphCalculator.process(
+        let levels = IndicatorWaveformMath.glyphLevels(
             samples: samples,
             gain: &gain,
             smoothed: &smoothed

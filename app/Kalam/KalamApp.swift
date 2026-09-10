@@ -72,11 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         static let defaultPasteDelayShortMs = 50
         static let defaultPasteDelayLongMs = 80
         static let defaultPasteFallbackTotalMs = 120
-        // Production default: stage-timing diagnostics stay OFF unless opted in
-        // (`defaults write singhkays.Kalam internal.latency.enableStageTiming -bool YES`).
-        // Info-level Lifecycle/Latency lines persist to the unified log store,
-        // so a loud default would spam production logs.
-        static let defaultEnableStageTiming = false
+        static let defaultEnableStageTiming = true
         static let defaultSnrAwareEnabled = true
         static let defaultSnrTrustDb: Float = 12
         static let defaultSnrAbsoluteCapMs = 1500
@@ -225,11 +221,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pttUpTime: CFAbsoluteTime = 0
     private var hotkeyConfiguration: PTTHotkeyConfiguration = .load()
     private var transcriptionTask: Task<Void, Never>?
+    /// Mid-hold stall watchdog (Bluetooth-dropout hardening): warns live when
+    /// tap callbacks stop arriving mid-recording. Cancelled on every stop,
+    /// cancel, wake-teardown, and terminate path alongside transcriptionTask.
+    private var micStallWatchdogTask: Task<Void, Never>?
     /// Audio teardown for the current stop/cancel (post-roll + drain + engine stop).
     /// New recordings await its completion before collecting, so sessions never
     /// overlap in the audio layer even when the transcription task is cancelled.
     private var recordingStopTask: Task<[Float], Never>?
     private var runtimePrepTask: Task<Void, Never>?
+    /// Bounded-start pending state (engine-start freeze hardening): a press
+    /// whose engine start is still in flight off-main. Between key-down and
+    /// commit the PTT machine stays idle — key-up, Esc, a superseding press,
+    /// quit, wake, or a device change during the window abandons the attempt
+    /// instead of freezing or half-committing a session.
+    private var pendingStartTask: Task<Void, Never>?
+    private var pendingStartGeneration = 0
     private var recordingSessions = RecordingSessionTracker()
     private let ptt = PTTStateMachine()
     private var pttState = PTTStateMachine.State()
@@ -239,6 +246,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var onboardingController: OnboardingFlowController?
     private var hotkeyObserver: NSObjectProtocol?
     private var modelsConfigObserver: NSObjectProtocol?
+    private var modelsConfigCoalesceTask: Task<Void, Never>?
     private var generalSettingsObserver: NSObjectProtocol?
     private var microphonePriorityObserver: NSObjectProtocol?
     private var openSetupObserver: NSObjectProtocol?
@@ -278,9 +286,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             LatencyTuningOptions.pasteDelayLongMsKey: LatencyTuningOptions.defaultPasteDelayLongMs,
             LatencyTuningOptions.pasteFallbackTotalMsKey: LatencyTuningOptions.defaultPasteFallbackTotalMs,
             LatencyTuningOptions.enableStageTimingKey: LatencyTuningOptions.defaultEnableStageTiming,
-            // Production default OFF (see defaultEnableStageTiming): start-latency
-            // lines persist to the log store, so they require opt-in too.
-            LatencyTuningOptions.startStageTimingKey: false,
+            LatencyTuningOptions.startStageTimingKey: true,
             LatencyTuningOptions.pasteSetVerifyTimeoutOverrideMsKey: 0,
             LatencyTuningOptions.snrAwareEnabledKey: LatencyTuningOptions.defaultSnrAwareEnabled,
             LatencyTuningOptions.snrTrustDbKey: LatencyTuningOptions.defaultSnrTrustDb,
@@ -313,6 +319,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.discardHeldTranscript()
         }
         overlay.prewarm()
+
+        // TEMP-DIAG-HALO (revert before commit): headless pill screenshot.
+        // KALAM_DEBUG_PILL=1 shows the live recording pill with no audio/hotkey.
+        if ProcessInfo.processInfo.environment["KALAM_DEBUG_PILL"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.overlay.showRecording(isHoldMode: true)
+            }
+        }
 
         // Status bar icon/menu
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -374,14 +388,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             queue: .main
         ) { [weak self] _ in
             guard let self = self else { return }
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                // Coalesce rapid posts (e.g. browsing the Step-3 picker fires
+                // one per tap): cancel the pending run so snapshot refresh +
+                // ASR prep execute once for the settled selection instead of
+                // once per tap (~520ms of MainActor work each). Settings UI
+                // itself updates synchronously via store ping and never waits
+                // on this path.
                 self.invalidateOnboardingSnapshot()
-                // Refresh first so the UI reflects the new config immediately
-                // (availability is a fast disk check); ASR prep runs in the
-                // background, then a final refresh flips isASRReady.
-                self.refreshOnboardingState(reopenIfNeeded: false)
-                await self.prepareRuntimeIfPossible()
-                self.refreshOnboardingState(reopenIfNeeded: false)
+                self.modelsConfigCoalesceTask?.cancel()
+                let run = Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                    guard !Task.isCancelled else { return }
+                    // Refresh first so the UI reflects the new config immediately
+                    // (availability is a fast disk check); ASR prep runs in the
+                    // background, then a final refresh flips isASRReady.
+                    self.refreshOnboardingState(reopenIfNeeded: false)
+                    // Picker-only browsing with no models installed changes
+                    // nothing the prep could act on (its model branch no-ops
+                    // without an installed model): skip the audio/ASR prep +
+                    // final refresh and spare ~60ms of MainActor work per
+                    // settled tap. Any installed model restores the full
+                    // sequence; rescan/folder-change paths are untouched.
+                    let installed = ModelSetupSupport.installedModelVersions(in: ModelsConfiguration.load())
+                    if !installed.isEmpty {
+                        await self.prepareRuntimeIfPossible()
+                        self.refreshOnboardingState(reopenIfNeeded: false)
+                    }
+                }
+                self.modelsConfigCoalesceTask = run
+                await run.value
             }
         }
 
@@ -511,11 +549,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func quit() {
+        // Termination must never wait on the audio stack: a HAL-wedged engine
+        // start cannot block quit anymore. The pending attempt (if any) is
+        // abandoned — it self-cleans or dies with the process.
+        cancelPendingStartIfActive(reason: "quit")
         NSApp.terminate(nil)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Abandon any pending bounded start FIRST so an in-flight (possibly
+        // HAL-wedged) attempt can never commit or surface UI during teardown.
+        // Deliberately no engine.stop() here: the audio stack is the one thing
+        // that can hang, and process death reclaims the mic indicator anyway.
+        cancelPendingStartIfActive(reason: "terminate")
         transcriptionTask?.cancel()
+        cancelMicStallWatchdog()
         if let hotkeyObserver {
             NotificationCenter.default.removeObserver(hotkeyObserver)
             self.hotkeyObserver = nil
@@ -524,6 +572,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationCenter.default.removeObserver(modelsConfigObserver)
             self.modelsConfigObserver = nil
         }
+        modelsConfigCoalesceTask?.cancel()
+        modelsConfigCoalesceTask = nil
         if let generalSettingsObserver {
             NotificationCenter.default.removeObserver(generalSettingsObserver)
             self.generalSettingsObserver = nil
@@ -887,6 +937,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleEscapeEvent(_ event: NSEvent) {
         guard event.keyCode == 53 else { return } // Escape
+        // A pending bounded start is not yet a committed recording: abandon it
+        // regardless of the escapeCancelsRecording setting (that setting gates
+        // committed sessions only). The PTT machine was never advanced.
+        if cancelPendingStartIfActive(reason: "escDuringPending") { return }
         // off-main post-processing: cheap checks FIRST — the global monitor fires on every
         // Escape keystroke system-wide, so the defaults load must sit
         // behind the isRecording gate.
@@ -1034,6 +1088,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // "connected") would stay OFFLINE until the window was closed and
         // reopened. handleSystemWake delegates here, so wake is covered too.
         NotificationCenter.default.post(name: .audioDevicesDidChange, object: nil)
+        // Bounded-start guard: if an off-main engine start is in flight —
+        // exactly the device-churn scenario that wedged the HAL — abandon it
+        // (it self-cleans) and DEFER the graph rebuild: prepare() must never
+        // touch engine state concurrently. The invalidated flag makes the
+        // next press rebuild the graph from fresh topology.
+        if audio.isStartInFlight {
+            audio.abandonPendingStart()
+            audio.invalidatePreparedState()
+            warmPool.invalidate(reason: "deviceChangeDuringStart")
+            logger.info("Audio refresh deferred: engine start in flight; graph rebuilds on next press")
+            invalidateOnboardingSnapshot()
+            refreshOnboardingState(reopenIfNeeded: false)
+            return
+        }
         invalidateOnboardingSnapshot()
         // Normalize persisted priority list here (infrequent path) instead of on
         // every press — normalize itself enumerates CoreAudio.
@@ -1064,9 +1132,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         invalidateOnboardingSnapshot()
         warmPool.invalidate(reason: "wake")
         logger.info("System wake: resetting PTT state and refreshing audio input")
+        // A bounded start in flight across sleep cannot be trusted to commit:
+        // abandon it (self-cleans) so the first post-wake press starts fresh.
+        cancelPendingStartIfActive(reason: "wake")
         if isRecording {
             transcriptionTask?.cancel()
             transcriptionTask = nil
+            cancelMicStallWatchdog()
             dictationTargetPID = nil
             dictationTargetElement = nil
             // K-52: heldTranscript survives — same never-destroyed policy as
@@ -1109,7 +1181,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 var probe = RecordingStartLatencyProbe()
                 probe.markWithTime(.hotkeyReceived, now)
                 startLatencyProbe = probe
-                _ = startRecording(triggerMode: triggerMode)
+                // Bounded start runs async off-main (freeze hardening): the
+                // hotkey loop stays responsive, so key-up/Esc during the
+                // window are handled by the pending-cancel paths. A second
+                // press while pending supersedes the first (second wins).
+                if pendingStartTask != nil {
+                    audio.abandonPendingStart()
+                    pendingStartTask?.cancel()
+                    pendingStartTask = nil
+                    pendingStartGeneration &+= 1
+                }
+                pendingStartGeneration &+= 1
+                let pendingGeneration = pendingStartGeneration
+                pendingStartTask = Task { @MainActor [weak self] in
+                    await self?.startRecording(triggerMode: triggerMode)
+                    self?.clearPendingStart(generation: pendingGeneration)
+                }
             case .stop:
                 pttUpTime = now
                 stopRecordingAndTranscribe()
@@ -1144,7 +1231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @discardableResult
-    private func startRecording(triggerMode: PTTStateMachine.TriggerMode) -> Bool {
+    private func startRecording(triggerMode: PTTStateMachine.TriggerMode) async -> Bool {
         guard !isRecording else { return false }
         // K-52: superseding an in-flight transcription/paste is decided by the
         // lifecycle machine, not by an unconditional cancel here — the old
@@ -1199,7 +1286,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = audio.beginRetentionIfEnabled(sessionID: sessionID, deviceUID: selectedInputUID)
 
         do {
-            try audio.startCollecting()
+            // Bounded start: the engine start runs off-main under a hard
+            // deadline — a HAL wedged mid-start (USB device churn) can no
+            // longer freeze the app. Timeout and abandonment behave exactly
+            // like a thrown failure: mic error + PTT machine left idle +
+            // immediate retry available on the next press.
+            let startOutcome = await audio.startCollectingBounded()
+            guard startOutcome == .started else {
+                logger.warning("Audio collection start did not commit outcome=\(String(describing: startOutcome), privacy: .public)")
+                audio.endRetention(markComplete: false)
+                // Superseded (key-up/Esc/supersede/device-change during the
+                // window) is a silent no-op by design — the user canceled the
+                // press; only genuine failures surface the mic error.
+                if startOutcome != .superseded {
+                    overlay.showError("Microphone unavailable", action: .openMicrophoneSettings, autoHideAfter: 4.0)
+                }
+                return false
+            }
         } catch {
             logger.warning("Audio collection start failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             overlay.showError("Microphone unavailable", action: .openMicrophoneSettings, autoHideAfter: 4.0)
@@ -1225,6 +1328,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             logger.info("Recording start latency \(line, privacy: .public) transport=\(self.audio.lastSessionTiming.transportTag, privacy: .public)")
         }
         startLatencyProbe = nil
+        // Mid-hold stall watchdog starts only on a committed recording (same
+        // gate as the lifecycle machine advance below).
+        startMicStallWatchdog(isHoldMode: triggerMode == .hold)
 
         // Play chime (so user hears it at full volume)
         let chimeDuration = playRecordingChime()
@@ -1267,14 +1373,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 dictationTargetElement = nil
                 // Partial-AX apps answer none of the AX queries on every press —
                 // expected, not a warning. Gated + deduped per pid per launch.
-                if KalamDiagnosticFlags.verboseAudio {
-                    Self.loggedPartialAXPIDsLock.lock()
-                    let seen = Self.loggedPartialAXPIDs.contains(frontmost.processIdentifier)
-                    if !seen { Self.loggedPartialAXPIDs.insert(frontmost.processIdentifier) }
-                    Self.loggedPartialAXPIDsLock.unlock()
-                    if !seen {
-                        logger.debug("Dictation target element capture FAILED reason=\(error.reason, privacy: .public) pidKept=\(frontmost.processIdentifier, privacy: .public)")
-                    }
+                if KalamDiagnosticFlags.verboseAudio,
+                   Self.claimFirstPartialAXLog(pid: frontmost.processIdentifier) {
+                    logger.debug("Dictation target element capture FAILED reason=\(error.reason, privacy: .public) pidKept=\(frontmost.processIdentifier, privacy: .public)")
                 }
             }
         } else {
@@ -1291,10 +1392,86 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         return true
     }
+
+    /// Sync (non-async) dedupe claim for the per-launch partial-AX log, so the
+    /// NSLock calls stay legal under Swift concurrency: `startRecording` became
+    /// async with the bounded-start hardening, and locking directly from an
+    /// async context is unavailable.
+    private static func claimFirstPartialAXLog(pid: Int32) -> Bool {
+        loggedPartialAXPIDsLock.lock()
+        defer { loggedPartialAXPIDsLock.unlock() }
+        let seen = loggedPartialAXPIDs.contains(pid)
+        if !seen { loggedPartialAXPIDs.insert(pid) }
+        return !seen
+    }
     
+    /// Returns true when a pending bounded start was active and has been
+    /// abandoned. The in-flight (possibly HAL-wedged) attempt self-cleans in
+    /// the recorder; the PTT machine was never advanced for an uncommitted
+    /// start, so there is nothing else to unwind.
+    @discardableResult
+    private func cancelPendingStartIfActive(reason: String) -> Bool {
+        guard pendingStartTask != nil else { return false }
+        audio.abandonPendingStart()
+        pendingStartTask?.cancel()
+        pendingStartTask = nil
+        pendingStartGeneration &+= 1
+        logger.debug("Pending engine start abandoned reason=\(reason, privacy: .public)")
+        return true
+    }
+
+    /// A finished pending-start task clears itself only if it is still the
+    /// current one — a superseding press already advanced the generation, so
+    /// the stale task's exit must not clobber the new pending handle.
+    private func clearPendingStart(generation: Int) {
+        guard pendingStartGeneration == generation else { return }
+        pendingStartTask = nil
+    }
+
+    /// Mid-hold stall watchdog (Bluetooth-dropout hardening). Polls the tap
+    /// callback count after a start grace; on stall it replaces the recording
+    /// pill with a mic error (with a mic-settings action) so the user can
+    /// release and retry instead of dictating into a dead mic. On recovery it
+    /// re-shows the recording pill (timer restarts — cosmetic, documented).
+    /// Warn-only: capture, transcription, and paste behavior are unchanged.
+    private func startMicStallWatchdog(isHoldMode: Bool) {
+        cancelMicStallWatchdog()
+        micStallWatchdogTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: UInt64(MicStallMonitor.graceMs) * 1_000_000)
+            guard !Task.isCancelled, self.isRecording else { return }
+            var monitor = MicStallMonitor()
+            while !Task.isCancelled, self.isRecording {
+                try? await Task.sleep(nanoseconds: UInt64(MicStallMonitor.pollIntervalMs) * 1_000_000)
+                guard !Task.isCancelled, self.isRecording else { return }
+                switch monitor.observe(count: self.audio.publishedCallbackCount()) {
+                case .ok:
+                    break
+                case .warn:
+                    // Warning level (not gated): visible at default log levels
+                    // without verboseAudio, with a route-filterable transport tag.
+                    self.logger.warning("Mic stall detected: no audio callbacks recently transport=\(self.audio.lastSessionTiming.transportTag, privacy: .public)")
+                    self.overlay.showError("Microphone signal lost — check your AirPods", action: .openMicrophoneSettings, autoHideAfter: nil)
+                case .recovered:
+                    self.logger.info("Mic stall recovered; signal flowing again")
+                    self.overlay.showRecording(isHoldMode: isHoldMode)
+                }
+            }
+        }
+    }
+
+    private func cancelMicStallWatchdog() {
+        micStallWatchdogTask?.cancel()
+        micStallWatchdogTask = nil
+    }
+
     private func stopRecordingAndTranscribe() {
+        // Key-up during a pending bounded start: the press never committed —
+        // abandon the attempt (self-cleans) and stay idle. Nothing to stop.
+        if cancelPendingStartIfActive(reason: "keyupDuringPending") { return }
         guard isRecording else { return }
         pttState.recordingDidStop()
+        cancelMicStallWatchdog()
         
         if UserDefaults.standard.bool(forKey: "duckEnabled") {
             duckingStartWorkItem?.cancel()
@@ -1435,6 +1612,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.logger.debug("Recording timing holdMs=\(Int(keyDownToUp * 1000), privacy: .public) keyUpToSamplesMs=\(Int(upToSamples * 1000), privacy: .public) postRollMs=\(postRollMs, privacy: .public)\(sessionTimingExtras, privacy: .public)")
             }
             stageMark("audio-stop+fetch")
+
+            // Capture-pathology gate (Bluetooth-dropout hardening): when the
+            // microphone delivered far less audio than the hold implies, or
+            // near-total digital silence over a long capture, ASR would only
+            // transcribe garbage — refuse to paste and point at the
+            // microphone instead. Counts/levels only, never content.
+            // Conservative by design: short holds always pass; downstream
+            // stages still own quiet-but-real speech.
+            let captureAssessment = CaptureHealthGuard.assess(
+                stats: self.audio.lastCaptureStats, holdMs: segmentEstimateMs)
+            guard captureAssessment.healthy else {
+                // User-visible no-paste outcome: one info line with the reason.
+                self.logger.info("Capture pathological reason=\(captureAssessment.reason?.logName ?? "unknown", privacy: .public) capturedMs=\(captureAssessment.capturedMs, privacy: .public) holdMs=\(captureAssessment.holdMs, privacy: .public) nonZeroPct=\(Int(captureAssessment.nonZeroRatio * 100), privacy: .public)")
+                await MainActor.run {
+                    self.dispatchLifecycle(.captureEnded(session: stopSessionID, result: .noSpeech), context: "capture-pathology")
+                    self.overlay.showError("Microphone delivered no usable audio", action: .openMicrophoneSettings, autoHideAfter: 5.0)
+                }
+                return
+            }
             
             // Trim with hysteresis/hangover/padding + conservative fallback
             // K-51: fused endpointing + peak normalization (one pass).
@@ -1694,7 +1890,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                     self.dictationTargetElement = nil
                     self.dictationTargetPID = nil
-                    self.overlay.showSuccessAndAutoHide()
+                    self.overlay.hide() // Silent success (D-1): pasted text in the target app IS the confirmation
                     self.dispatchLifecycle(.insertSucceeded(session: stopSessionID, outcome: .pasted), context: "paste-ok")
                     stageMark("paste-dispatch")
                     if stageTimingEnabled {
@@ -1739,7 +1935,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                     do {
                         try await self.paster.paste(post.text)
-                        self.overlay.showSuccessAndAutoHide()
+                        self.overlay.hide() // Silent success (D-1): pasted text in the target app IS the confirmation
                         self.dispatchLifecycle(.insertSucceeded(session: stopSessionID, outcome: .pasted), context: "paste-fallback-ok")
                         stageMark("paste-fallback-dispatch")
                         if stageTimingEnabled {
@@ -1783,6 +1979,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func cancelRecording() {
         guard isRecording else { return }
         pttState.recordingDidStop()
+        cancelMicStallWatchdog()
 
         // record-time paste target capture: a canceled session must not retain its paste target.
         // K-52: heldTranscript is deliberately NOT cleared here — a preserved
@@ -2002,7 +2199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             do {
                 try await self.paster.paste(text)
-                self.overlay.showSuccessAndAutoHide()
+                self.overlay.hide() // Silent success (D-1): pasted text in the target app IS the confirmation
             } catch {
                 self.logger.warning("Held-transcript paste failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
                 self.overlay.showError("Paste failed", action: nil, autoHideAfter: 4.0)

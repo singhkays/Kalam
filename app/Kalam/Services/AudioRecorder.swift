@@ -68,6 +68,144 @@ enum AudioPrepareDecision {
     }
 }
 
+/// Snapshot of a finished capture session. Counts and peak level only —
+/// never audio content. Consumed by `CaptureHealthGuard` (see
+/// SpeechQualityGuard.swift) to refuse pasting unusable bytes.
+struct CaptureStats: Sendable, Equatable {
+    var sampleCount: Int
+    var durationMs: Int
+    var callbacks: Int
+    var dropped: Int
+    var nonZeroCount: Int
+    var maxAmplitude: Float
+
+    static let empty = CaptureStats(
+        sampleCount: 0, durationMs: 0, callbacks: 0,
+        dropped: 0, nonZeroCount: 0, maxAmplitude: 0)
+}
+
+/// Mid-hold stall watchdog state (Bluetooth-dropout hardening). Polls the
+/// published tap-callback count; reports `.warn` once when no new audio
+/// arrives for `stallThresholdMs`, and `.recovered` when the stream resumes
+/// after a warning (so the caller can heal the indicator). Pure; the
+/// polling loop lives in AppDelegate.
+enum MicStallEvent: Sendable, Equatable {
+    case ok
+    case warn
+    case recovered
+}
+
+struct MicStallMonitor: Sendable {
+    /// Covers the worst observed Bluetooth engine start (~450 ms) plus
+    /// converter priming with wide margin; the first poll only baselines.
+    static let graceMs = 2500
+    static let pollIntervalMs = 1000
+    /// Two consecutive stalled polls (matches the ~2.4 s systematic AirPods
+    /// stall: warns ~4.5 s into a dead hold instead of wasting all of it).
+    static let stallThresholdMs = 2000
+
+    private(set) var lastCount: Int?
+    private(set) var stalledMs = 0
+    private(set) var warned = false
+
+    /// Returns the single action for this poll. Warns at most once per
+    /// stall episode; a resume re-arms the next episode.
+    mutating func observe(count: Int) -> MicStallEvent {
+        defer { lastCount = count }
+        guard let last = lastCount else { return .ok }
+        if count != last {
+            stalledMs = 0
+            if warned {
+                warned = false
+                return .recovered
+            }
+            return .ok
+        }
+        stalledMs += Self.pollIntervalMs
+        if !warned, stalledMs >= Self.stallThresholdMs {
+            warned = true
+            return .warn
+        }
+        return .ok
+    }
+}
+
+// MARK: - Bounded engine start (main-thread freeze hardening)
+
+/// Resume-at-most-once guard shared by the two racing branches of a bounded
+/// start (engine attempt vs deadline timer). `@unchecked Sendable` because the
+/// lock provides the synchronization.
+final class BoundedStartResumeOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var claimed = false
+
+    /// Returns true exactly once per instance; losers of the race must not
+    /// touch the continuation.
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if claimed { return false }
+        claimed = true
+        return true
+    }
+}
+
+/// Pure policy behind the bounded engine start (2026-09-09 audio-start
+/// hardening design plan). Framework-free so the deadline and outcome
+/// classification are headless-testable.
+///
+/// Background: `AVAudioEngine.start()` used to run synchronously on the main
+/// thread. When the HAL wedges mid-start (USB device churn: `error 35` /
+/// `no such object` cascade, `AVAudioIONodeImpl err = 1852797029`), the call
+/// parks indefinitely instead of throwing — freezing the entire app, overlay
+/// timer included, and making quit impossible. The start now runs off-main
+/// under a hard deadline owned here.
+enum AudioStartPolicy {
+    /// Hard deadline for the entire bounded start, including the one recovery
+    /// re-prepare + retry that lives inside `startCollecting`. 2000 ms covers
+    /// the worst observed Bluetooth start (~450 ms — see
+    /// `MicStallMonitor.graceMs`) with wide margin while keeping the perceived
+    /// hang under ~2 s. A wedged HAL never returns, so this is the only bound.
+    /// Revisit only with a measured `toEngineMs` distribution that approaches
+    /// the margin.
+    static let timeoutMs: Int = 2000
+
+    /// Poll cadence while waiting for a still-in-flight previous attempt to
+    /// clear the engine (supersede path). Short enough that a superseding
+    /// press feels immediate; cheap by construction.
+    static let inFlightWaitPollMs: Int = 25
+
+    /// Outcomes of a bounded start attempt.
+    /// - `started`: engine live, tap installed, session may commit.
+    /// - `failed`: the attempt threw (device gone, permission, bind error…).
+    /// - `timedOut`: the deadline elapsed first — the attempt may still be
+    ///   parked inside CoreAudio and will self-clean when/if it returns.
+    /// - `superseded`: the press was abandoned while in flight (key-up, Esc,
+    ///   second press, device change, wake, quit). Never surfaces a toast.
+    enum Outcome: Equatable, Sendable {
+        case started
+        case timedOut
+        case failed
+        case superseded
+    }
+
+    /// Single classification point for a completed or abandoned attempt.
+    /// Precedence: abandonment wins (the session is no longer wanted — even a
+    /// technically-successful start must self-clean, never commit), then a
+    /// thrown error, then the deadline as fallback.
+    static func classify(elapsedMs: Int, didThrow: Bool, wasAbandoned: Bool) -> Outcome {
+        if wasAbandoned { return .superseded }
+        if didThrow { return .failed }
+        if elapsedMs >= timeoutMs { return .timedOut }
+        return .started
+    }
+
+    /// An abandoned attempt must ALWAYS self-clean (engine stop + graph
+    /// invalidation): an engine that started late must never be left running
+    /// with no committed session behind it.
+    static func shouldSelfClean(wasAbandoned: Bool) -> Bool { wasAbandoned }
+}
+
 final class AudioRecorder: @unchecked Sendable {
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "AudioRecorder")
     private var engine = AVAudioEngine()
@@ -75,6 +213,19 @@ final class AudioRecorder: @unchecked Sendable {
     private var tapInstalled = false
     private var preparedInputDeviceID: AudioDeviceID?
     private var preparedStateInvalidated = false
+
+    // Bounded-start flight state (main-thread freeze hardening). Lock-guarded.
+    // Invariant: while `_isStartInFlight` is true, the engineOpQueue block owns
+    // ALL engine access; main-thread callers (prepare, finishStop, refresh)
+    // must check `isStartInFlight` and defer instead of touching the engine.
+    private let startFlightLock = NSLock()
+    private var _isStartInFlight = false
+    private var _abandonCurrentStart = false
+
+    /// Serial home for the off-main engine start. One block at a time; the
+    /// in-flight guard keeps main from entering concurrently, so engine state
+    /// is never touched from two contexts at once.
+    private let engineOpQueue = DispatchQueue(label: "singhkays.Kalam.audio.engineops", qos: .userInitiated)
 
     // render-thread audio lock fix: all capture state (buffers, converter, counters) lives behind
     // AudioCaptureExchange; the render thread publishes non-blockingly
@@ -101,6 +252,18 @@ final class AudioRecorder: @unchecked Sendable {
     }
     private func setLastPostRollSNR(_ v: Float) {
         lastSNRlock.lock(); _lastPostRollSNR = v; lastSNRlock.unlock()
+    }
+
+    /// Snapshot of the most recently finished capture session. Counts and
+    /// levels only — never content. Read by KalamApp's capture-pathology
+    /// gate (Bluetooth-dropout hardening) to refuse pasting garbage.
+    private var _lastCaptureStats = CaptureStats.empty
+    private let lastCaptureStatsLock = NSLock()
+    var lastCaptureStats: CaptureStats {
+        lastCaptureStatsLock.lock(); defer { lastCaptureStatsLock.unlock() }; return _lastCaptureStats
+    }
+    private func setLastCaptureStats(_ v: CaptureStats) {
+        lastCaptureStatsLock.lock(); _lastCaptureStats = v; lastCaptureStatsLock.unlock()
     }
 
     // MARK: Task 6 (K-57) — opt-in retention, default OFF, byte-identical when OFF
@@ -454,7 +617,151 @@ final class AudioRecorder: @unchecked Sendable {
 
         if KalamDiagnosticFlags.verboseAudio { logger.debug("Started collecting audio samples") }
     }
-    
+
+    // MARK: Bounded engine start (main thread must never block on the HAL)
+
+    private func setStartInFlight(_ value: Bool) {
+        startFlightLock.lock()
+        _isStartInFlight = value
+        startFlightLock.unlock()
+    }
+
+    private func markStartAbandoned() {
+        startFlightLock.lock()
+        _abandonCurrentStart = true
+        startFlightLock.unlock()
+    }
+
+    private func consumeStartAbandoned() -> Bool {
+        startFlightLock.lock()
+        defer { startFlightLock.unlock() }
+        let wasAbandoned = _abandonCurrentStart
+        _abandonCurrentStart = false
+        return wasAbandoned
+    }
+
+    /// True while a bounded start is inside the engine (or wedged there).
+    /// Main-thread engine access (prepare, finishStop, device refresh) must
+    /// check this and defer instead of touching engine state concurrently.
+    var isStartInFlight: Bool {
+        startFlightLock.lock()
+        defer { startFlightLock.unlock() }
+        return _isStartInFlight
+    }
+
+    /// App-layer abandonment of the pending press (key-up during pending, Esc,
+    /// superseding press, device change, wake, quit). The in-flight — possibly
+    /// HAL-wedged — attempt can never commit a session after this; if it
+    /// eventually returns it self-cleans (engine stop + graph invalidation).
+    func abandonPendingStart() {
+        markStartAbandoned()
+    }
+
+    /// Best-effort liveness probe: can CoreAudio name a default input device?
+    /// A failed/unknown answer means the device is already gone (unplug, dock
+    /// churn) and the engine start would just park on a dead node — fail
+    /// before touching the graph. The query itself can block on a wedged HAL,
+    /// which is why it runs off-main inside the bounded window, never on main.
+    static func defaultInputDeviceLooksAlive() -> Bool {
+        var deviceID = kAudioObjectUnknown
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &deviceID)
+        return status == noErr && deviceID != kAudioObjectUnknown
+    }
+
+    /// Engine stop + graph invalidation after an abandoned attempt. Runs on
+    /// engineOpQueue only — the in-flight invariant guarantees exclusivity.
+    private func performAbandonCleanup() {
+        if engine.isRunning {
+            engine.stop()
+        }
+        invalidatePreparedState()
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("Bounded start self-cleaned after abandonment") }
+    }
+
+    /// Runs `startCollecting()` off the main thread under a hard deadline
+    /// (`AudioStartPolicy.timeoutMs`). A wedged `engine.start()` can no longer
+    /// freeze the app: the deadline branch returns `.timedOut` on time, marks
+    /// the attempt abandoned, and the parked attempt self-cleans when/if it
+    /// ever returns. While in flight, main-thread engine access is deferred
+    /// (see `isStartInFlight`), so engine state is never touched concurrently.
+    func startCollectingBounded() async -> AudioStartPolicy.Outcome {
+        // Supersede wait: a previous attempt may still hold the engine (a
+        // superseded press finishing, or a wedged one never returning). Wait
+        // within this attempt's budget instead of failing outright; if the
+        // previous attempt is truly wedged, report the deadline, stay safe.
+        let waitStart = CFAbsoluteTimeGetCurrent()
+        while isStartInFlight {
+            let waitedMs = Int((CFAbsoluteTimeGetCurrent() - waitStart) * 1000)
+            if waitedMs >= AudioStartPolicy.timeoutMs {
+                logger.warning("Bounded start skipped: previous attempt still in flight waitedMs=\(waitedMs, privacy: .public)")
+                return .timedOut
+            }
+            try? await Task.sleep(nanoseconds: UInt64(AudioStartPolicy.inFlightWaitPollMs) * 1_000_000)
+            if Task.isCancelled { return .superseded }
+        }
+
+        setStartInFlight(true)
+        _ = consumeStartAbandoned() // clear any stale flag from a prior attempt
+        let began = CFAbsoluteTimeGetCurrent()
+
+        return await withCheckedContinuation { (continuation: CheckedContinuation<AudioStartPolicy.Outcome, Never>) in
+            let resumeOnce = BoundedStartResumeOnce()
+            engineOpQueue.async { [weak self] in
+                guard let self else {
+                    if resumeOnce.claim() { continuation.resume(returning: .failed) }
+                    return
+                }
+                var didThrow = false
+                do {
+                    // Preflight (off-main): a dead default input fails before
+                    // the engine graph is touched at all.
+                    if !Self.defaultInputDeviceLooksAlive() {
+                        throw AudioRecorderError.engineStartFailed(
+                            NSError(
+                                domain: "Kalam.AudioRecorder",
+                                code: -1097,
+                                userInfo: [NSLocalizedDescriptionKey: "No live default input device before engine start"]
+                            )
+                        )
+                    }
+                    try self.startCollecting()
+                } catch {
+                    didThrow = true
+                }
+                let wasAbandoned = self.consumeStartAbandoned()
+                let final = AudioStartPolicy.classify(
+                    elapsedMs: Int((CFAbsoluteTimeGetCurrent() - began) * 1000),
+                    didThrow: didThrow,
+                    wasAbandoned: wasAbandoned)
+                if AudioStartPolicy.shouldSelfClean(wasAbandoned: wasAbandoned) {
+                    self.performAbandonCleanup()
+                } else if final == .failed {
+                    // Both the primary start and the in-band recovery retry
+                    // failed: force a fresh graph on the next press instead of
+                    // reusing whatever wedged/failed state is on the engine.
+                    self.invalidatePreparedState()
+                }
+                self.setStartInFlight(false)
+                if resumeOnce.claim() { continuation.resume(returning: final) }
+            }
+            DispatchQueue.global(qos: .utility).asyncAfter(
+                deadline: .now() + .milliseconds(AudioStartPolicy.timeoutMs)
+            ) { [weak self] in
+                // Deadline won: the attempt is abandoned in place. It cannot
+                // be interrupted — engine.start() has no cancellation surface —
+                // so it parks in CoreAudio and self-cleans on return.
+                self?.markStartAbandoned()
+                if resumeOnce.claim() { continuation.resume(returning: .timedOut) }
+            }
+        }
+    }
+
     // Post-roll capture is applied before stopping and fetching samples.
     // Convenience async wrapper (test seam): pins the generation at call time,
     // sleeps the post-roll, then finishes THAT session. Production callers
@@ -476,13 +783,19 @@ final class AudioRecorder: @unchecked Sendable {
     func finishStop(expectedGeneration: Int) -> [Float] {
         guard exchange.currentGeneration() == expectedGeneration else {
             if KalamDiagnosticFlags.verboseAudio { logger.debug("Stop superseded by a newer capture session; skipping teardown") }
+            setLastCaptureStats(.empty)
             return []
         }
 
         var out = exchange.stopCapture(expectedGeneration: expectedGeneration)
 
         // Stop the engine on the main thread to turn off the microphone indicator.
-        if engine.isRunning {
+        // Bounded-start guard: while an off-main engine start holds the engine
+        // (possibly wedged in the HAL), main must not touch it — the attempt's
+        // own self-clean path owns teardown. Production stop paths cannot reach
+        // this window (a pending start never committed a session), so this is
+        // belt-and-braces for wake/cancel race edges.
+        if engine.isRunning && !isStartInFlight {
             let stopStart = CFAbsoluteTimeGetCurrent()
             engine.stop()
             let stopElapsed = (CFAbsoluteTimeGetCurrent() - stopStart) * 1000
@@ -504,9 +817,12 @@ final class AudioRecorder: @unchecked Sendable {
         // Debug: Check non-zero and max amplitude
         let nonZeroCount = out.lazy.filter { abs($0) > 0.0001 }.count
         if KalamDiagnosticFlags.verboseAudio { logger.debug("Audio sample summary nonZeroSamples=\(nonZeroCount, privacy: .public) totalSamples=\(out.count, privacy: .public)") }
-        if let maxAmplitude = out.map({ abs($0) }).max() {
-            if KalamDiagnosticFlags.verboseAudio { logger.debug("Audio sample maxAmplitude=\(maxAmplitude, privacy: .public)") }
-        }
+        let maxAmplitude = out.map({ abs($0) }).max() ?? 0
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("Audio sample maxAmplitude=\(maxAmplitude, privacy: .public)") }
+        setLastCaptureStats(CaptureStats(
+            sampleCount: out.count, durationMs: durationMs,
+            callbacks: callbacks, dropped: dropped,
+            nonZeroCount: nonZeroCount, maxAmplitude: maxAmplitude))
         return out
     }
 
@@ -516,6 +832,12 @@ final class AudioRecorder: @unchecked Sendable {
     /// three 20 ms analysis windows the tail verdict needs.
     func recentCaptureSamples(count: Int) -> [Float] {
         exchange.waveform(sampleCount: count)
+    }
+
+    /// Live tap-callback count for the mid-hold stall watchdog. Consumer
+    /// side; mirrors `stats().callbacks` without the drop counter.
+    func publishedCallbackCount() -> Int {
+        exchange.stats().callbacks
     }
 
     /// Ring read-back helper: estimate room SNR from the recent waveform

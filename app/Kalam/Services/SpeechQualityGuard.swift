@@ -85,3 +85,72 @@ enum SpeechQualityGuard {
         ).verdict
     }
 }
+
+/// Fails loudly when the microphone delivered unusable bytes (Bluetooth
+/// dropout hardening). Unlike `SpeechQualityGuard` — which rejects
+/// noise-like clips — this catches a broken *capture*: far fewer samples
+/// than the hold implies, or near-total digital silence over a long
+/// capture. Either way ASR would transcribe garbage, so the pipeline must
+/// refuse to paste and point at the microphone instead.
+///
+/// Pure over counts/levels (never content); thresholds are deliberately
+/// lenient so healthy captures — including quiet voices and slow engine
+/// starts — never trip it.
+enum CaptureHealthGuard {
+    enum Reason: Sendable, Equatable {
+        /// Long hold, but the buffer holds a fraction of it (stalled engine,
+        /// dropped stream, mid-hold device death).
+        case shortfall
+        /// Long capture that is almost entirely digital zeros (dead stream).
+        case silence
+
+        var logName: String {
+            switch self {
+            case .shortfall: return "shortfall"
+            case .silence: return "silence"
+            }
+        }
+    }
+
+    struct Assessment: Sendable, Equatable {
+        var healthy: Bool
+        var reason: Reason?
+        var capturedMs: Int
+        var holdMs: Int
+        var nonZeroRatio: Float
+    }
+
+    /// Minimum hold before any verdict (quick taps and engine-start overhead
+    /// must never trip the gate; downstream stages own short clips).
+    static let minHoldMsForAssessment = 4000
+    /// Captured audio must cover at least this fraction of the hold.
+    static let minKeepRatio: Double = 0.5
+    /// Minimum capture length before the digital-silence verdict applies.
+    static let minCaptureMsForSilenceCheck = 2000
+    /// Fraction of samples above 1e-4 required on a long capture.
+    static let minNonZeroRatio: Float = 0.02
+
+    static func assess(stats: CaptureStats, holdMs: Int) -> Assessment {
+        let capturedMs = stats.durationMs
+        let nonZeroRatio: Float = stats.sampleCount > 0
+            ? Float(stats.nonZeroCount) / Float(stats.sampleCount)
+            : 0
+        let base = Assessment(
+            healthy: true, reason: nil,
+            capturedMs: capturedMs, holdMs: holdMs, nonZeroRatio: nonZeroRatio)
+        guard holdMs >= minHoldMsForAssessment else { return base }
+        if Double(capturedMs) < Double(holdMs) * minKeepRatio {
+            var out = base
+            out.healthy = false
+            out.reason = .shortfall
+            return out
+        }
+        if capturedMs >= minCaptureMsForSilenceCheck, nonZeroRatio < minNonZeroRatio {
+            var out = base
+            out.healthy = false
+            out.reason = .silence
+            return out
+        }
+        return base
+    }
+}
