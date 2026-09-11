@@ -1,8 +1,10 @@
 import CoreGraphics
 import Foundation
 
-/// Pure audio-envelope math behind the recording indicator (Phase 1 extraction).
-/// Framework-free and deterministic so it stays unit-testable; views translate
+/// Pure audio-envelope math behind the recording indicator (Phase 1 extraction;
+/// provenance: the AppKit WaveformView/PillLevelGlyphView call sites, deleted
+/// at the Phase 4 cutover). Framework-free and deterministic so it stays
+/// unit-testable; views translate
 /// these values into pixels. The constants are the tuned spec moved verbatim
 /// from the WaveformView and PillLevelGlyphView call sites. Do not retune here.
 enum IndicatorWaveformMath {

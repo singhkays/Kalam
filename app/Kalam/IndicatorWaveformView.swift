@@ -2,7 +2,8 @@ import SwiftUI
 
 /// The machined deck's waveform: one canvas draw per tick, isolated from the
 /// rest of the surface tree (plan §6.4). Geometry and the green alpha ramp
-/// mirror WaveformView exactly.
+/// SwiftUI waveform bars for the machined deck (the sole content path since
+/// the Phase 4 cutover; values mirror the deleted AppKit implementation).
 struct IndicatorWaveformView: View {
     @ObservedObject var waveform: IndicatorWaveformState
 
