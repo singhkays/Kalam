@@ -115,6 +115,24 @@ final class PasteService {
         case failed            // every strategy failed — nothing consumed it
     }
 
+    /// Paste-leg telemetry: always-on, content-free (leg name + text length +
+    /// outcome + target bundle). Purpose: attribute a target-app-specific
+    /// rendering bug (e.g. a transcript arriving word-by-word) to the delivery
+    /// strategy that served it — AX verified insert, AX fallback, unicode
+    /// CGEvent, or Cmd+V — without logging any transcript content.
+    private enum PasteLeg {
+        static let axVerified = "ax-verified"
+        static let axFallback = "ax-fallback"
+        static let axCapturedElement = "ax-captured-element"
+        static let unicodeCGEvent = "unicode-cgevent"
+        static let cmdV = "cmd-v"
+        static let cmdVPid = "cmd-v-pid"
+    }
+
+    private func logLeg(_ leg: String, text: String, outcome: String, bundle: String? = nil) {
+        Self.logger.info("Paste leg=\(leg, privacy: .public) length=\(text.count, privacy: .public) outcome=\(outcome, privacy: .public) bundle=\(bundle ?? "nil", privacy: .public)")
+    }
+
     func paste(_ text: String) async throws {
         try await paste(text, preferPid: nil, pidPostingEnabled: false)
     }
@@ -196,8 +214,10 @@ final class PasteService {
             let verified = await performVerifiedAXInsert(element: element, text: text)
             if verified {
                 if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via Accessibility (verified)") }
+                logLeg(PasteLeg.axVerified, text: text, outcome: "inserted", bundle: frontmostBundleID)
                 return
             } else {
+                logLeg(PasteLeg.axVerified, text: text, outcome: "unverified-falling-through", bundle: frontmostBundleID)
                 if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AX verification failed (Electron lie / timeout) → fall through to global legs after frontmost re-check") }
             }
         }
@@ -216,8 +236,10 @@ final class PasteService {
         // Global legs: CGEvent unicode → pasteboard+CmdV
         if strategies.postUnicodeText(text) {
             if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via CGEvent unicode") }
+            logLeg(PasteLeg.unicodeCGEvent, text: text, outcome: "inserted", bundle: frontmostBundleID)
             return
         }
+        logLeg(PasteLeg.unicodeCGEvent, text: text, outcome: "post-failed", bundle: frontmostBundleID)
 
         let pasteboard = strategies.pasteboard
         let snapshot = PasteboardSnapshot(pasteboard: pasteboard)
@@ -239,6 +261,7 @@ final class PasteService {
 
         if pidPostingEnabled, let preferPid, strategies.postCmdVToPid(preferPid) {
             if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via PID-posted Cmd+V pid=\(preferPid, privacy: .public)") }
+            logLeg(PasteLeg.cmdVPid, text: text, outcome: "posted", bundle: frontmostBundleID)
             outcome = .cmdV
             return
         } else if pidPostingEnabled, preferPid != nil {
@@ -246,18 +269,22 @@ final class PasteService {
         }
         if strategies.postCmdV() {
             if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via Cmd+V") }
+            logLeg(PasteLeg.cmdV, text: text, outcome: "posted", bundle: frontmostBundleID)
             outcome = .cmdV
             return
         }
+        logLeg(PasteLeg.cmdV, text: text, outcome: "post-failed", bundle: frontmostBundleID)
 
         // Final fallback: legacy AX without verification (for apps where verification is unavailable).
         // This is reached only after global legs failed; keeps previous behavior for coverage.
         if let error = strategies.insertTextViaAccessibility(text) {
             Self.logger.warning("Paste failed after AX fallback: \(error, privacy: .public)")
+            logLeg(PasteLeg.axFallback, text: text, outcome: "failed", bundle: frontmostBundleID)
             throw PasteServiceError.pasteExecutionFailed(reason: error)
         }
 
         if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via Accessibility (fallback)") }
+        logLeg(PasteLeg.axFallback, text: text, outcome: "inserted", bundle: frontmostBundleID)
         outcome = .accessibility
     }
 
@@ -300,8 +327,10 @@ final class PasteService {
         let verified = await performVerifiedAXInsert(element: element, text: text)
         if verified {
             if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via captured-element Accessibility insert (verified)") }
+            logLeg(PasteLeg.axCapturedElement, text: text, outcome: "inserted", bundle: strategies.bundleIDForPID(strategies.axGetPid(element) ?? 0))
             return
         }
+        logLeg(PasteLeg.axCapturedElement, text: text, outcome: "unverified-legacy-fallback", bundle: strategies.bundleIDForPID(strategies.axGetPid(element) ?? 0))
         // Fallback to legacy insert for compatibility (still verified via same element)
         if let error = strategies.insertTextIntoElement(element, text) {
             Self.logger.warning("Captured-element paste failed: \(error, privacy: .public)")
