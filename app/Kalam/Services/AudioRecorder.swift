@@ -684,6 +684,21 @@ final class AudioRecorder: @unchecked Sendable {
         if KalamDiagnosticFlags.verboseAudio { logger.debug("Bounded start self-cleaned after abandonment") }
     }
 
+    /// Teardown for a STALE COMMIT: the bounded start succeeded, but the
+    /// machine's pending start was rolled back while the engine was starting
+    /// (stop/Esc/wake/quit during the window). The engine is live with no
+    /// session behind it — stop it and force a fresh graph on the next press.
+    /// Queued on engineOpQueue like every engine access.
+    func stopEngineFromStaleCommit() {
+        engineOpQueue.async { [self] in
+            if engine.isRunning {
+                engine.stop()
+            }
+            invalidatePreparedState()
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("Stale commit: engine stopped, graph invalidated") }
+        }
+    }
+
     /// Runs `startCollecting()` off the main thread under a hard deadline
     /// (`AudioStartPolicy.timeoutMs`). A wedged `engine.start()` can no longer
     /// freeze the app: the deadline branch returns `.timedOut` on time, marks

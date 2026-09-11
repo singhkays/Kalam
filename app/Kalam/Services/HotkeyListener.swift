@@ -36,6 +36,11 @@ final class HotkeyListener {
         hotKey = nil
 
         let safeConfiguration = configuration.normalized()
+        // Mode telemetry: the effective activation mode decides the whole PTT
+        // contract — log it next to the key so a settings/mode mismatch can
+        // never hide in a behavior report again (holdOrToggle double-press
+        // regression, 2026-09-10).
+        logger.info("PTT activation mode=\(safeConfiguration.activationMode.rawValue, privacy: .public)")
         if let custom = safeConfiguration.customChord {
             registerCustom(custom)
             return

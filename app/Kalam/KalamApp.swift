@@ -1181,10 +1181,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 var probe = RecordingStartLatencyProbe()
                 probe.markWithTime(.hotkeyReceived, now)
                 startLatencyProbe = probe
+                // The machine latches the pending start SYNCHRONOUSLY: the
+                // bounded engine commit lands up to ~2 s later, and every key
+                // event in that window must decide against the pending start
+                // (stop press aborts; holdOrToggle quick release converts),
+                // never against a stale idle machine.
+                pttState.beginPending(triggerMode)
                 // Bounded start runs async off-main (freeze hardening): the
-                // hotkey loop stays responsive, so key-up/Esc during the
-                // window are handled by the pending-cancel paths. A second
-                // press while pending supersedes the first (second wins).
+                // hotkey loop stays responsive. The machine now routes
+                // pending-window second presses to .stop, so this supersede
+                // branch is belt-and-braces for any .start that slips through.
                 if pendingStartTask != nil {
                     audio.abandonPendingStart()
                     pendingStartTask?.cancel()
@@ -1230,8 +1236,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return nil
     }
 
+    /// Rolls the machine's pending start back if the recording did not commit
+    /// (guard failure, engine start failure/timeout/supersede, stale commit).
+    /// A failed start leaves the machine idle — the pre-hardening contract.
     @discardableResult
     private func startRecording(triggerMode: PTTStateMachine.TriggerMode) async -> Bool {
+        let started = await performStartRecording(triggerMode: triggerMode)
+        if !started {
+            pttState.rollbackPending()
+        }
+        return started
+    }
+
+    private func performStartRecording(triggerMode: PTTStateMachine.TriggerMode) async -> Bool {
         guard !isRecording else { return false }
         // K-52: superseding an in-flight transcription/paste is decided by the
         // lifecycle machine, not by an unconditional cancel here — the old
@@ -1311,7 +1328,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
         startLatencyProbe?.mark(.engineStarted)
-        pttState.recordingDidStart(triggerMode)
+        // Commit the machine's pending start. Latches the trigger mode the
+        // pending window decided (holdOrToggle quick-tap converts hold→toggle
+        // mid-flight). A false return means the pending start was rolled back
+        // while the engine was starting (stop/Esc/wake/quit during the
+        // window): the engine is live but the session is unwanted — tear it
+        // down and drop everything silently.
+        guard pttState.commitPending() else {
+            audio.stopEngineFromStaleCommit()
+            audio.endRetention(markComplete: false)
+            logger.debug("Stale recording commit dropped: pending start rolled back during engine start")
+            return false
+        }
         overlay.showRecording(isHoldMode: triggerMode == .hold)
         // K-52: the start committed — advance the machine (this is where a
         // superseded session's transcript gets preserved / its tasks killed).
@@ -1406,12 +1434,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     /// Returns true when a pending bounded start was active and has been
-    /// abandoned. The in-flight (possibly HAL-wedged) attempt self-cleans in
-    /// the recorder; the PTT machine was never advanced for an uncommitted
-    /// start, so there is nothing else to unwind.
+    /// abandoned. Rolls the machine's pending state back (a pending start IS
+    /// machine decision state since the freeze hardening) and abandons the
+    /// in-flight — possibly HAL-wedged — attempt, which self-cleans in the
+    /// recorder. On success the machine has already committed, so this is
+    /// only reachable while pending.
     @discardableResult
     private func cancelPendingStartIfActive(reason: String) -> Bool {
-        guard pendingStartTask != nil else { return false }
+        guard pendingStartTask != nil || pttState.isPending else { return false }
+        pttState.rollbackPending()
         audio.abandonPendingStart()
         pendingStartTask?.cancel()
         pendingStartTask = nil
@@ -1466,9 +1497,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func stopRecordingAndTranscribe() {
-        // Key-up during a pending bounded start: the press never committed —
-        // abandon the attempt (self-cleans) and stay idle. Nothing to stop.
-        if cancelPendingStartIfActive(reason: "keyupDuringPending") { return }
+        // A stop that lands in the bounded-start pending window aborts the
+        // attempt: no engine session ever committed, so there is nothing to
+        // transcribe — and per the silent-cancellation ruling, no toast. The
+        // machine routes this press here precisely so it cannot be eaten by
+        // a stale idle read (the holdOrToggle double-press regression).
+        if pttState.isPending || pendingStartTask != nil {
+            cancelPendingStartIfActive(reason: "stopDuringPending")
+            return
+        }
         guard isRecording else { return }
         pttState.recordingDidStop()
         cancelMicStallWatchdog()

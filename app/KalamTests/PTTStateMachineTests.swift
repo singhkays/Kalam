@@ -6,9 +6,11 @@ import XCTest
 /// so the timing-sensitive transitions are headlessly testable.
 ///
 /// Contract simulated in every test (exactly what `AppDelegate` does):
-/// - after a `.start` event, the AppDelegate reports success via
-///   `state.recordingDidStart(mode)` — it may NOT (failed start leaves the
-///   machine idle);
+/// - on a `.start` event, the AppDelegate latches `state.beginPending(mode)`
+///   synchronously (the bounded engine start commits up to ~2 s later);
+/// - on commit success it reports `state.commitPending()`; on any failure,
+///   timeout, supersede, or pending-cancel it reports `state.rollbackPending()`
+///   — a failed start leaves the machine idle;
 /// - after a `.stop` event it reports via `state.recordingDidStop()`.
 final class PTTStateMachineTests: XCTestCase {
 
@@ -135,15 +137,106 @@ final class PTTStateMachineTests: XCTestCase {
         XCTAssertEqual(machine.handle(isDown: true, now: 0.1, activationMode: .holdOrToggle, state: &state), [])
     }
 
+    // MARK: - pending window (bounded-start hardening)
+
+    /// THE regression pin: in Hold-or-Toggle, the start tap's release lands
+    /// before the bounded engine commit. The conversion must happen against
+    /// the pending state so the NEXT single press stops (the shipped bug
+    /// required two presses: the first was eaten by the stale idle read).
+    func testHoldOrToggleQuickTapConvertsDuringPendingWindowAndCommitLatchesToggle() {
+        XCTAssertEqual(machine.handle(isDown: true, now: 0, activationMode: .holdOrToggle, state: &state),
+                       [.start(.hold)])
+        state.beginPending(.hold)
+        // Release while the engine start is still in flight: converts the
+        // pending hold to a latched toggle.
+        XCTAssertEqual(machine.handle(isDown: false, now: 0.15, activationMode: .holdOrToggle, state: &state), [])
+        XCTAssertEqual(state.pendingTriggerMode, .toggle)
+        // The bounded start commits: whatever the window decided is latched.
+        XCTAssertTrue(state.commitPending())
+        XCTAssertTrue(state.isRecording)
+        XCTAssertEqual(state.recordingTriggerMode, .toggle)
+        // ONE press now stops — the shipped double-press bug is closed.
+        XCTAssertEqual(machine.handle(isDown: true, now: 5.0, activationMode: .holdOrToggle, state: &state),
+                       [.stop, .suppressNextKeyUp])
+    }
+
+    func testHoldOrToggleLongHoldDuringPendingEmitsStopForAbort() {
+        XCTAssertEqual(machine.handle(isDown: true, now: 0, activationMode: .holdOrToggle, state: &state),
+                       [.start(.hold)])
+        state.beginPending(.hold)
+        // Release past the tap threshold while still pending: a normal hold
+        // whose stop aborts the not-yet-live engine session.
+        XCTAssertEqual(machine.handle(isDown: false, now: 0.6, activationMode: .holdOrToggle, state: &state),
+                       [.stop])
+    }
+
+    func testHoldOrTogglePendingConvertedToggleStopsOnNextDown() {
+        XCTAssertEqual(machine.handle(isDown: true, now: 0, activationMode: .holdOrToggle, state: &state),
+                       [.start(.hold)])
+        state.beginPending(.hold)
+        _ = machine.handle(isDown: false, now: 0.15, activationMode: .holdOrToggle, state: &state)
+        XCTAssertEqual(state.pendingTriggerMode, .toggle)
+        // A second press while the converted start is still pending aborts it.
+        XCTAssertEqual(machine.handle(isDown: true, now: 0.4, activationMode: .holdOrToggle, state: &state),
+                       [.stop, .suppressNextKeyUp])
+    }
+
+    func testToggleStopPressDuringPendingAbortsInsteadOfRestarting() {
+        // The shipped bug's toggle variant: the machine's stale idle read made
+        // a stop press during the pending window emit .start again — my
+        // supersede path then RESTARTED the recording instead of stopping it.
+        XCTAssertEqual(machine.handle(isDown: true, now: 0, activationMode: .toggle, state: &state),
+                       [.start(.toggle)])
+        state.beginPending(.toggle)
+        XCTAssertEqual(machine.handle(isDown: true, now: 0.2, activationMode: .toggle, state: &state),
+                       [.stop, .suppressNextKeyUp])
+        // The app aborts the pending start; the machine is idle for a fresh press.
+        state.rollbackPending()
+        XCTAssertEqual(machine.handle(isDown: true, now: 1.0, activationMode: .toggle, state: &state),
+                       [.start(.toggle)])
+    }
+
+    func testHoldSecondDownDuringPendingIgnoredAndUpAborts() {
+        XCTAssertEqual(machine.handle(isDown: true, now: 0, activationMode: .hold, state: &state),
+                       [.start(.hold)])
+        state.beginPending(.hold)
+        // Hold cannot double-start, in flight or live.
+        XCTAssertEqual(machine.handle(isDown: true, now: 0.1, activationMode: .hold, state: &state), [])
+        // The release of a pending hold aborts the not-yet-live session.
+        XCTAssertEqual(machine.handle(isDown: false, now: 0.2, activationMode: .hold, state: &state),
+                       [.stop])
+    }
+
+    func testCommitPendingWithoutPendingReturnsFalse() {
+        XCTAssertFalse(state.commitPending())
+        XCTAssertFalse(state.isRecording)
+    }
+
+    func testRollbackPendingRestoresIdleForFreshStart() {
+        state.beginPending(.toggle)
+        state.rollbackPending()
+        XCTAssertFalse(state.isPending)
+        XCTAssertFalse(state.isRecording)
+        XCTAssertNil(state.recordingTriggerMode)
+        XCTAssertEqual(machine.handle(isDown: true, now: 1.0, activationMode: .toggle, state: &state),
+                       [.start(.toggle)])
+    }
+
     // MARK: - outcome contract
 
     func testFailedStartLeavesMachineIdle() {
-        // AppDelegate reports NO recordingDidStart (guard failure: onboarding
-        // incomplete, mic/ASR not ready). The machine must not be wedged.
+        // AppDelegate latches a pending start synchronously and rolls it back
+        // when the bounded start fails (guard failure, engine failure,
+        // timeout). The machine must come back fully idle either way.
         XCTAssertEqual(machine.handle(isDown: true, now: 0, activationMode: .holdOrToggle, state: &state),
                        [.start(.hold)])
-        XCTAssertEqual(machine.handle(isDown: false, now: 0.1, activationMode: .holdOrToggle, state: &state), [])
+        state.beginPending(.hold)
+        XCTAssertEqual(machine.handle(isDown: false, now: 0.1, activationMode: .holdOrToggle, state: &state),
+                       [])
+        XCTAssertTrue(state.isPending)
+        state.rollbackPending() // the app's failure path
         XCTAssertFalse(state.isRecording)
+        XCTAssertFalse(state.isPending)
         // A later press starts normally.
         XCTAssertEqual(machine.handle(isDown: true, now: 1.0, activationMode: .holdOrToggle, state: &state),
                        [.start(.hold)])
