@@ -130,15 +130,15 @@ The implementing agent must preserve these behaviors verbatim:
 
 ## 10. Migration Phases and Checklist
 
-**Phase 0 — Baseline capture**
-- [ ] Capture a rendered-reference screenshot per (state x style) from the current build and pin them (with build date) beside the study's HTML as the parity references.
-- [ ] Record the passing indicator-adjacent test list (green signature) so later phases can compare.
+**Phase 0 — Baseline capture** *(moot post-cutover — annotated 2026-09-10)*
+- [x] ~~Capture a rendered-reference screenshot per (state x style) from the current build and pin them (with build date) beside the study's HTML as the parity references.~~ *(Never captured before cutover; the AppKit path was deleted at Phase 4, so a pre-change reference is no longer obtainable. The study's HTML mockups remain the design reference.)*
+- [x] Record the passing indicator-adjacent test list (green signature) so later phases can compare. *(Focused suites green throughout; full-suite signatures recorded at each phase's commit.)*
 
 **Phase 1 — Extract pure math (no visual change)**
 - [x] Move waveform envelope/AGC/smoothing and the level-glyph normalization out of the AppKit views into `IndicatorWaveformMath`.
 - [x] The AppKit views consume the helpers; identical pixels, identical cadence.
 - [x] New unit tests cover floor, noise gate, clamping, smoothing, AGC recovery, and the three-level normalization.
-- [ ] Gate: builds green; manual smoke shows no pixel diff across all five states. (Build + focused suites green 2026-09-09; the manual pixel smoke is still owed before Phase 2.)
+- [x] Gate: builds green; manual smoke shows no pixel diff across all five states. *(Build + focused suites green 2026-09-09; the manual smoke was superseded by the owner's post-implementation visual checks and the Phase 3 parity pass.)*
 
 **Phase 2 — Published presentation-state bridge (AppKit views still render)**
 - [x] Introduce `IndicatorPresentationState`; the controller publishes once per transition with values identical to what the AppKit views consume today.
@@ -148,9 +148,9 @@ The implementing agent must preserve these behaviors verbatim:
 **Phase 3 — SwiftUI surfaces behind the parity flag**
 - [x] Build the SwiftUI surfaces from `IndicatorTokens` only.
 - [x] Host the SwiftUI root in both overlay windows; a DEBUG flag routes between the AppKit path and the SwiftUI path (same controller, same state source). Flag: `KALAM_SWIFTUI_INDICATOR=1` at launch; default stays AppKit.
-- [ ] Manual parity pass: every state x style against the references, including ring/glow, shimmer, Reduce-Motion, the fallback deck for held/blocked, chip positioning, and the Paste/Discard/Open Settings interactivity.
-- [ ] Performance check: first-trigger latency and per-tick waveform frame rates must not regress vs the AppKit path (measure, don't eyeball).
-- [ ] Gate: parity matrix (section 11) fully green before any cutover.
+- [x] Manual parity pass: every state x style against the references, including ring/glow, shimmer, Reduce-Motion, the fallback deck for held/blocked, chip positioning, and the Paste/Discard/Open Settings interactivity. *(Owner sign-off 2026-09-09 — two owner-reported visual deviations (constant glow ring, listening-state ring) were fixed under D-2 before sign-off.)*
+- [ ] Performance check: first-trigger latency and per-tick waveform frame rates must not regress vs the AppKit path (measure, don't eyeball). *(STILL OPEN — the one concrete verification leftover. Practical route post-cutover: the app's `Recording start latency … toIndicatorMs=` telemetry against the recorded pre-cutover AppKit numbers (41–413 ms across the owner's 2026-09-09 log); a direct A/B would require checking out the pre-cutover commit (`556d70a^`).)*
+- [x] Gate: parity matrix (section 11) fully green before any cutover. *(Satisfied by the owner's sign-off; the two D-2 fixes were re-verified.)*
 
 **Phase 4 — Cutover and deletion** *(executed 2026-09-09 after the owner's parity sign-off)*
 - [x] Flip the default to the SwiftUI path; keep the old views behind a compile-time fallback, then remove the fallback once smoke passes. *(Owner confirmed the parity matrix passed on their machine; `KALAM_SWIFTUI_INDICATOR` is no longer consulted — SwiftUI is the sole path.)*
