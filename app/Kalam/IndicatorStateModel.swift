@@ -30,11 +30,12 @@ enum IndicatorStateModel {
 
     /// Fallback law: held/blocked ALWAYS present in machined form regardless of
     /// style, because actionable states need the full surface. Transient states
-    /// render compact for whisper/caret only; machined is never compact.
+    /// render compact for whisper only; machined is never compact.
+    /// (The caret chip was removed 2026-09-12; it never used this surface.)
     static func usesCompactSurface(style: IndicatorStyle, state: IndicatorState) -> Bool {
         switch state {
         case .listening, .pausing, .transcribing:
-            return style != .machined
+            return style == .whisper
         case .held, .blocked:
             return false
         }

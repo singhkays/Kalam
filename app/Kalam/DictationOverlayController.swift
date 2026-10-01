@@ -15,10 +15,8 @@ final class DictationOverlayController {
         static let overlayWidth: CGFloat = IndicatorStateModel.machinedFormWidth
         static let compactHeight: CGFloat = 34
         static let recordingHeight: CGFloat = 72
-        /// K-48 Task 5: whisper/caret pill height.
+        /// K-48: whisper pill height.
         static let pillHeight: CGFloat = 30
-        /// K-48 Task 7: at-the-caret chip width (dot + glyph + timer).
-        static let caretChipWidth: CGFloat = 84
         static let topInset: CGFloat = 20
         static let bottomInset: CGFloat = 16
     }
@@ -84,14 +82,9 @@ final class DictationOverlayController {
     /// K-48 Task 5: system appearance and Reduce Motion follow the same once-per-session rule.
     private var sessionUsesDarkAppearance = true
     private var sessionReduceMotion = false
-    /// K-48 Task 7: record-time focused element, delivered by KalamApp after the bounded
-    /// AX capture; anchors the at-the-caret chip without a second system-wide walk.
-    private var caretAnchorElement: AXUIElement?
-    private var caretChipWindow: NSWindow?
     /// Phase 2/3: published presentation for the (sole) SwiftUI surfaces.
     private let presentationState = IndicatorPresentationState()
     private var capsuleHostingView: NSHostingView<IndicatorCapsuleRootView>?
-    private var chipHostingView: NSHostingView<IndicatorChipRootView>?
 
     func setWaveformProvider(_ provider: @escaping () -> [Float]) {
         waveformProvider = provider
@@ -191,8 +184,6 @@ final class DictationOverlayController {
         stateTask = nil
         stopWaveformUpdates()
         stopTimerUpdates()
-        caretAnchorElement = nil
-        hideCaretChip()
         // No session-scoped CAAnimation teardown needed: the SwiftUI surfaces
         // carry no infinitely-running Core Animation layers (animations are
         // view-lifetime scoped there); the old hideGreenRing/
@@ -218,7 +209,7 @@ final class DictationOverlayController {
         stateTask = nil
         ensureWindow()
         let showsWaveform = isRecordingState(state)
-        // K-48 Task 5: whisper/caret shrink listening+transcribing to the pill; everything else keeps the deck.
+        // K-48: whisper shrinks listening+transcribing to the pill; everything else keeps the deck.
         let compact = usesCompactSurface(for: state)
         // Hoisted: the K-52 hold notice must be measured for width before the
         // window frame is applied, and reused below for the label/button.
@@ -257,27 +248,6 @@ final class DictationOverlayController {
         guard let w = window else { return }
         // Corner-halo geometry diagnostics removed (hunt is over): re-add behind
         // KalamDiagnosticFlags.verboseAudio if window geometry is ever suspect again.
-        // K-48 Task 7: when the caret chip owns feedback, the corner window stays hidden
-        // but BOTH feedback loops still run — they drive the chip's clock, level glyph,
-        // and 500ms re-anchoring. If anchoring fails, the fallback law applies: hide the
-        // chip attempt and let the machined deck take the state (review R1/R3).
-        if caretChipOwnsFeedback(for: state) {
-            updateCaretChip(state: state, element: caretAnchorElement)
-            if caretChipWindow?.isVisible == true {
-                // Chip is live: corner window stays hidden; loops drive clock/levels/re-anchor.
-                // Ring law lives in IndicatorTokens (transcribing-only) and the
-                // published state — no per-view ring calls anymore.
-                w.alphaValue = 0.0
-                startWaveformUpdates()
-                startTimerUpdates()
-                currentStateSetTime = CFAbsoluteTimeGetCurrent()
-                return
-            }
-            // Anchor failed: fallback law hands the state to the machined deck below.
-            hideCaretChip()
-        } else {
-            hideCaretChip()
-        }
         currentStateSetTime = CFAbsoluteTimeGetCurrent()
         // overlay action buttons unclickable: the overlay is click-through EXCEPT while an actionable state
         // (held-transcript "Paste", error "Open") is presented — with
@@ -343,20 +313,12 @@ final class DictationOverlayController {
         }
     }
 
-    /// K-48 Task 5/7: ONLY whisper renders the compact pill. Caret never uses this surface:
-    /// during recording the chip owns feedback (main window stays hidden), and during
-    /// transcribing/held/blocked the fallback law returns the machined deck.
+    /// K-48: ONLY whisper renders the compact pill; machined keeps the deck.
     private func usesCompactSurface(for state: OverlayState) -> Bool {
         guard sessionStyle == .whisper,
               let mapped = indicatorState(for: state),
               IndicatorStateModel.usesCompactSurface(style: sessionStyle, state: mapped) else { return false }
         return true
-    }
-
-    /// K-48 Task 7: true when the caret chip owns feedback for this state
-    /// (caret style + an actual recording phase).
-    private func caretChipOwnsFeedback(for state: OverlayState) -> Bool {
-        sessionStyle == .caret && isRecordingState(state)
     }
 
     private func presentation(for state: OverlayState,
@@ -465,7 +427,6 @@ final class DictationOverlayController {
                 let formatted = String(format: "%02d:%02d", mm, ss)
                 await MainActor.run {
                     self.presentationState.publishElapsed(formatted)
-                    self.updateCaretChipForTick(formattedTime: formatted)
                 }
                 try? await Task.sleep(nanoseconds: 500_000_000)
             }
@@ -475,29 +436,6 @@ final class DictationOverlayController {
     private func stopTimerUpdates() {
         timerTask?.cancel()
         timerTask = nil
-    }
-
-    /// K-48 Task 7: per-tick caret chip refresh. The 500ms timer only runs while a
-    /// recording state is active (startTimerUpdates is gated on showsWaveform), so the
-    /// chip re-anchors on caret moves for exactly the states it owns.
-    fileprivate func updateCaretChipForTick(formattedTime: String) {
-        let chipVisibleBefore = caretChipWindow?.isVisible == true
-        updateCaretChip(state: .recordingToggle, element: caretAnchorElement)
-        // Review finding: the record-time capture lands AFTER indicator-up, so the first
-        // transition almost always renders the deck; promote/demote here so exactly one
-        // surface is ever visible. Ring law needs no per-view calls: the SwiftUI
-        // surfaces gate the ring off IndicatorTokens (listening never rings).
-        if chipVisibleNow() && !chipVisibleBefore {
-            // Chip went live: retire the corner window.
-            window?.alphaValue = 0.0
-        } else if !chipVisibleNow() && chipVisibleBefore {
-            // Anchor died mid-recording: restore the deck, never indicator-less.
-            window?.alphaValue = 1.0
-        }
-    }
-
-    private func chipVisibleNow() -> Bool {
-        caretChipWindow?.isVisible == true
     }
 
     /// Phase 2: exactly one publish per transition. The SwiftUI parity surfaces
@@ -586,7 +524,7 @@ final class DictationOverlayController {
         return NSRect(x: origin.x, y: origin.y, width: ww, height: wh)
     }
 
-    // MARK: Caret location helpers
+    // MARK: Focus helpers
 
     private func flipAXRect(_ rect: CGRect) -> CGRect {
         let primaryScreenHeight = NSScreen.main?.frame.height ?? NSScreen.screens.first?.frame.height ?? 0
@@ -611,11 +549,6 @@ final class DictationOverlayController {
         let appKitRect = flipAXRect(frame)
         let center = CGPoint(x: appKitRect.midX, y: appKitRect.midY)
         return NSScreen.screens.first(where: { $0.frame.contains(center) }) ?? fallbackScreen()
-    }
-
-    /// K-48 Task 7: delivers the record-time focused element for caret anchoring.
-    func setCaretAnchorElement(_ element: AXUIElement?) {
-        caretAnchorElement = element
     }
 
     /// Called once the bounded record-time focus capture lands. Repositions
@@ -654,93 +587,6 @@ final class DictationOverlayController {
             return CGRect(origin: position, size: size)
         }
         return nil
-    }
-
-    // MARK: K-48 Task 7 — at-the-caret chip
-
-    /// Resolves the on-screen rect of the text selection start via the selected-text range.
-    /// Returns nil for any failure (no range attribute, BoundsForRange refusal, degenerate rect).
-    private func caretRect(for element: AXUIElement) -> CGRect? {
-        var rangeRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
-              let rangeValue = rangeRef,
-              CFGetTypeID(rangeValue) == AXValueGetTypeID() else { return nil }
-        var range = CFRange()
-        guard AXValueGetValue(rangeValue as! AXValue, .cfRange, &range) else { return nil }
-        var boundsRef: CFTypeRef?
-        guard AXUIElementCopyParameterizedAttributeValue(
-            element,
-            kAXBoundsForRangeParameterizedAttribute as CFString,
-            rangeValue as CFTypeRef,
-            &boundsRef) == .success,
-            let bounds = boundsRef,
-            CFGetTypeID(bounds) == AXValueGetTypeID() else { return nil }
-        var rect = CGRect.zero
-        guard AXValueGetValue(bounds as! AXValue, .cgRect, &rect) else { return nil }
-        return flipAXRect(rect)
-    }
-
-    /// Shows or hides the at-the-caret chip window. The chip is a separate borderless
-    /// window anchored to the caret rect; any resolution failure hides it and leaves
-    /// the corner capsule in charge (fallback law). Called from the timer tick so a
-    /// moved caret re-anchors within half a second without its own polling loop.
-    private func updateCaretChip(state: OverlayState, element: AXUIElement?) {
-        let eligible = sessionStyle == .caret && isRecordingState(state)
-        guard eligible, let element, let rawRect = caretRect(for: element) else {
-            hideCaretChip()
-            return
-        }
-        guard let screen = placementScreen ?? fallbackScreen(),
-              let anchor = CaretAnchorResolver.chipOrigin(
-                caretRect: rawRect,
-                screenFrame: screen.frame,
-                chipSize: CGSize(width: Metrics.caretChipWidth, height: Metrics.pillHeight)) else {
-            hideCaretChip()
-            return
-        }
-        ensureCaretChipWindow()
-        guard let chipWindow = caretChipWindow else { return }
-        chipWindow.setFrame(
-            NSRect(x: anchor.x, y: anchor.y, width: Metrics.caretChipWidth, height: Metrics.pillHeight),
-            display: true)
-        // Shadow shape follows the content alpha; re-derive after any frame change.
-        chipWindow.invalidateShadow()
-        // Review gap 1: the chip carries its own full visibility — ordered front here,
-        // ordered out by hideCaretChip(). It must NOT mirror the corner window's alpha,
-        // which is 0 while the chip owns feedback.
-        if chipWindow.alphaValue < 1.0 { chipWindow.alphaValue = 1.0 }
-        if !chipWindow.isVisible { chipWindow.orderFrontRegardless() }
-    }
-
-    private func ensureCaretChipWindow() {
-        guard caretChipWindow == nil else { return }
-        // Telemetry (DEBUG, Xcode console): caret chip on the SwiftUI path.
-        indicatorDiag.debug("SwiftUI indicator surfaces ACTIVE (chip hosting view)")
-        let host = NSHostingView(rootView: IndicatorChipRootView(state: presentationState))
-        host.frame = NSRect(origin: .zero,
-                            size: CGSize(width: Metrics.caretChipWidth, height: Metrics.pillHeight))
-        chipHostingView = host
-        let view: NSView = host
-        let w = NSWindow(
-            contentRect: NSRect(origin: .zero,
-                                size: CGSize(width: Metrics.caretChipWidth, height: Metrics.pillHeight)),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false)
-        w.isOpaque = false
-        w.backgroundColor = .clear
-        w.level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 2)
-        w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        w.ignoresMouseEvents = true
-        // WindowServer shadow (see ensureWindow) — no CALayer shadow anywhere.
-        w.hasShadow = true
-        w.contentView = view
-        caretChipWindow = w
-    }
-
-    private func hideCaretChip() {
-        guard let w = caretChipWindow else { return }
-        w.orderOut(nil)
     }
 }
 

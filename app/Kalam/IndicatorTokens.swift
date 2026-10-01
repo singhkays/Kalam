@@ -9,7 +9,6 @@ enum IndicatorTokens {
     static let deckHeight: CGFloat = 72
     static let compactHeight: CGFloat = 34
     static let pillHeight: CGFloat = 30
-    static let caretChipWidth: CGFloat = 84
     static let cornerRadius: CGFloat = 14
     static let pillCornerRadius: CGFloat = 15
     static let hPadding: CGFloat = 12
@@ -23,8 +22,9 @@ enum IndicatorTokens {
     static let barGap: CGFloat = 1.5
     static let entryFraction: CGFloat = 0.98
     static let waveformVPadding: CGFloat = 4
-    static let barAlphaFloor: CGFloat = 0.45
-    static let barAlphaCeiling: CGFloat = 0.95
+    static let barAlpha: CGFloat = 0.95
+    /// Silence bars render as near-flat nubs so valleys visibly bottom out.
+    static let waveformMinBarHeight: CGFloat = 2.0
 
     // MARK: Level glyph
     static let glyphSize = CGSize(width: 14, height: 12)
@@ -80,5 +80,4 @@ enum IndicatorTokens {
 
     static let messageFont = Font.system(size: 13, weight: .semibold)
     static let buttonFont = Font.system(size: 11, weight: .semibold)
-    static let chipTimerFont = Font.system(size: 10.5, weight: .medium).monospacedDigit()
 }

@@ -153,7 +153,7 @@ struct BreathingDot: View {
 
 // MARK: - Level glyph
 
-/// The three-bar level glyph (whisper pill + caret chip). Heights come from the
+/// The three-bar level glyph (whisper pill). Heights come from the
 /// published glyph levels; the low floor keeps bars clearly bar-shaped.
 struct IndicatorLevelGlyph: View {
     let levels: [CGFloat]
@@ -307,36 +307,11 @@ struct IndicatorPillSurface: View {
     }
 }
 
-/// At-the-caret chip: dot + mini glyph + mono timer. Never an app name (pinned
-/// study ruling); the chip window is sized and placed by the controller.
-struct IndicatorChipSurface: View {
-    let elapsed: String
-    @ObservedObject var waveform: IndicatorWaveformState
-
-    var body: some View {
-        IndicatorStadium(cornerRadius: IndicatorTokens.pillCornerRadius) {
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(IndicatorTokens.brandGreen)
-                    .frame(width: 6, height: 6)
-                IndicatorLevelGlyph(levels: waveform.glyph.smoothed, barWidth: 2, maxBarHeight: 10)
-                    .frame(width: 12, height: 10)
-                Text(elapsed)
-                    .font(IndicatorTokens.chipTimerFont)
-                    .foregroundStyle(.white.opacity(0.75))
-                    .fixedSize()
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 9)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-}
-
 // MARK: - Window roots
 
-/// Main capsule window root (SwiftUI parity path). Picks the surface from
-/// session style + canonical state; the controller owns window sizing.
+/// Main capsule window root. Picks the surface from session style +
+/// canonical state (whisper renders the compact pill, everything else the
+/// deck); the controller owns window sizing.
 struct IndicatorCapsuleRootView: View {
     @ObservedObject var state: IndicatorPresentationState
 
@@ -375,14 +350,5 @@ struct IndicatorCapsuleRootView: View {
                 reduceMotion: state.session.reduceMotion
             )
         )
-    }
-}
-
-/// Caret chip window root. The chip never rings (pinned study ruling).
-struct IndicatorChipRootView: View {
-    @ObservedObject var state: IndicatorPresentationState
-
-    var body: some View {
-        IndicatorChipSurface(elapsed: state.elapsed, waveform: state.waveform)
     }
 }

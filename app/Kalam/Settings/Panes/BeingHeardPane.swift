@@ -255,35 +255,6 @@ struct BeingHeardPane: View {
                                 .overlay(
                                     Capsule().stroke(Color.white.opacity(0.28))
                                 )
-                            case .caret:
-                                // Inline chip per study v2: dot + bars + timer trailing a caret bar
-                                // on a light page background (no app name — pinned ruling).
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .fill(Color(red: 0.98, green: 0.98, blue: 0.97))
-                                        .frame(width: 72, height: 26)
-                                    HStack(spacing: 3) {
-                                        Rectangle()
-                                            .fill(Color(hex: "1A5C3A"))
-                                            .frame(width: 1, height: 9)
-                                        Circle()
-                                            .fill(Color(hex: "52B788"))
-                                            .frame(width: 4.5, height: 4.5)
-                                        HStack(spacing: 1) {
-                                            Capsule().fill(Color(hex: "52B788")).frame(width: 1.2, height: 3)
-                                            Capsule().fill(Color(hex: "52B788")).frame(width: 1.2, height: 5.5)
-                                            Capsule().fill(Color(hex: "52B788")).frame(width: 1.2, height: 4)
-                                        }
-                                        Text("0:47")
-                                            .font(.system(size: 6, weight: .medium).monospacedDigit())
-                                            .foregroundStyle(Color.white.opacity(0.78))
-                                            .padding(.horizontal, 2.5)
-                                            .padding(.vertical, 1)
-                                            .background(
-                                                Capsule().fill(Color.black.opacity(0.82))
-                                            )
-                                    }
-                                }
                             }
                         }
                         HStack(spacing: 6) {

@@ -8,10 +8,9 @@ final class IndicatorStyleTests: XCTestCase {
     func testRawValuesAreStable() {
         XCTAssertEqual(IndicatorStyle.machined.rawValue, "machined")
         XCTAssertEqual(IndicatorStyle.whisper.rawValue, "whisper")
-        XCTAssertEqual(IndicatorStyle.caret.rawValue, "caret")
         XCTAssertEqual(
             IndicatorStyle.allCases,
-            [.machined, .whisper, .caret],
+            [.machined, .whisper],
             "case order feeds the settings picker; do not reorder casually"
         )
     }
@@ -23,7 +22,8 @@ final class IndicatorStyleTests: XCTestCase {
         XCTAssertEqual(IndicatorStyle.migrating(fromStored: "rainbow"), .machined)
         XCTAssertEqual(IndicatorStyle.migrating(fromStored: "machined"), .machined)
         XCTAssertEqual(IndicatorStyle.migrating(fromStored: "whisper"), .whisper)
-        XCTAssertEqual(IndicatorStyle.migrating(fromStored: "caret"), .caret)
+        // Rejected caret style migrates to machined (removed 2026-09-12).
+        XCTAssertEqual(IndicatorStyle.migrating(fromStored: "caret"), .machined)
     }
 
     // MARK: - Persistence
@@ -34,14 +34,14 @@ final class IndicatorStyleTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         var config = GeneralSettingsConfiguration.load(from: defaults)
-        config.indicatorStyle = .caret
+        config.indicatorStyle = .whisper
         config.save(to: defaults)
 
         let reloaded = GeneralSettingsConfiguration.load(from: defaults)
-        XCTAssertEqual(reloaded.indicatorStyle, .caret)
+        XCTAssertEqual(reloaded.indicatorStyle, .whisper)
         XCTAssertEqual(
             defaults.string(forKey: GeneralSettingsKeys.indicatorStylePreset),
-            "caret"
+            "whisper"
         )
     }
 

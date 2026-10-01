@@ -274,9 +274,9 @@ final class SettingsModelTests: XCTestCase {
         let store = InMemorySettingsStore()
         let model = makeModel(store)
         XCTAssertEqual(model.indicatorStyle, .machined)
-        model.indicatorStyle = .caret
-        XCTAssertEqual(store.indicatorStyle, .caret)
-        XCTAssertEqual(model.indicatorStyle, .caret)
+        model.indicatorStyle = .whisper
+        XCTAssertEqual(store.indicatorStyle, .whisper)
+        XCTAssertEqual(model.indicatorStyle, .whisper)
     }
 
     // MARK: - Revision mechanism (plan §4.1 — the @Observable reactivity fix)

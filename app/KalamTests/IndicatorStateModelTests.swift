@@ -58,13 +58,13 @@ final class IndicatorStateModelTests: XCTestCase {
 
     func testFallbackLawMatrix() {
         // held/blocked ALWAYS present machined regardless of style;
-        // transient states go compact only for whisper/caret.
+        // transient states go compact for whisper only.
         let expected: [IndicatorState: [IndicatorStyle: Bool]] = [
-            .listening: [.machined: false, .whisper: true, .caret: true],
-            .pausing: [.machined: false, .whisper: true, .caret: true],
-            .transcribing: [.machined: false, .whisper: true, .caret: true],
-            .held: [.machined: false, .whisper: false, .caret: false],
-            .blocked: [.machined: false, .whisper: false, .caret: false],
+            .listening: [.machined: false, .whisper: true],
+            .pausing: [.machined: false, .whisper: true],
+            .transcribing: [.machined: false, .whisper: true],
+            .held: [.machined: false, .whisper: false],
+            .blocked: [.machined: false, .whisper: false],
         ]
 
         for state in [IndicatorState.listening, .pausing, .transcribing, .held, .blocked] {
