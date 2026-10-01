@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The machined deck's waveform: one canvas draw per tick, isolated from the
-/// rest of the surface tree (plan §6.4). Geometry and the green alpha ramp
+/// rest of the surface tree (plan §6.4). Geometry uses a uniform green alpha;
 /// SwiftUI waveform bars for the machined deck (the sole content path since
 /// the Phase 4 cutover; values mirror the deleted AppKit implementation).
 struct IndicatorWaveformView: View {
@@ -10,7 +10,7 @@ struct IndicatorWaveformView: View {
     var body: some View {
         Canvas { context, size in
             let drawHeight = size.height - IndicatorTokens.waveformVPadding * 2
-            let minHeight = max(4.0, drawHeight * 0.05)
+            let minHeight = max(IndicatorTokens.waveformMinBarHeight, drawHeight * 0.05)
             let maxHeight = max(minHeight + 5, drawHeight * 0.96)
             let step = IndicatorTokens.barWidth + IndicatorTokens.barGap
             let entryX = size.width * IndicatorTokens.entryFraction
@@ -25,8 +25,7 @@ struct IndicatorWaveformView: View {
                 let amplitude = historyIndex >= 0 ? history[historyIndex] : 0.0
                 let height = minHeight + (maxHeight - minHeight) * amplitude
                 let rect = CGRect(x: x, y: centerY - height / 2, width: IndicatorTokens.barWidth, height: height)
-                let progress = min(1.0, max(0.0, x / entryX))
-                let alpha = IndicatorTokens.barAlphaFloor + (IndicatorTokens.barAlphaCeiling - IndicatorTokens.barAlphaFloor) * progress
+                let alpha = IndicatorTokens.barAlpha
                 context.fill(
                     Path(roundedRect: rect, cornerRadius: IndicatorTokens.barWidth / 2),
                     with: .color(IndicatorTokens.brandGreen.opacity(Double(alpha)))
