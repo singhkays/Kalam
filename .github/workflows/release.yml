@@ -40,6 +40,11 @@ jobs:
         run: ./scripts/test-engine.sh
 
       - name: Run Xcode tests
+        # Serial test execution (2026-10-08): parallel workers die abruptly on
+        # GitHub runners (exit 65, zero failure lines, 470+ green — twice on
+        # two trees incl. a previously-green control). Local 7-worker runs are
+        # green, so this is runner resource pressure, not code. Serial is
+        # slower (~15-25 min) but deterministic; revisit if runners improve.
         shell: bash
         run: |
           set -euo pipefail
@@ -47,6 +52,7 @@ jobs:
             -project app/Kalam.xcodeproj \
             -scheme Kalam \
             -destination 'platform=macOS' \
+            -parallel-testing-enabled NO \
             -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | xcbeautify
