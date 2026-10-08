@@ -273,4 +273,67 @@ final class WarmEnginePoolTests: XCTestCase {
         XCTAssertNotNil(first)
         XCTAssertNil(pool.spareForTesting)
     }
+
+    // MARK: - last-used spare keying (owner decision 2026-10-02)
+
+    func testPreferredSpareUIDPrefersLastUsedWhenAvailable() {
+        XCTAssertEqual(
+            WarmEnginePool.preferredSpareUID(lastUsedUID: "uid-B", availableUIDs: ["uid-A", "uid-B"]),
+            "uid-B", "spare follows last-used even when it is not top priority"
+        )
+    }
+
+    func testPreferredSpareUIDFallsBackToTopWhenLastUsedGone() {
+        XCTAssertEqual(
+            WarmEnginePool.preferredSpareUID(lastUsedUID: "uid-gone", availableUIDs: ["uid-A", "uid-B"]),
+            "uid-A", "unplugged last-used falls back to top priority"
+        )
+    }
+
+    func testPreferredSpareUIDFallsBackToTopWhenNoLastUsed() {
+        XCTAssertEqual(
+            WarmEnginePool.preferredSpareUID(lastUsedUID: nil, availableUIDs: ["uid-A", "uid-B"]),
+            "uid-A", "first launch (no stored pick) behaves as before"
+        )
+    }
+
+    func testPreferredSpareUIDNilWhenNothingAvailable() {
+        XCTAssertNil(WarmEnginePool.preferredSpareUID(lastUsedUID: "uid-A", availableUIDs: []))
+        XCTAssertNil(WarmEnginePool.preferredSpareUID(lastUsedUID: nil, availableUIDs: []))
+    }
+
+    // MARK: - ensureSpare convergence (last-used policy)
+
+    func testEnsureSpareNoOpWhenFresh() {
+        let (pool, c, counter) = makePool(currentUID: "A")
+        pool.prewarm(for: "A")
+        let builds = counter.count
+        pool.ensureSpare(for: "A")
+        c.advance(by: 1.0)
+        XCTAssertEqual(counter.count, builds, "fresh spare must not schedule a rebuild")
+        XCTAssertTrue(pool.isFresh(for: "A"))
+    }
+
+    func testEnsureSpareRebuildsTowardJustUsed() {
+        // Provider (last-used) now resolves B; spare still names A.
+        let c = FakeClock()
+        let (pool, _, counter) = makePool(currentUID: "B", clock: c)
+        pool.prewarm(for: "A")
+        pool.ensureSpare(for: "B")
+        c.advance(by: 0.30)
+        XCTAssertEqual(counter.lastUID, "B", "rebuild must target the just-used device")
+        XCTAssertTrue(pool.isFresh(for: "B"))
+    }
+
+    func testEnsureSpareTrustsInflightRefill() {
+        let c = FakeClock()
+        let (pool, _, counter) = makePool(currentUID: "A", clock: c)
+        pool.prewarm(for: "A")
+        _ = pool.take(for: "A") // consumes; schedules refill (pending)
+        let builds = counter.count
+        pool.ensureSpare(for: "B") // spare nil + pending → trust it
+        c.advance(by: 0.30)
+        XCTAssertEqual(counter.count, builds + 1, "exactly one refill build, no double schedule")
+        XCTAssertTrue(pool.isFresh(for: "A"))
+    }
 }
