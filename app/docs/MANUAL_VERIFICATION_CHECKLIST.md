@@ -10,9 +10,9 @@ execution notes of `app/docs/IMPROVEMENT_PLAN.md`.
 **Still open — all require a HOST Mac** (the VM has no mic, cannot render the
 overlay window, and cannot drive Accessibility):
 
-| # | Gate | K-Code | What it proves | Key evidence needed | Runbook |
-|---|---|---|---|---|---|
-| 1 | **Engine popover states F1–F8** render per spec | — | Popover states F1–F8 render per spec (wells, notch, selchip, chipgrid, verified/multiple states) | Per-state screenshots | `## F popover manual checklist` |
+*None — every gate is closed, removed, or retired (last: F popover retired
+2026-10-02 as superseded-by-design). The table is kept so future gates have a
+place to land.*
 
 > **K-52 rapid re-record — CLOSED 2026-10-02 (owner waiver, no live preserve-path
 > re-run).** Drain-discard proven live 2026-10-01 and accepted as correct
@@ -21,12 +21,11 @@ overlay window, and cannot drive Accessibility):
 > window is fractions of a second and owner accepts headless coverage. Full
 > record under `## K-52` below. Reopen if the preserve path is ever touched.
 
-**Run order:** do the shared setup once ("Before you start any gate below"),
-then work the gates **in numeric order** — F popover. (K-52 rapid re-record closed 2026-10-02; K-53 WarmEnginePool
+**Run order:** no open gates — everything below is record. (K-52 rapid re-record closed 2026-10-02; K-53 WarmEnginePool
 closed 2026-10-02; K-54 SNR post-roll closed 2026-10-02; K-55 auto-degrade
 REMOVED 2026-10-02; K-56 Tier-1 closed 2026-10-02 headless+lived; K-57 retention
-REMOVED 2026-10-02; K-58 Fn option + advisor REMOVED 2026-10-02 — see notes above.) Each gate's own Pre-steps override the shared setup where they
-differ (e.g. verboseAudio for pool diagnostics).
+REMOVED 2026-10-02; K-58 Fn option + advisor REMOVED 2026-10-02; F popover
+RETIRED 2026-10-02 superseded-by-design — see notes above.)
 
 **Also awaiting human verification — `IMPROVEMENT_PLAN.md` 🔄 rows with no full
 runbook here yet:**
@@ -201,18 +200,14 @@ xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platfor
 
 > **REMOVED — see `## ✅ K-58 …` under `# DONE — verified, archived` for the removal record + restore pointer.** Fn is no longer a hotkey option, so the advisor is gone with it. Do not run the L1–L4 runbook below.
 
-## F popover manual checklist (Engine Tab — F Popover, 10 states)
+## F popover manual checklist (RETIRED 2026-10-02 — superseded by design)
 
-- [ ] F1 collapsed: Choose… primary, View/Copy bsec white, no popover
-- [ ] F2 folder chosen: Change/Open/Clear, same
-- [ ] F3 Install popover: Hide well tint, well #F1F0EA brew, notch right:135 centered on Hide, card height stable
-- [ ] F4 Download popover: selchip before well, v2→v3 swaps command, notch pinned
-- [ ] F5 picker open: selchipMenu (v2 ✓) + dimmed well 0.55
-- [ ] F6 verified: green ✓, ON DISK, no View
-- [ ] F6b multiple: 2 models, v2 ON green-t, v3 Use, Missing dimmed
-- [ ] F6c multiple incomplete: warn orange border + chipgrid
-- [ ] F7 incomplete popover: chipgrid inside popover, well #F1F0EA
-- [ ] F8 repo guard: orange guard, GetTheModel dimmed 0.55
+> **RETIRED — the UI below does not exist.** Zero `.popover`/`NSPopover` usages
+> in Settings; the only mentions are comments for a never-built popover
+> ("for now just View button"). The live UI is the Option-D wizard ("NO popover
+> anywhere") + Active model card, covered by T17 (smoke) and T23 (all seven
+> Engine states, light + dark). See `## ✅ F popover` in DONE for the record.
+> The 10 bullets (F1–F8 + F6b/F6c) are retained in git history.
 
 # DONE — verified, archived
 
@@ -351,6 +346,15 @@ launch/active/Karabiner observers + `checkFnAdvisor`,
 Stale `fnAdvisor.*` defaults keys are inert. Verified post-cut: app BUILD
 SUCCEEDED + full Xcode TEST SUCCEEDED. The L1–L4 runbook below was never
 executed live; full text in git.
+
+## ✅ F popover (RETIRED 2026-10-02 — superseded by design, NOT verified)
+
+The F1–F8 checklist described a popover-based Engine Tab that does not exist:
+zero `.popover`/`NSPopover` usages in Settings (only never-built "for now just
+View button" comments). The live UI is the Option-D wizard + Active model card,
+covered by T17 (Engine smoke) and T23 (all seven Engine states, light + dark).
+Retired rather than rewritten to avoid duplicating that coverage. The 10
+bullets (F1–F8 + F6b/F6c) survive in git history.
 
 ## ✅ T16 — K-19 (verified, archived): VoiceOver + Full Keyboard Access (updated for Compass)
 
