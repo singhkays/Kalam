@@ -336,4 +336,48 @@ final class WarmEnginePoolTests: XCTestCase {
         XCTAssertEqual(counter.count, builds + 1, "exactly one refill build, no double schedule")
         XCTAssertTrue(pool.isFresh(for: "A"))
     }
+
+    // MARK: - takeIfFresh single-resolution take (K-60 miss log, K-61 zero-enumeration)
+
+    func testTakeIfFreshAdoptsAndSchedulesRefill() {
+        let c = FakeClock()
+        let (pool, _, counter) = makePool(currentUID: "A", clock: c)
+        pool.prewarm(for: "A")
+        let builds = counter.count
+        XCTAssertNotNil(pool.takeIfFresh(for: "A"))
+        XCTAssertNil(pool.spareForTesting)
+        c.advance(by: 0.30)
+        XCTAssertEqual(counter.count, builds + 1)
+        XCTAssertTrue(pool.isFresh(for: "A"))
+    }
+
+    func testTakeIfFreshMissPreservesSpareAndSchedulesNothing() {
+        let (pool, _, _) = makePool(currentUID: "A")
+        pool.prewarm(for: "A")
+        XCTAssertNil(pool.takeIfFresh(for: "B"), "mismatch must miss")
+        XCTAssertTrue(pool.isFresh(for: "A"), "miss must not consume the spare")
+        XCTAssertFalse(pool.hasPendingRebuildForTesting, "miss schedules nothing (convergence is ensureSpare's job)")
+    }
+
+    func testTakeIfFreshEmptyPoolReturnsNil() {
+        let (pool, _, _) = makePool(currentUID: "A")
+        XCTAssertNil(pool.takeIfFresh(for: "A"))
+    }
+
+    func testTakeIfFreshNeverConsultsProvider() {
+        // K-61: the pre-resolved UID path must not enumerate devices.
+        let pool = WarmEnginePool(
+            debounceInterval: 0.25,
+            permissionCheck: { true },
+            currentDeviceProvider: {
+                XCTFail("takeIfFresh must not consult the provider")
+                return nil
+            },
+            engineFactory: { _ in AVAudioEngine() },
+            scheduler: { _, _ in FakeCancellable({}) }
+        )
+        pool.prewarm(for: "A")
+        XCTAssertNotNil(pool.takeIfFresh(for: "A"))
+        XCTAssertNil(pool.takeIfFresh(for: "A"), "second take: spare already consumed")
+    }
 }

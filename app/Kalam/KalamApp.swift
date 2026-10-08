@@ -1176,7 +1176,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let candidates = resolvePriorityOrderedMicrophones()
         for candidate in candidates {
             do {
-                try audio.prepare(preferredInputDeviceID: candidate.deviceID, warmPool: warmPool)
+                // K-61: pass the already-resolved UID so the pool consult costs
+                // zero extra CoreAudio enumerations (single sweep per press).
+                try audio.prepare(preferredInputDeviceID: candidate.deviceID, preferredUID: candidate.uid, warmPool: warmPool)
                 // Last-used convergence: a prepare that misses the spare
                 // schedules nothing by itself, so nudge toward the just-used
                 // device (no-op when fresh or when a refill is in flight).
@@ -1187,7 +1189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 continue
             }
         }
-        try audio.prepare(preferredInputDeviceID: nil, warmPool: warmPool)
+        try audio.prepare(preferredInputDeviceID: nil, preferredUID: nil, warmPool: warmPool)
         warmPool.ensureSpare(for: nil)
         return nil
     }

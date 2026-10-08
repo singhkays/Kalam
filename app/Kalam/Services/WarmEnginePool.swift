@@ -136,6 +136,30 @@ final class WarmEnginePool: @unchecked Sendable {
         return s
     }
 
+    /// Single-resolution take for callers that already know the UID (K-61):
+    /// one atomic check-and-take with NO device enumeration (the caller
+    /// resolved once upstream). A miss — stale spare or empty pool — logs one
+    /// verbose line naming both sides (K-60: `isFresh == false` misses were
+    /// previously silent) and the caller builds inline.
+    @discardableResult
+    func takeIfFresh(for uid: String?) -> PreparedGraph? {
+        let current = spare
+        guard let graph = current, graph.deviceUID == uid else {
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("WarmEnginePool miss: requested uid=\(uid ?? "nil", privacy: .public) spare uid=\(current?.deviceUID ?? "nil", privacy: .public) — inline build") }
+            return nil
+        }
+        spare = nil
+        if KalamDiagnosticFlags.verboseAudio { logger.debug("WarmEnginePool take consumed uid=\(uid ?? "nil", privacy: .public) — scheduling refill") }
+        scheduleRebuild()
+        return graph
+    }
+
+    /// UID resolution for callers without a pre-resolved UID (K-61 fallback
+    /// path only — prefer passing the UID down so the hot path enumerates once).
+    func resolveUID(for deviceID: AudioDeviceID?) -> String? {
+        Self.uid(for: deviceID, provider: currentDeviceProvider)
+    }
+
     // AudioDeviceID overloads — resolve UID via candidate list
     func take(for deviceID: AudioDeviceID?) -> PreparedGraph? {
         let uid: String? = WarmEnginePool.uid(for: deviceID, provider: currentDeviceProvider)

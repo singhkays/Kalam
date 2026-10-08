@@ -298,10 +298,20 @@ final class AudioRecorder: @unchecked Sendable {
     }
 
     func prepare(preferredInputDeviceID: AudioDeviceID?, warmPool: WarmEnginePool?) throws {
-        // Task-1: consult pool freshness first — a fresh spare can be adopted
-        // without rebuilding the graph inline (device-change win).
-        if let pool = warmPool, pool.isFresh(for: preferredInputDeviceID) {
-            if let graph = pool.take(for: preferredInputDeviceID) {
+        try prepare(preferredInputDeviceID: preferredInputDeviceID, preferredUID: nil, warmPool: warmPool)
+    }
+
+    /// - Parameter preferredUID: pre-resolved device UID from the caller (K-61).
+    ///   When provided, the pool is consulted with zero extra CoreAudio
+    ///   enumerations; when nil, falls back to resolving from the device ID
+    ///   (one enumeration, old behavior).
+    func prepare(preferredInputDeviceID: AudioDeviceID?, preferredUID: String? = nil, warmPool: WarmEnginePool?) throws {
+        // Task-1: consult pool first — a fresh spare can be adopted
+        // without rebuilding the graph inline (device-change win). Single
+        // atomic take (K-61); misses log one line naming both UIDs (K-60).
+        if let pool = warmPool {
+            let uid = preferredUID ?? pool.resolveUID(for: preferredInputDeviceID)
+            if let graph = pool.takeIfFresh(for: uid) {
                 if engine.isRunning {
                     engine.stop()
                 }
