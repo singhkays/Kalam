@@ -380,4 +380,66 @@ final class WarmEnginePoolTests: XCTestCase {
         XCTAssertNotNil(pool.takeIfFresh(for: "A"))
         XCTAssertNil(pool.takeIfFresh(for: "A"), "second take: spare already consumed")
     }
+
+    // MARK: - recording gate (built-in stall hardening: no mid-hold refill)
+
+    func testTakeRefillDeferredWhileRecording() {
+        let c = FakeClock()
+        let (pool, _, counter) = makePool(currentUID: "A", clock: c)
+        pool.prewarm(for: "A")
+        XCTAssertEqual(counter.count, 1)
+        pool.setRecordingActive(true)
+        _ = pool.take(for: "A")
+        XCTAssertNil(pool.spareForTesting)
+        c.advance(by: 1.0)
+        XCTAssertEqual(counter.count, 1, "refill must not build while recording")
+        XCTAssertTrue(pool.deferredRefillNeededForTesting)
+        XCTAssertFalse(pool.hasPendingRebuildForTesting)
+        pool.setRecordingActive(false)
+        c.advance(by: 0.30)
+        XCTAssertEqual(counter.count, 2, "idle flush must rebuild exactly once")
+        XCTAssertTrue(pool.isFresh(for: "A"))
+    }
+
+    func testFireTimeGuardRedeferWhenPressWinsRace() {
+        let c = FakeClock()
+        let (pool, _, counter) = makePool(currentUID: "A", clock: c)
+        pool.prewarm(for: "A")
+        _ = pool.take(for: "A") // schedules refill while idle
+        pool.setRecordingActive(true) // press lands inside the debounce window
+        XCTAssertFalse(pool.hasPendingRebuildForTesting, "going active must cancel the pending refill")
+        c.advance(by: 1.0)
+        XCTAssertEqual(counter.count, 1, "cancelled refill must never fire mid-hold")
+        pool.setRecordingActive(false)
+        c.advance(by: 0.30)
+        XCTAssertEqual(counter.count, 2)
+    }
+
+    func testPrewarmDeferredWhileRecording() {
+        let c = FakeClock()
+        let (pool, _, counter) = makePool(currentUID: "A", clock: c)
+        pool.setRecordingActive(true)
+        pool.prewarm(for: "A")
+        XCTAssertEqual(counter.count, 0, "prewarm must not construct mid-hold")
+        XCTAssertNil(pool.spareForTesting)
+        pool.setRecordingActive(false)
+        c.advance(by: 0.30)
+        XCTAssertEqual(counter.count, 1, "deferred prewarm flushes on idle")
+        XCTAssertTrue(pool.isFresh(for: "A"))
+    }
+
+    func testInvalidateDeferredWhileRecording() {
+        let c = FakeClock()
+        let (pool, _, counter) = makePool(currentUID: "A", clock: c)
+        pool.prewarm(for: "A")
+        let builds = counter.count
+        pool.setRecordingActive(true)
+        pool.invalidate(reason: "deviceChange")
+        XCTAssertNil(pool.spareForTesting, "invalidate still clears the spare")
+        c.advance(by: 1.0)
+        XCTAssertEqual(counter.count, builds, "rebuild must wait for idle")
+        pool.setRecordingActive(false)
+        c.advance(by: 0.30)
+        XCTAssertEqual(counter.count, builds + 1)
+    }
 }

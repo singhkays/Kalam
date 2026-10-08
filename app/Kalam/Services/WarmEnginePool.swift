@@ -36,6 +36,20 @@ final class WarmEnginePool: @unchecked Sendable {
     private var _spare: PreparedGraph?
     private var pendingRebuild: WarmEnginePoolCancellable?
 
+    // MARK: - Recording gate (built-in stall hardening)
+
+    /// True while a recording session owns the live engine (set by AppDelegate
+    /// before press-time prepare, cleared after the stop teardown finishes).
+    /// While true, `scheduleRebuild` defers instead of constructing a second
+    /// engine on the same device mid-hold: the refill factory binds the same
+    /// input device and used to shrink its HAL ring buffer, which reconfigures
+    /// the stream the live engine is reading and drops tap callbacks (HAL
+    /// "skipping cycle due to overload" → `Mic stall detected` on builtin).
+    private var _isRecordingActive = false
+    /// A refill was requested while recording (take/invalidate/ensureSpare).
+    /// Flushed by `setRecordingActive(false)` once the engine has stopped.
+    private var _deferredRefillNeeded = false
+
     private var spare: PreparedGraph? {
         get { lock.lock(); defer { lock.unlock() }; return _spare }
         set { lock.lock(); _spare = newValue; lock.unlock() }
@@ -90,6 +104,38 @@ final class WarmEnginePool: @unchecked Sendable {
 
     // MARK: - Public API
 
+    /// Live-recording gate for the pool. `true` before press-time prepare,
+    /// `false` after the stop teardown finishes (engine stopped). While active,
+    /// refills defer (see `scheduleRebuild`); transitioning to active cancels
+    /// any pending refill so it cannot fire mid-hold; transitioning to idle
+    /// flushes one deferred refill. Callers gate the idle flush on
+    /// `!isRecording` so a rapid re-record's teardown never clears the new
+    /// session's ownership (the fire-time guard re-defers if a press wins the
+    /// 250 ms debounce race anyway).
+    func setRecordingActive(_ active: Bool) {
+        var shouldFlush = false
+        lock.lock()
+        _isRecordingActive = active
+        if active {
+            if pendingRebuild != nil {
+                pendingRebuild?.cancel()
+                pendingRebuild = nil
+                if _spare == nil { _deferredRefillNeeded = true }
+            } else if _spare == nil {
+                _deferredRefillNeeded = true
+            }
+        } else {
+            if _deferredRefillNeeded && _spare == nil && pendingRebuild == nil {
+                _deferredRefillNeeded = false
+                shouldFlush = true
+            } else if _spare != nil {
+                _deferredRefillNeeded = false
+            }
+        }
+        lock.unlock()
+        if shouldFlush { scheduleRebuild() }
+    }
+
     /// Permission-gated prewarm for a specific UID. Synchronous on the caller
     /// (MainActor) for test determinism; production factory does `prepare()` only.
     func prewarm(for deviceUID: String?) {
@@ -98,6 +144,16 @@ final class WarmEnginePool: @unchecked Sendable {
             return
         }
         let target = deviceUID ?? currentDeviceProvider()
+        lock.lock()
+        let recording = _isRecordingActive
+        let alreadyFresh = _spare?.deviceUID == target
+        if recording && !alreadyFresh { _deferredRefillNeeded = true }
+        lock.unlock()
+        if recording {
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("WarmEnginePool prewarm deferred: recording active uid=\(target ?? "nil", privacy: .public)") }
+            if alreadyFresh { return }
+            return
+        }
         if let s = spare, s.deviceUID == target {
             if KalamDiagnosticFlags.verboseAudio { logger.debug("WarmEnginePool prewarm skipped: already fresh for uid=\(target ?? "nil", privacy: .public)") }
             return
@@ -204,12 +260,31 @@ final class WarmEnginePool: @unchecked Sendable {
 
     private func scheduleRebuild() {
         lock.lock()
+        // Mid-hold deferral: never construct/bind a second engine on the live
+        // device while it is streaming. Remember the need; the recording-end
+        // flush (`setRecordingActive(false)`) rebuilds once the engine stops.
+        if _isRecordingActive {
+            _deferredRefillNeeded = true
+            pendingRebuild?.cancel()
+            pendingRebuild = nil
+            lock.unlock()
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("WarmEnginePool rebuild deferred: recording active") }
+            return
+        }
         pendingRebuild?.cancel()
         lock.unlock()
         let c = scheduler(debounceInterval) { [weak self] in
             guard let self else { return }
             self.lock.lock()
             self.pendingRebuild = nil
+            // Fire-time guard: a press won the debounce race (take flushed at
+            // stop, new hold started within 250 ms). Re-defer instead of
+            // building on the now-live device.
+            if self._isRecordingActive {
+                self._deferredRefillNeeded = true
+                self.lock.unlock()
+                return
+            }
             self.lock.unlock()
             guard self.permissionCheck() else {
                 if KalamDiagnosticFlags.verboseAudio { self.logger.debug("WarmEnginePool rebuild skipped: not authorized") }
@@ -276,19 +351,12 @@ final class WarmEnginePool: @unchecked Sendable {
                 throw AudioRecorderError.engineStartFailed(NSError(domain: "Kalam.AudioRecorder", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "Warm pool: bind failed OSStatus \(status)"]))
             }
         }
-        let bound: AudioDeviceID? = {
-            if let uid = deviceUID, let did = AudioDeviceDebug.deviceID(forUID: uid) { return did }
-            var def = AudioDeviceID(0)
-            var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-            var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultInputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-            let st = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &def)
-            return st == noErr ? def : nil
-        }()
-        if let bound, let applied = AudioRecorder.shrinkDeviceRingBuffer(deviceID: bound) {
-            if KalamDiagnosticFlags.verboseAudio {
-                Logger(subsystem: "singhkays.Kalam", category: "WarmEnginePool").debug("Warm pool ring applied frames=\(applied, privacy: .public)")
-            }
-        }
+        // NOTE: no device ring-buffer shrink here by design. The ring size is
+        // device-global state: `AudioRecorder.prepare` (live, press-time, engine
+        // idle) owns it, and the setting persists on the device — re-applying
+        // it from a background refill while the live engine streams
+        // reconfigures the HAL mid-hold (overload → dropped tap callbacks →
+        // builtin mic stall). The pool only constructs + binds + prepares.
         let fmt = input.outputFormat(forBus: 0)
         guard fmt.channelCount > 0, fmt.sampleRate > 0 else {
             throw AudioRecorderError.invalidInputFormat
@@ -302,6 +370,8 @@ final class WarmEnginePool: @unchecked Sendable {
 
     var spareForTesting: PreparedGraph? { spare }
     var hasPendingRebuildForTesting: Bool { lock.lock(); defer { lock.unlock() }; return pendingRebuild != nil }
+    var isRecordingActiveForTesting: Bool { lock.lock(); defer { lock.unlock() }; return _isRecordingActive }
+    var deferredRefillNeededForTesting: Bool { lock.lock(); defer { lock.unlock() }; return _deferredRefillNeeded }
     func setSpareForTesting(_ graph: PreparedGraph?) { spare = graph }
     func cancelPendingForTesting() { lock.lock(); pendingRebuild?.cancel(); pendingRebuild = nil; lock.unlock() }
 }

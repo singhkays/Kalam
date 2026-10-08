@@ -1134,6 +1134,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // resetForConfigurationChange — the latter keeps isRecording == true,
         // so the first post-wake keypress acted as a STOP on a junk clip.
         pttState.abandonActiveSession()
+        // Wake tore the session down: release the pool gate (the stopTask above
+        // finishes the engine stop; refresh below invalidates + rebuilds idle).
+        warmPool.setRecordingActive(false)
         refreshAudioInputAfterDeviceChange()
     }
 
@@ -1259,6 +1262,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         startLatencyProbe?.mark(.guardsCompleted)
 
+        // Recording gate for the warm pool: claim BEFORE press-time prepare so
+        // the take's debounced refill defers instead of constructing a second
+        // engine on the live device mid-hold (builtin HAL overload → stall).
+        // Every `return false` below releases it; success releases after the
+        // stop teardown finishes (engine stopped).
+        warmPool.setRecordingActive(true)
+
         do {
             let pickedUID = try prepareAudioForRecording()
             selectedInputUID = pickedUID
@@ -1267,6 +1277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             logger.warning("Audio input setup failed before recording errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             overlay.showError("Microphone setup failed", action: .openMicrophoneSettings, autoHideAfter: 4.0)
+            warmPool.setRecordingActive(false)
             return false
         }
 
@@ -1292,11 +1303,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if startOutcome != .superseded {
                     overlay.showError("Microphone unavailable", action: .openMicrophoneSettings, autoHideAfter: 4.0)
                 }
+                warmPool.setRecordingActive(false)
                 return false
             }
         } catch {
             logger.warning("Audio collection start failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             overlay.showError("Microphone unavailable", action: .openMicrophoneSettings, autoHideAfter: 4.0)
+            warmPool.setRecordingActive(false)
             return false
         }
         startLatencyProbe?.mark(.engineStarted)
@@ -1309,6 +1322,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard pttState.commitPending() else {
             audio.stopEngineFromStaleCommit()
             logger.debug("Stale recording commit dropped: pending start rolled back during engine start")
+            warmPool.setRecordingActive(false)
             return false
         }
         overlay.showRecording(isHoldMode: triggerMode == .hold)
@@ -1450,8 +1464,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case .warn:
                     // Warning level (not gated): visible at default log levels
                     // without verboseAudio, with a route-filterable transport tag.
-                    self.logger.warning("Mic stall detected: no audio callbacks recently transport=\(self.audio.lastSessionTiming.transportTag, privacy: .public)")
-                    self.overlay.showError("Microphone signal lost — check your AirPods", action: .openMicrophoneSettings, autoHideAfter: nil)
+                    let stalledTransport = self.audio.lastSessionTiming.transportTag
+                    self.logger.warning("Mic stall detected: no audio callbacks recently transport=\(stalledTransport, privacy: .public)")
+                    // Transport-aware copy: the old text always blamed AirPods,
+                    // which misleads on builtin/USB stalls (e.g. HAL overload
+                    // from background engine contention).
+                    let stallMessage: String
+                    switch stalledTransport {
+                    case "bluetooth":
+                        stallMessage = "Microphone signal lost — check your AirPods"
+                    case "builtin":
+                        stallMessage = "Microphone signal lost — check your Mac microphone"
+                    case "usb":
+                        stallMessage = "Microphone signal lost — check your USB microphone"
+                    default:
+                        stallMessage = "Microphone signal lost — check your microphone"
+                    }
+                    self.overlay.showError(stallMessage, action: .openMicrophoneSettings, autoHideAfter: nil)
                 case .recovered:
                     self.logger.info("Mic stall recovered; signal flowing again")
                     self.overlay.showRecording(isHoldMode: isHoldMode)
@@ -1558,6 +1587,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             
             let keyUpToStopStart = CFAbsoluteTimeGetCurrent()
             let samples = await stopTask.value
+            // Engine stopped: release the warm-pool recording gate so the
+            // deferred refill rebuilds idle. Guarded on !isRecording so a rapid
+            // re-record's teardown never clears the new session's ownership
+            // (the pool's fire-time guard re-defers if a press wins the race).
+            if !self.isRecording {
+                self.warmPool.setRecordingActive(false)
+            }
             guard !Task.isCancelled else { return }
             // A stale stop (superseded by a rapid re-record) returns no audio;
             // the newer session's overlay state owns the indicator from here.
@@ -2002,6 +2038,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         transcriptionTask = Task(priority: .userInitiated) { [weak self, stopTask] in
             guard let self else { return }
             _ = await stopTask.value
+            if !self.isRecording {
+                self.warmPool.setRecordingActive(false)
+            }
             await MainActor.run {
                 self.overlay.showInfoAndAutoHide("Recording canceled")
             }
