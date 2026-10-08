@@ -160,3 +160,65 @@ private func restored(_ text: String) -> String {
     // only the two-token sum-broken shape ("ten thirty" -> "40") is masked.
     #expect(masked("I'll meet you at two fifty three") == "I'll meet you at two fifty three")
 }
+
+// MARK: bare-conjunction sums (2026-10-08): Nemo SUMS "one and four" -> "5"
+
+@Test func oneAndFourIsMasked() {
+    // Raw ITN: "one and four" -> "5"
+    #expect(masked("one and four").contains("XXKALAMSPAN0XX"))
+}
+
+@Test func twoAndThreeIsMasked() {
+    // Raw ITN: "two and three" -> "5"
+    #expect(masked("I said two and three today").contains("XXKALAMSPAN0XX"))
+}
+
+@Test func betweenAndIsMasked() {
+    // Raw ITN: "between five and ten" -> "between 15"
+    let result = ITNSpanProtector().protect("between five and ten")
+    #expect(result.spans.count == 1)
+    #expect(result.spans[0].original == "five and ten")
+}
+
+@Test func largerAndIsMasked() {
+    // Raw ITN concatenates instead of summing here ("twenty and five" ->
+    // "2005"), still garbage — mask it verbatim.
+    #expect(masked("twenty and five").contains("XXKALAMSPAN0XX"))
+}
+
+@Test func hundredAndFiveIsNotMasked() {
+    // Nemo-correct quantity ("one hundred and five" -> "105") must still
+    // normalize: the multiplier exclusion keeps it unmasked.
+    #expect(masked("one hundred and five") == "one hundred and five")
+}
+
+@Test func currencyAndIsNotMasked() {
+    // Nemo-correct currency ("five dollars and fifty cents" -> "$5.50"):
+    // "dollars" sits between the number and "and", so no match.
+    #expect(masked("five dollars and fifty cents") == "five dollars and fifty cents")
+}
+
+@Test func andRestoreRoundTrips() {
+    #expect(restored("one and four") == "one and four")
+    #expect(restored("between five and ten") == "between five and ten")
+}
+
+// MARK: digit/mixed ranges (2026-10-08): pin "5 to 10" verbatim
+
+@Test func digitRangeIsMasked() {
+    #expect(masked("count from 5 to 10").contains("XXKALAMSPAN0XX"))
+}
+
+@Test func mixedRangeIsMasked() {
+    #expect(masked("five to 10").contains("XXKALAMSPAN0XX"))
+    #expect(masked("5 to ten").contains("XXKALAMSPAN0XX"))
+}
+
+@Test func digitThroughIsMasked() {
+    #expect(masked("5 through 10").contains("XXKALAMSPAN0XX"))
+}
+
+@Test func mixedAndIsMasked() {
+    // Raw ITN drops "and" ("one and 4" -> "1 4") — mask it verbatim.
+    #expect(masked("one and 4").contains("XXKALAMSPAN0XX"))
+}

@@ -10,6 +10,11 @@ import Foundation
 /// - partitive idioms: "one of us"          -> "1 of us"
 /// - digit sequences:  "five five five..."  -> "16 9"
 /// - spoken times:     "at ten thirty"      -> "40" (sum composition, spoken-time ITN composition misfire)
+/// - bare conjunctions: "one and four"     -> "5" (sum composition; also
+///   "between five and ten" -> "between 15", "twenty and five" -> "2005")
+///   Quantities ("one hundred and five" -> "105") and currency
+///   ("five dollars and fifty cents" -> "$5.50") are Nemo-correct and stay
+///   unmasked.
 ///
 /// digit-shaped ITN protection (2026-08-24, probed against the real library): ASR also emits
 /// comma/period-separated and mixed word+digit runs; whitespace-only joins
@@ -165,6 +170,18 @@ public struct ITNSpanProtector: Sendable {
     private static let optSep = "[,\\s.]?"
     /// Run tokens: simple words or short standalone digits (mixed sequences).
     private static let runToken = "(?:" + simpleNumberWord + "|\\d{1,2})"
+    /// Bare-conjunction left/right words: full cardinals WITHOUT the
+    /// multipliers (hundred/thousand/million/billion) so "one hundred and
+    /// five" (Nemo-correct "105") never matches. Currency never matches
+    /// either: "dollars"/"cents" sits between the number and "and".
+    private static let andNumberWord =
+        "(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|" +
+        "thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|" +
+        "twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)"
+    /// Conjunction/ranges may mix words with digit runs (Parakeet emits both
+    /// shapes: "five to 10", "one and 4").
+    private static let andToken = "(?:" + andNumberWord + "|\\d+)"
+    private static let rangeNumber = "(?:" + numberWord + "|\\d+)"
 
     // MARK: - Patterns
 
@@ -182,8 +199,22 @@ public struct ITNSpanProtector: Sendable {
     )
 
     /// "two to three", "twelve through fourteen" — ITN reads these as times.
+    /// Digit/mixed shapes ("5 to 10", "five to 10") are masked too: raw Nemo
+    /// currently leaves digits alone, but the mask pins the range verbatim so
+    /// a library upgrade cannot turn them into times.
     private static let rangePattern = try! NSRegularExpression(
-        pattern: "(?i)\\b" + numberWord + sep + "(?:to|through)" + sep + numberWord + "\\b",
+        pattern: "(?i)\\b" + rangeNumber + sep + "(?:to|through)" + sep + rangeNumber + "\\b",
+        options: []
+    )
+
+    /// "one and four", "between five and ten" — Nemo SUMS (or concatenates:
+    /// "twenty and five" -> "2005") bare "<number> and <number>" pairs.
+    /// Left excludes hundred/thousand/million/billion so the Nemo-correct
+    /// quantity ("one hundred and five" -> "105") never matches; currency
+    /// ("five dollars and fifty cents") never matches because "dollars"
+    /// sits between the number and "and".
+    private static let andPattern = try! NSRegularExpression(
+        pattern: "(?i)\\b" + andToken + "\\s+and\\s+" + andToken + "\\b",
         options: []
     )
 
@@ -203,6 +234,6 @@ public struct ITNSpanProtector: Sendable {
     )
 
     private static let protectionPatterns: [NSRegularExpression] = [
-        temporalPattern, rangePattern, idiomPattern, runPattern
+        temporalPattern, rangePattern, andPattern, idiomPattern, runPattern
     ]
 }

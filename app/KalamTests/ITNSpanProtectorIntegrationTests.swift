@@ -56,4 +56,31 @@ final class ITNSpanProtectorIntegrationTests: XCTestCase {
         try XCTSkipUnless(NemoTextProcessing.isAvailable, "NemoTextProcessing is not linked in this test environment.")
         XCTAssertEqual(runPipeline("the year twenty twenty five"), "the year 2025")
     }
+
+    // Bare-conjunction sums (2026-10-08): raw Nemo "one and four" -> "5".
+    func testOneAndFourSurvivesITN() throws {
+        try XCTSkipUnless(NemoTextProcessing.isAvailable, "NemoTextProcessing is not linked in this test environment.")
+        XCTAssertEqual(runPipeline("one and four"), "one and four")
+    }
+
+    func testBetweenAndSurvivesITN() throws {
+        try XCTSkipUnless(NemoTextProcessing.isAvailable, "NemoTextProcessing is not linked in this test environment.")
+        XCTAssertEqual(runPipeline("between five and ten"), "between five and ten")
+    }
+
+    func testHundredAndFiveStillNormalizes() throws {
+        try XCTSkipUnless(NemoTextProcessing.isAvailable, "NemoTextProcessing is not linked in this test environment.")
+        XCTAssertEqual(runPipeline("one hundred and five"), "105")
+    }
+
+    // Digit ranges (2026-10-08): "5 to 10" stays verbatim.
+    func testDigitRangeSurvivesITN() throws {
+        try XCTSkipUnless(NemoTextProcessing.isAvailable, "NemoTextProcessing is not linked in this test environment.")
+        XCTAssertEqual(runPipeline("count from 5 to 10"), "count from 5 to 10")
+    }
+
+    func testWordRangeFiveToTenSurvivesITN() throws {
+        try XCTSkipUnless(NemoTextProcessing.isAvailable, "NemoTextProcessing is not linked in this test environment.")
+        XCTAssertEqual(runPipeline("I counted five to ten"), "I counted five to ten")
+    }
 }
