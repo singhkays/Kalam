@@ -30,7 +30,11 @@ Kalam is a privacy-first macOS menu bar dictation app (Swift 6, deployment targe
 | File | Responsibility |
 |---|---|
 | `KalamApp.swift` | Entry, AppDelegate, hotkey event application (decision logic in `Services/PTTStateMachine.swift`), recording orchestration, paste pipeline, chime. Pure orchestration since god-file extraction (2026-08-11); components live in the files below. |
-| `DictationOverlayController.swift` | Dictation overlay UI: `DictationOverlayController` + `OverlayCapsuleView` + `WaveformView` (AppKit/CALayer capsule with rainbow border, waveform, target-app row). |
+| `DictationOverlayController.swift` | Dictation overlay orchestration (AppKit window ownership, placement, fades, auto-hide, AX focus hints, telemetry) + `OverlayAction`. Content is SwiftUI, not AppKit (see the `Indicator*` files). |
+| `IndicatorSurfaces.swift`, `IndicatorTokens.swift`, `IndicatorWaveformView.swift` | Indicator presentation: SwiftUI surfaces (`IndicatorDeckSurface`/`IndicatorPillSurface`/`IndicatorCapsuleRootView`, ring/shimmer/glyph), design tokens, waveform view. The AppKit content layer was deleted at the SwiftUI cutover (`556d70a`). |
+| `IndicatorStateModel.swift`, `IndicatorStyle.swift` | Pure indicator model: the 5 canonical states + fallback law, and the persisted style enum (`machined`/`whisper`). The at-the-caret chip was rejected and removed 2026-09-12. |
+| `IndicatorWaveformMath.swift` | Framework-free waveform/level math (envelope, adaptive dB ceiling, 3-bar glyph levels) so the meter stays headless-testable. Do not retune constants here without updating the tests. |
+| `IndicatorPresentationState.swift` | The single published state the controller pushes once per transition; the indicator's only state source. |
 | `Services/AudioRecorder.swift` | `AudioRecorder` (AVAudioEngine + 16 kHz mono resample, tap callback, secureZero'd buffers) + `AudioRecorderError` + `Array<Float>.secureZero()`. |
 | `Services/SilenceTrimmer.swift` | `SilenceTrimmer` — energy-based endpointer with hysteresis + `normalizePeak`. |
 | `Services/SystemAudioDucker.swift` | `SystemAudioDucker` — CoreAudio virtual-main-volume ducking + `Float.clamped(to:)`. |

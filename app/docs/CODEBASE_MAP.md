@@ -74,15 +74,22 @@ Supporting cast:
 
 | File | ~LOC | Responsibility |
 |---|---|---|
-| `KalamApp.swift` | 1350 | `@main` + `AppDelegate`. Pure orchestration since god-file extraction: applies PTTStateMachine events, owns recording lifecycle (`startRecording` :853, `stopRecordingAndTranscribe` :951), hosts the settings window (`openSettingsWindow` :368), onboarding windows, chime, latency-tuning defaults. The `Settings {}` scene is deliberately inert (settings redesign comment at :29). |
-| `DictationOverlayController.swift` | 817 | Overlay capsule UI: `DictationOverlayController`, `OverlayCapsuleView`, `WaveformView`, `OverlayAction` (:16, incl. `pasteHeldTranscript` support for record-time paste target capture), indicator placement. |
-| `RecordingSessionTracker.swift` | 28 | Monotonic session generations; stale-task paste guard (stale-recording paste guard). |
+| `KalamApp.swift` | 2294 | `@main` + `AppDelegate`. Pure orchestration since god-file extraction: applies PTTStateMachine events, owns recording lifecycle (`startRecording` :1243, `stopRecordingAndTranscribe` :1497), hosts the settings window (`openSettingsWindow` :624), onboarding windows, chime, latency-tuning defaults. The `Settings {}` scene is deliberately inert (settings redesign comment at :29). |
+| `DictationOverlayController.swift` | 592 | Overlay **orchestration** (AppKit window ownership, placement, fades, auto-hide, AX focus hints, telemetry) + `OverlayAction` (incl. `pasteHeldTranscript` support for record-time paste target capture). Rendering lives in the `Indicator*` files below — the AppKit content layer was deleted at the SwiftUI cutover (`556d70a`). |
+| `IndicatorSurfaces.swift` | 353 | SwiftUI indicator surfaces: `IndicatorStadium` chrome, `IndicatorRing` (green conic ring + glow), `ShimmerDots`/`BreathingDot`, `IndicatorLevelGlyph`, `IndicatorAppIcon`, `IndicatorDeckSurface`/`IndicatorPillSurface`, and the `IndicatorCapsuleRootView` window root. |
+| `IndicatorTokens.swift` | 82 | Every indicator dimension/alpha/font constant. Single source for surfaces so the deck and pill cannot drift. |
+| `IndicatorWaveformView.swift` | 36 | SwiftUI view wrapping the published waveform history into deck bars. |
+| `IndicatorStateModel.swift` | 101 | Pure model: the 5 canonical states (listening/pausing/transcribing/held/blocked) + the fallback law (held/blocked always render machined) + the compact-surface rule. |
+| `IndicatorStyle.swift` | 34 | Persisted style enum (`machined`/`whisper`) + `migrating(fromStored:)` (unknown/absent → machined). The at-the-caret chip was rejected and removed 2026-09-12. |
+| `IndicatorWaveformMath.swift` | 200 | Framework-free metering: window RMS → dBFS, absolute floor + slow-adaptive ceiling (`adaptedCeiling`), deck envelope, 3-bar glyph levels. Headless-testable; do not retune constants without updating `IndicatorWaveformMathTests`. |
+| `IndicatorPresentationState.swift` | 73 | The single published state pushed once per transition (revision-bumped, timer ticks excluded) — the indicator's only state source. |
+| `RecordingSessionTracker.swift` | 41 | Monotonic session generations; stale-task paste guard (stale-recording paste guard). |
 
 ### Services (`app/Kalam/Services/`)
 
 | File | ~LOC | Responsibility |
 |---|---|---|
-| `PTTStateMachine.swift` | 165 | Pure hold/toggle/doubleTap/holdOrToggle decision logic. Emits `.start(TriggerMode)` / `.stop` / `.suppressNextKeyUp`; `State` mutators are compile-checked outcome syncs. 14 unit pins in KalamTests. |
+| `PTTStateMachine.swift` | 246 | Pure hold/toggle/doubleTap/holdOrToggle decision logic. Emits `.start(TriggerMode)` / `.stop` / `.suppressNextKeyUp`; `State` mutators are compile-checked outcome syncs. A start is latched **pending** at the `.start` event (`beginPending`/`commitPending`/`rollbackPending`) so the bounded ~170-450 ms engine start can't be mistaken for an idle machine (`f97e025`). 23 unit pins in KalamTests. |
 | `HotkeyListener.swift` | 294 | HotKey package global hotkey + modifier-only side-key monitoring → PTT callbacks. |
 | `AudioRecorder.swift` | 317 | AVAudioEngine capture, tap callback, 16 kHz mono resample, `secureZero()` buffers, `AudioRecorderError`. |
 | `AudioCaptureExchange.swift` | 300 | render-thread audio lock fix seam between render thread and consumers. `publish()` uses a try-lock; contention drops counted (`dropped=`), render thread never blocks. Session-generation guards stop stale teardown. |
@@ -199,7 +206,7 @@ panel styling are the reference for the app's light-mode design language
 6. Clipboard-restore guard semantics intact (changeCount + content equality).
 7. Pipeline order ASR → clean → ITN → dictionary → paste; update DEVELOPER_GUIDE if it ever changes.
 
-## Known doc drift (as of 2026-08-25)
+## Known doc drift (as of 2026-10-01)
 
 - Older references to `SettingsUI.swift`, `MicrophonePriorityConfiguration.swift`
   and `MicrophoneDeviceService.swift` as separate files are stale: mic config
@@ -208,3 +215,11 @@ panel styling are the reference for the app's light-mode design language
 - Spec paths mentioning `kalam-settings-redesign*` folders are historical; those
   directories no longer exist. Current design packages are `kalam-compass-*`
   and `kalam-onboarding-v*`.
+- References to the AppKit indicator content layer (`OverlayCapsuleView`,
+  `WaveformView`, `PillLevelGlyphView`, `CaretChipView`) and to the "rainbow
+  border" indicator are stale: the content layer moved to SwiftUI (`556d70a`)
+  and the rainbow border was retired in the K-48 redesign.
+- The at-the-caret indicator chip (`CaretAnchorResolver`, `IndicatorStyle.caret`)
+  was rejected and removed 2026-09-12; stored `caret` values migrate to
+  `machined`. Dev plans `2026-08-25-indicator-styles.md` and
+  `2026-08-26-indicator-B-green-ring.md` still describe it as planned.
