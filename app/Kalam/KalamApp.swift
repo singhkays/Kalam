@@ -257,7 +257,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let recordingChime = NSSound(named: NSSound.Name("Breeze"))
     private var recordingChimePlayer: AVAudioPlayer?
     private let recordingChimeVolume: Float = 0.15
-    
+
+    /// One-time sweep of defaults keys left by removed features (K-55
+    /// auto-degrade, K-57 retention, K-58 fn advisor — all cut 2026-10-02).
+    /// Inert since nothing reads them; removed so a future feature can't
+    /// misread stale state. Idempotent — safe to run every launch.
+    /// Nonisolated: touches only UserDefaults (thread-safe), no actor state.
+    nonisolated static func removeLegacyDefaults(_ defaults: UserDefaults = .standard) {
+        for key in [
+            "retention.enabled",
+            "validationGate.isDegraded",
+            "validationGate.trips",
+            "validationGate.successStreak",
+            "fnAdvisor.lastNotifiedReason",
+            "fnAdvisor.lastShouldAdvise",
+        ] {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // No-network invariant: set before any FluidAudio loader can run
         // (see ASRService.enforceOfflineMode and the adoption dev-design doc).
@@ -296,6 +314,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // defaults write singhkays.Kalam internal.logging.verboseAudio -bool YES
             KalamDiagnosticFlags.verboseAudioKey: false
         ])
+        // Dead keys from removed features must not linger (see above).
+        Self.removeLegacyDefaults()
 
         // App Nap guard: defeats timer coalescing so hotkey handling stays
         // immediate. userInitiated ONLY - never block system/display sleep.

@@ -85,6 +85,20 @@ final class TranscriptPostProcessorTests: XCTestCase {
         XCTAssertEqual(makeProcessor().process("five dollars and fifty cents").text, "$5.50")
     }
 
+    // 2026-10-02: "Call me at five." pasted live as "Call me at 5". A headless
+    // probe of the full pipeline proved the period survives here ("Call me at
+    // 5."): the live loss was ASR-level (Parakeet emitted no period), and
+    // cleanup never adds terminal periods — it only spaces existing ones. These
+    // pins lock the pipeline half so a future period-eater fails loudly.
+    func testTerminalPeriodSurvivesSingleWordNumberConversion() {
+        XCTAssertEqual(makeProcessor().process("Call me at five.").text, "Call me at 5.")
+    }
+
+    func testTerminalPeriodSurvivesTimeAndDecimalConversion() {
+        XCTAssertEqual(makeProcessor().process("Meeting at ten thirty.").text, "Meeting at 10:30.")
+        XCTAssertEqual(makeProcessor().process("The version is two point five.").text, "The version is 2.5.")
+    }
+
     // Snapshot-engine parity: a once-compiled engine applied by the processor
     // must match per-call compile output across phrase rules, single-word
     // case mimicry, disabled entries, and empty input. (All pre-existing tests

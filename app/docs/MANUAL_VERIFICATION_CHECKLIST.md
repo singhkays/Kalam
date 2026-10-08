@@ -277,9 +277,12 @@ no SNR lines, stop+fetch 209 ms; ON → `snrAware-trusted` returns (snr 15.2,
 G1-builtin/G2-dedicated runs waived (transports share the post-roll path).
 Side notes: roomSNR swings ±6 dB dictation-to-dictation (mode flaps across the
 12 dB trust line); HFP first-buffer bimodal ~110/460 ms (TAP-TO-WAKE); a trusted
-all-silent tail can burn the full 1.5 s backstop (latency cost only); "Call me
-at 5" dropped its terminal period (cleanup/ITN punctuation nit, not stop
-timing — watch item). Full runbook in git
+all-silent tail can burn the full 1.5 s backstop (latency cost only). "Call me
+at 5" missing period RESOLVED 2026-10-02 (not a bug): headless probe of the full
+pipeline preserves it ("Call me at five." → "Call me at 5."); the live loss was
+ASR-level (Parakeet emitted no period) and cleanup never adds terminal periods
+(spacing only) — pinned by 3 regression tests in TranscriptPostProcessorTests.
+Full runbook in git
 (`git log -p -- app/docs/MANUAL_VERIFICATION_CHECKLIST.md`). Reopen only if
 post-roll/trimming code is touched.
 
