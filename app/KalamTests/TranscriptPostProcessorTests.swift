@@ -99,6 +99,28 @@ final class TranscriptPostProcessorTests: XCTestCase {
         XCTAssertEqual(makeProcessor().process("The version is two point five.").text, "The version is 2.5.")
     }
 
+    // 2026-10-08: cleanup's list rule ate the decimal ("one point two" became
+    // "1. Point / 2. …") before ITN could render "1.2". With the decimal guard
+    // in place, the full pipeline delivers the decimal.
+    func testSpokenDecimalRendersThroughFullPipeline() {
+        XCTAssertEqual(
+            makeProcessor().process("How's the one point two release CI doing").text,
+            "How's the 1.2 release CI doing"
+        )
+    }
+
+    // 2026-10-08: "Let's check that and with the issue scratch that make that
+    // first" pasted verbatim — backtrack correctly cut to "make that first"
+    // but the gate vetoed it (kept 3 of 13 words, containment 0.27 < 0.30)
+    // and restored the raw text, cue and all. A fired cue is explicit user
+    // intent to discard, so backtrack-driven rewrites bypass the gate.
+    // ("first" → "1st" is ITN's ordinary ordinal rendering with master on.)
+    func testBacktrackRewriteIsExemptFromGateVeto() {
+        let out = makeProcessor().process("Let's check that and with the issue scratch that make that first")
+        XCTAssertEqual(out.text, "make that 1st")
+        XCTAssertFalse(out.gateRawFallback)
+    }
+
     // Snapshot-engine parity: a once-compiled engine applied by the processor
     // must match per-call compile output across phrase rules, single-word
     // case mimicry, disabled entries, and empty input. (All pre-existing tests

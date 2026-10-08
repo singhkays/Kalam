@@ -41,7 +41,20 @@ struct TranscriptPostProcessor: Sendable {
         // in isolation; on reject we fall back to raw and skip ITN/dictionary entirely
         // (high-quality fallback, never empty).
         let gateMetrics = ValidationGate.metrics(raw: rawInput, cleaned: cleanupResult.text)
-        let gateVerdict = ValidationGate.verdict(raw: rawInput, cleaned: cleanupResult.text, metrics: gateMetrics)
+        // Backtrack exemption (2026-10-08): a fired self-correction cue IS the
+        // user telling us the earlier words are unwanted, so heavy deletion is
+        // the requested outcome — not divergence. Without this, the gate vetoes
+        // exactly the rewrites the rule exists for ("Let's check that and with
+        // the issue scratch that make that first" → kept 3 of 13 words,
+        // containment 0.27 < 0.30 → raw restored, cue and all). The cue list
+        // stays deliberately narrow (multi-word unambiguous markers), and the
+        // gate still guards every non-backtrack rewrite.
+        let gateVerdict: GateVerdict
+        if cleanupResult.stats.backtrackEdits > 0 {
+            gateVerdict = .accept
+        } else {
+            gateVerdict = ValidationGate.verdict(raw: rawInput, cleaned: cleanupResult.text, metrics: gateMetrics)
+        }
         let gateRawFallback: Bool
         let finalText: String
         let itnResult: (text: String, changed: Bool, durationMs: Double, available: Bool, enabled: Bool, spanTokens: Int, spansMasked: Int)
