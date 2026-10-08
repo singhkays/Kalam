@@ -164,8 +164,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let overlay = DictationOverlayController()
     private let hotkeys = HotkeyListener()
     private let paster = PasteService()
-    private let validationGateStore = ValidationGateTripStore()
-    private let retentionPolicy = RetentionPolicy()
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "DictationRuntime")
 
     // record-time paste target capture: record-time paste target (app PID + focused element), and a held transcript
@@ -251,7 +249,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var microphonePriorityObserver: NSObjectProtocol?
     private var openSetupObserver: NSObjectProtocol?
     private var appDidBecomeActiveObserver: NSObjectProtocol?
-    private var validationGateObserver: NSObjectProtocol?
     private var localKeyDownMonitor: Any?
     private var globalKeyDownMonitor: Any?
     private var audioMonitor: AudioDeviceMonitor?
@@ -471,19 +468,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.refreshOnboardingState(reopenIfNeeded: true)
                 await self.prepareRuntimeIfPossible()
                 self.refreshOnboardingState(reopenIfNeeded: true)
-                self.checkFnAdvisor()
-            }
-        }
-
-        validationGateObserver = NotificationCenter.default.addObserver(
-            forName: ValidationGateTripStore.didAutoDegrade,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in
-                self.overlay.showError("Cleanup auto-paused — last 3 pastes had formatting issues.", action: nil, autoHideAfter: 5.0)
-                self.logger.warning("ValidationGate auto-degraded; cleanup will be bypassed until relaunch or manual reset")
             }
         }
 
@@ -508,30 +492,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         audioMonitor = monitor
 
-        // Task 6 (K-57): retention — opt-in, default OFF. When ON, sweep timer + reindex.
-        if UserDefaults.standard.bool(forKey: "retention.enabled") {
-            Task { @MainActor in
-                self.retentionPolicy.startSweeper()
-            }
-            let sessions = RecoveryScanner.reindex()
-            logger.info("Retention reindex count=\(sessions.count, privacy: .public)")
-            if let newest = sessions.first(where: { !$0.meta.isComplete }) {
-                logger.info("Retention newest interrupted session=\(newest.folder.lastPathComponent, privacy: .public) duration=\(newest.estimatedDuration?.description ?? "nil", privacy: .public)")
-                // TODO: auto-transcribe newest via ASRService ON-DEVICE (deferred — needs audio file read)
-            }
-        }
-
-        // Task 7 (K-58): FnUsageAdvisor — silent-trigger support trap.
-        FnUsageAdvisor.checkAndNotifyIfNeeded(overlay: overlay)
-        // Re-check on app active and on Karabiner launch/terminate (independent of fn domain).
-        let workspaceCenter = NSWorkspace.shared.notificationCenter
-        _ = workspaceCenter.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.checkFnAdvisor() }
-        }
-        _ = workspaceCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.checkFnAdvisor() }
-        }
-
+        // Task 7 (K-58) FnUsageAdvisor removed 2026-10-02 with the Fn hotkey
+        // option (owner: unreliable trigger) — the advisor only protected Fn
+        // users, so it goes with the option. Karabiner launch/terminate
+        // observers below were advisor-only and go too.
         applyGeneralSettings()
         installEscapeMonitor()
         refreshOnboardingState(reopenIfNeeded: false)
@@ -543,11 +507,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     }
 
-    @MainActor
-    private func checkFnAdvisor() {
-        FnUsageAdvisor.checkAndNotifyIfNeeded(overlay: overlay)
-    }
-    
     @objc private func quit() {
         // Termination must never wait on the audio stack: a HAL-wedged engine
         // start cannot block quit anymore. The pending attempt (if any) is
@@ -589,13 +548,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let openSetupObserver {
             NotificationCenter.default.removeObserver(openSetupObserver)
             self.openSetupObserver = nil
-        }
-        if let validationGateObserver {
-            NotificationCenter.default.removeObserver(validationGateObserver)
-            self.validationGateObserver = nil
-        }
-        Task { @MainActor in
-            self.retentionPolicy.stopSweeper()
         }
         audioMonitor?.stop()
         audioMonitor = nil
@@ -1148,7 +1100,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let audioGeneration = audio.captureGeneration
             let stopTask = Task(priority: .userInitiated) { [audio, audioGeneration] in
                 let samples = audio.finishStop(expectedGeneration: audioGeneration)
-                audio.endRetention(markComplete: true)
                 return samples
             }
             recordingStopTask = stopTask
@@ -1226,6 +1177,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for candidate in candidates {
             do {
                 try audio.prepare(preferredInputDeviceID: candidate.deviceID, warmPool: warmPool)
+                // Last-used convergence: a prepare that misses the spare
+                // schedules nothing by itself, so nudge toward the just-used
+                // device (no-op when fresh or when a refill is in flight).
+                warmPool.ensureSpare(for: candidate.uid)
                 return candidate.uid
             } catch {
                 logger.warning("Audio input bind failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
@@ -1233,6 +1188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         try audio.prepare(preferredInputDeviceID: nil, warmPool: warmPool)
+        warmPool.ensureSpare(for: nil)
         return nil
     }
 
@@ -1298,9 +1254,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // K-52: identity for every lifecycle event of this session; minted
         // before the async legs so stale completions name their session.
         let sessionID = recordingSessions.currentSessionID ?? UUID()
-        // Task 6 (K-57): retention — per-session folder + streaming CAF + meta (isComplete=false).
-        // When OFF, no-ops (zero disk writes).
-        _ = audio.beginRetentionIfEnabled(sessionID: sessionID, deviceUID: selectedInputUID)
 
         do {
             // Bounded start: the engine start runs off-main under a hard
@@ -1311,7 +1264,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let startOutcome = await audio.startCollectingBounded()
             guard startOutcome == .started else {
                 logger.warning("Audio collection start did not commit outcome=\(String(describing: startOutcome), privacy: .public)")
-                audio.endRetention(markComplete: false)
                 // Superseded (key-up/Esc/supersede/device-change during the
                 // window) is a silent no-op by design — the user canceled the
                 // press; only genuine failures surface the mic error.
@@ -1323,8 +1275,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             logger.warning("Audio collection start failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             overlay.showError("Microphone unavailable", action: .openMicrophoneSettings, autoHideAfter: 4.0)
-            // Retention started but engine failed — mark incomplete and close.
-            audio.endRetention(markComplete: false)
             return false
         }
         startLatencyProbe?.mark(.engineStarted)
@@ -1336,7 +1286,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // down and drop everything silently.
         guard pttState.commitPending() else {
             audio.stopEngineFromStaleCommit()
-            audio.endRetention(markComplete: false)
             logger.debug("Stale recording commit dropped: pending start rolled back during engine start")
             return false
         }
@@ -1587,10 +1536,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             
             let keyUpToStopStart = CFAbsoluteTimeGetCurrent()
             let samples = await stopTask.value
-            // Task 6 (K-57): retention — streaming CAF already closed via exchange sink;
-            // mark the session complete now that audio is durably captured.
-            // When OFF, no-ops. For superseded (empty) stops, still close the writer for that generation.
-            self.audio.endRetention(markComplete: true)
             guard !Task.isCancelled else { return }
             // A stale stop (superseded by a rapid re-record) returns no audio;
             // the newer session's overlay state owns the indicator from here.
@@ -1768,21 +1713,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 
                 // off-main post-processing: snapshot Sendable inputs on-main, run cleanup+ITN+
                 // dictionary OFF the main actor, keep only counts in logs.
-                // K-55 ValidationGate: check degraded flag before snapshot so the next
-                // dictation bypasses cleanup when auto-degraded; the gate itself validates
-                // TextCleanupEngine output only (ITN/dictionary are curated).
+                // ValidationGate (kept, silent): validates TextCleanupEngine
+                // output only (ITN/dictionary are curated); on reject the
+                // processor falls back to raw. The K-55 auto-degrade trip
+                // store + banner were removed 2026-10-02 (owner: unrequested
+                // feature) — rejects fall back silently, every time.
                 let baseCleanupConfig = ModelsConfiguration.load().textCleanup
-                let isDegradedBefore = self.validationGateStore.isDegraded
-                let effectiveCleanupConfig: TextCleanupConfiguration = {
-                    if isDegradedBefore {
-                        var c = baseCleanupConfig
-                        c.enabled = false
-                        return c
-                    }
-                    return baseCleanupConfig
-                }()
                 let processor = TranscriptPostProcessor(
-                    cleanupConfig: effectiveCleanupConfig,
+                    cleanupConfig: baseCleanupConfig,
                     dictionaryEngine: CustomDictionaryManager.shared.currentCompiledEngine
                 )
                 let post = await Self.postProcessTranscript(processor, trimmedText)
@@ -1798,15 +1736,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                     return
                 }
-                // K-55: record verdict and surface degraded banner exactly once
-                self.validationGateStore.record(post.gateVerdict)
-                let gateReason: String
-                switch post.gateVerdict {
-                case .accept: gateReason = "accept"
-                case .reject(let r): gateReason = r
-                }
                 if KalamDiagnosticFlags.verboseAudio {
-                    self.logger.debug("ValidationGate verdict=\(gateReason, privacy: .public) fallback=\(post.gateRawFallback, privacy: .public) lengthRatio=\(String(format: "%.2f", post.gateMetrics.lengthRatio), privacy: .public) containment=\(String(format: "%.2f", post.gateMetrics.tokenContainment), privacy: .public) trigram=\(post.gateMetrics.trigramOverlap.map { String(format: "%.2f", $0) } ?? "nil", privacy: .public) rawLen=\(trimmedText.count, privacy: .public) cleanedLen=\(post.text.count, privacy: .public) degradedBefore=\(isDegradedBefore, privacy: .public) degradedNow=\(self.validationGateStore.isDegraded, privacy: .public)")
+                    let gateReason: String
+                    switch post.gateVerdict {
+                    case .accept: gateReason = "accept"
+                    case .reject(let r): gateReason = r
+                    }
+                    self.logger.debug("ValidationGate verdict=\(gateReason, privacy: .public) fallback=\(post.gateRawFallback, privacy: .public) lengthRatio=\(String(format: "%.2f", post.gateMetrics.lengthRatio), privacy: .public) containment=\(String(format: "%.2f", post.gateMetrics.tokenContainment), privacy: .public) trigram=\(post.gateMetrics.trigramOverlap.map { String(format: "%.2f", $0) } ?? "nil", privacy: .public) rawLen=\(trimmedText.count, privacy: .public) cleanedLen=\(post.text.count, privacy: .public)")
                 }
                 let asrMs = Int((asrEnd - asrStart) * 1000)
                 let asrInputMs = Int(Double(normalized.count) / 16_000.0 * 1000)
@@ -2038,8 +1974,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let audioGeneration = audio.captureGeneration
         let stopTask = Task(priority: .userInitiated) { [audio, audioGeneration] in
             let samples = audio.finishStop(expectedGeneration: audioGeneration)
-            // Task 6: retention — even a canceled session was durably captured up to cancel.
-            audio.endRetention(markComplete: true)
             return samples
         }
         recordingStopTask = stopTask
