@@ -252,12 +252,13 @@ offset-invariant, so normalization cannot change its verdict.
 ## Text Cleanup Behavior
 
 `TextCleanupEngine` runs deterministic, local-only text transforms with feature flags;
-`ValidationGate` (K-55) validates raw-vs-cleaned divergence inside `KalamTextEngine` (length
+`ValidationGate` validates raw-vs-cleaned divergence inside `KalamTextEngine` (length
 0.18…1.65, containment ≥0.30, trigram ≥0.05; all 13 goldens accept). On `.reject` the
-pipeline falls back to raw ASR text (skips ITN/dictionary), counts a trip in
-`ValidationGateTripStore` (rolling 24 h window, ≥3 trips → auto-degrades cleanup to
-bypass until relaunch or `CleanupPane` Re-enable; `Notification.Name.validationGateAutoDegraded`;
-success streak 5 resets). `TranscriptPostProcessor` exposes `gateVerdict`/`gateMetrics`/`gateRawFallback`
+pipeline falls back to raw ASR text (skips ITN/dictionary) — silently, every time
+(the K-55 auto-degrade trip store + banner were removed 2026-10-02). Rewrites driven
+by a fired backtrack cue bypass the gate: a self-correction cue is explicit user
+intent to discard, so heavy deletion there is the requested outcome, not divergence.
+`TranscriptPostProcessor` exposes `gateVerdict`/`gateMetrics`/`gateRawFallback`
 and logs `ValidationGate verdict=` with the transcription summary.
 
 `TextCleanupEngine` flags:
