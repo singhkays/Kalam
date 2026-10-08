@@ -1,43 +1,119 @@
 # Kalam — Manual Verification Checklist
 
-**Slimmed down 2026-08-25:** closed-gate test scripts and historical testing notes were
-removed; what remains is (a) the open-gates runbook (Part 1 verified; Parts 3/4 + K-52…K-58
-gates still awaiting human verification as of 2026-09-06) and (b) a one-line-per-test
-verification record. Full detail for any past round lives in git history
+**Layout (reorganized 2026-10-01):** everything that still needs YOUR manual
+verification is at the **top**, with full steps. Everything verified is at the
+**bottom** under `# DONE — verified, archived`. Nothing was deleted in the move —
+full detail for any past round lives in git history
 (`git log -p -- app/docs/MANUAL_VERIFICATION_CHECKLIST.md`) and in the per-K rows +
 execution notes of `app/docs/IMPROVEMENT_PLAN.md`.
 
----
+**Still open — all require a HOST Mac** (the VM has no mic, cannot render the
+overlay window, and cannot drive Accessibility):
 
----
-
-# Runbook for the open gates
-
-**Part 1 (T11–T23) is fully verified ✅** (last: T23 v1.7 dark-mode, 2026-09-06). The gates
-below are **still awaiting live human verification on a host Mac**. They live in Parts 3/4 and
-the K-52…K-58 sections of this file, plus a few plan-only items from `IMPROVEMENT_PLAN.md`.
-Each has its own setup / log-stream prep; run-order tips are noted per gate.
-
-| # | Gate | K-Code | What it proves | Key evidence needed | Full runbook |
+| # | Gate | K-Code | What it proves | Key evidence needed | Runbook |
 |---|---|---|---|---|---|
-| 1 | Part 3 Gate E — PID-post compatibility matrix | K-49/K-50 | PID-posted Cmd+V lands in every target app (Mail/Notes/Messages/TextEdit/Slack/Chrome/Xcode) or falls back to global post — never drops | Per-app `Paste succeeded via PID-posted Cmd+V` / `refused; falling back` lines | `# Part 3 — K-49/K-50/K-51 stop-to-paste latency` § Gate E |
-| 2 | Part 3 Gate F — rapid re-record regression sweep | K-49 | Generation/staleness contract survives the early-exit loop: old stop no-ops, no stale/wrong-target paste, mic never left on | All three evidence checks clean over the sweep; `dropped=0` hygiene | `# Part 3 — …` § Gate F |
-| 3 | Part 4 — Indicator B 10-row matrix | K-48 | Whisper/machined/caret × listening/transcribing/pausing/held render per spec (rim, arc speeds, no dwell, fallback-A capsule) | 10 screenshots (1:1) + 2 clips + no-dwell clip + Digital Color Meter rim reads | `# Part 4 — Indicator B verification` (+ 4 additional proofs) |
-| 4 | K-52 lifecycle — rapid re-record ROUND 3 | K-52 | Re-record from `transcribing` parks A in the held chip (never drops); B pastes whole; interrupt log is preserve-only | Chip text + pasted B + `Lifecycle ctx=…` log sample (no `cancelWork`) | `## K-52 lifecycle manual gate …` |
-| 5 | K-53 WarmEnginePool | K-53 | 60 s idle keeps the mic glyph **off**; built-in + Bluetooth device-change first dictation hits the warm pool (`toPreparedMs ≤5`) | `prewarm ok` counts (exactly one per burst), `toPreparedMs`/`pttDown->firstBuffer` lines, permission gate | `## K-53 WarmEnginePool …` |
-| 6 | K-54 SNR-aware post-roll | K-54 | Trailing phoneme never clipped: low-SNR (<12 dB) stretches to 1.5 s backstop, trusted rooms stop after speech-like quiet; kill-switch keeps fixed path | G1–G5: per-sentence last-word checklist, `mode=`/`roomSNR=`/`effectiveMaxMs` log lines, kill-switch flip | `## K-54 — SNR-aware …` |
-| 7 | K-55 ValidationGate | K-55 | 3 trips → auto-degrade banner **once**; Re-enable + 5-accept streak resets; no double-insert while degraded | `validationGate.isDegraded` 0/1 flips, banner screenshot, `ValidationGate auto-degraded` once, H3 no-double | `## K-55 ValidationGate …` |
-| 8 | K-56 Tier-1 insertion | K-56 | Secure-field refusal before pasteboard; PID-mismatch / frontmost-changed → hold + promised-app paste; no regression with flag unset | I1–I7: per-gate checklist, `pbpaste` sentinel intact, Electron single-insert, no `Per-element verify timeout override` | `## K-56 Tier-1 insertion …` |
-| 9 | K-57 Crash recovery | K-57 | Toggle OFF = zero disk writes; ON streams per-session CAF; `kill -9` mid-recording recoverable next launch | `fs_usage` on/off captures, `ls -R` + `meta.json` (`isComplete`), `RecoveryScanner` logs | `## K-57 Crash recovery …` |
-| 10 | K-58 FnUsageAdvisor | K-58 | Stock = no banner; bad fn values / Karabiner fire banner once + deep-link + clear; no transcript text logged | L1–L4: `defaults read` outputs, banner screenshot, `log stream` greps (`reason`/`karabiner` only) | `## K-58 FnUsageAdvisor …` |
+| 1 | **Engine popover states F1–F8** render per spec | — | Popover states F1–F8 render per spec (wells, notch, selchip, chipgrid, verified/multiple states) | Per-state screenshots | `## F popover manual checklist` |
 
-**Also awaiting human verification — from `IMPROVEMENT_PLAN.md` 🔄 rows (no full runbook here yet):**
+> **K-52 rapid re-record — CLOSED 2026-10-02 (owner waiver, no live preserve-path
+> re-run).** Drain-discard proven live 2026-10-01 and accepted as correct
+> behavior; preserve path pinned headlessly (`DictationStateMachineTests` +
+> `RecordingSessionTrackerTests` TEST SUCCEEDED 2026-10-02); live preserve
+> window is fractions of a second and owner accepts headless coverage. Full
+> record under `## K-52` below. Reopen if the preserve path is ever touched.
+
+**Run order:** do the shared setup once ("Before you start any gate below"),
+then work the gates **in numeric order** — F popover. (K-52 rapid re-record closed 2026-10-02; K-53 WarmEnginePool
+closed 2026-10-02; K-54 SNR post-roll closed 2026-10-02; K-55 auto-degrade
+REMOVED 2026-10-02; K-56 Tier-1 closed 2026-10-02 headless+lived; K-57 retention
+REMOVED 2026-10-02; K-58 Fn option + advisor REMOVED 2026-10-02 — see notes above.) Each gate's own Pre-steps override the shared setup where they
+differ (e.g. verboseAudio for pool diagnostics).
+
+**Also awaiting human verification — `IMPROVEMENT_PLAN.md` 🔄 rows with no full
+runbook here yet:**
 
 - **K-35 (plan row 107)** — 🧑 visual QA of the onboarding **hotkey card**: menu composition, capture-in-place, dropdown well contrast (deck `tile` fill + `hair` stroke, radius 8, mono 12.5 label) vs the v3.2 dark figures. Row stays 🔄 until a user eyeballs it.
 - **K-38 (plan row 134; T20 covered the hitch half)** — Escape sub-check on a long dictation ("Escape sub-check never explicitly reported" per T20); sample the main thread during a long-dictation paste to confirm cleanup+ITN stay off-main.
 - **K-12 (plan row 74, low priority)** — manual relaunch test now that K-24 (unreachable button) is closed: run Setup → relaunch → confirm clean lifecycle (previously blocked as T6).
 - **K-29 (plan row 88; T13 pre-verified)** — re-dictate the two bare-"no" sentences ("no problem", "there's no way …") on a **shipped build** carrying K-26..K-29 (v1.2) to close the tracker.
 
+**Closed recently (details at the bottom of this file):**
+
+- **K-49 / K-50 / K-51 Gates A–F** ✅ — Gates A–D on `c4d7c7c` 2026-08-25; Gates E–F 2026-09-12 per user sign-off.
+- **Part 4 Indicator B matrix** ✅ owner-verified 2026-10-01 (8 rows + Reduce Motion, no-dwell, universal rim, light-bars proofs). Caret rows 7–8 were **rejected and the style removed 2026-09-12** — struck, not runnable.
+- **K-59 indicator metering scale law** ✅ owner-verified 2026-10-01 — quiet room, loud room, and door-slam all read correctly; the meter neither pegs nor flattens. Pinned headlessly in `IndicatorWaveformMathTests`; if you retune a constant, re-run the meter check (dictate ~30 s in a quiet room, then with a door slam mid-utterance) — the law is what stops the deck re-scaling itself.
+
+## Before you start any gate below
+
+Everything here needs a **real Mac** — the app needs a microphone, and it needs
+Accessibility permission to paste. Two things are true of every gate, so set them
+up once.
+
+**1. Which app are you testing?** Most gates assume the **debug build** you get
+from Xcode, which macOS knows as `singhkays.Kalam-test`. That's the name you use
+in `defaults` commands:
+
+```bash
+defaults read singhkays.Kalam-test internal.latency.enableStageTiming   # debug build
+defaults read singhkays.Kalam     internal.latency.enableStageTiming   # installed / release build
+```
+
+⚠️ **This trips people up.** Writing a setting to `singhkays.Kalam` while running
+the debug build does *nothing, silently* — no error, the flag just stays off. If
+a gate's flag "doesn't work", check you used the same name as the build you're
+running. Every gate below writes to **`singhkays.Kalam-test`** unless it says
+otherwise. (K-53's original pre-steps used the release name — that's fixed here.)
+
+**2. Turning on the detailed timing logs.** Several gates read numbers like
+`toPreparedMs` or `keyUpToSamplesMs` that Kalam only records when timing is
+switched on. Turn it on once, then **fully quit and reopen** Kalam (⌘Q, not just
+close the window):
+
+```bash
+defaults write singhkays.Kalam-test internal.latency.enableStageTiming -bool true
+defaults write singhkays.Kalam-test internal.latency.startStageTiming  -bool true
+```
+
+If a gate turns a flag **off** at the end (K-54's kill-switch, for example),
+switch it back on afterwards so the next gate isn't silently blind.
+
+**3. Watching the logs.** Two ways — pick whichever you prefer.
+
+*Console.app (no typing, good for reading along):* open Console, choose **All
+Messages**, and search `singhkays.Kalam`. Leave it open. Note that Console may
+not show the app's info-level lines unless you enable them — in the message list,
+right-click a row and make sure **Info** is shown.
+
+*Terminal (better for copy-paste evidence):* run this once and leave it running:
+
+```bash
+log stream --style compact --predicate 'subsystem == "singhkays.Kalam"' --info \
+  | tee ~/kalam-log.txt
+```
+
+Two things that are easy to get wrong:
+
+- **The `--info` flag is required.** Most of what you need to check is logged at
+  the "info" level, which is hidden by default. Without `--info` you get warnings
+  and errors only — and the interesting lines never appear.
+- **The subsystem is always `singhkays.Kalam`, never `singhkays.Kalam-test`.**
+  The `-test` suffix only shows up in the app's bundle ID and process name, not
+  in its logging subsystem. Filtering on `singhkays.Kalam-test` matches nothing at
+  all, and you'll sit there waiting for output that will never come.
+
+If you started the stream late and missed something, you don't have to redo the
+test — the last two hours are still on disk:
+
+```bash
+log show --last 30m --predicate 'subsystem == "singhkays.Kalam"' --info --style compact
+```
+
+**4. Reading a timing number.** When a gate says "`toPreparedMs ≤ 5", it means
+*"the app was ready to record in under about 5 milliseconds"* — lower is better,
+and a number in the tens means the shortcut was missed. Each gate spells out what
+good and bad look like for its own numbers; the general rule is that **these are
+milliseconds, and they're only meaningful next to the baseline quoted in the
+gate.** A "slow" number isn't automatically a bug if the gate says that stage is
+irreducible.
 ## Preparation for Part 1 (once, ~10 min)
 
 1. **Build & launch the current app.**
@@ -89,11 +165,192 @@ Each has its own setup / log-stream prep; run-order tips are noted per gate.
 
 ---
 
+## K-52 — Start a new dictation before the last one finishes
+
+> **CLOSED 2026-10-02 — archived.** See `## ✅ K-52 …` under `# DONE — verified, archived`
+> for the full record (runbook, 2026-10-01 attempt log, scope decision).
+
+## K-53 — Is the microphone dot off when you are? / is the first dictation after switching mics fast? ✅ PASSED 2026-10-02
+
+> **ARCHIVED — see `## ✅ K-53 …` under `# DONE — verified, archived` for the full record (runbook, attempts, decisions).**
+
+**The test:** four checks. The first one matters most — it's the privacy one.
+
+## K-54 — Do you lose the last word when you let go of the key? ✅ PASSED 2026-10-02
+
+> **ARCHIVED — see `## ✅ K-54 …` under `# DONE — verified, archived` for the full record (runbook, attempts, kill-switch evidence).**
+
+## K-55 — Does Kalam back off when its text cleanup keeps going wrong? ❌ REMOVED 2026-10-02
+
+> **REMOVED — see `## ✅ K-55 …` under `# DONE — verified, archived` for the removal record + restore pointer.** The auto-degrade half is cut (unrequested); the silent reject→raw fallback stays. Do not run the H1–H3 runbook below.
+
+## K-56 — Does Kalam paste exactly once, and never into the wrong place? ✅ CLOSED 2026-10-02
+
+> **ARCHIVED — see `## ✅ K-56 …` under `# DONE — verified, archived` for the record (headless mapping + lived evidence).** The I1–I7 live matrix was judged redundant: every gate is pinned headlessly.
+
+**Gate I1 — Electron lie-success → exactly one insertion (headless pin + manual):**
+```bash
+xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/PasteServiceTier1Tests/testElectronLieFallsThroughToCmdVExactlyOnce 2>&1 | tail -n 20
+# Must pass — verifies AX lie (SET success but value unchanged) falls through to Cmd+V exactly once, no double.
+```
+## K-57 — If the app crashes mid-sentence, can you get the words back? ❌ REMOVED 2026-10-02
+
+> **REMOVED — see `## ✅ K-57 …` under `# DONE — verified, archived` for the removal record + restore pointer.** Audio is never persisted, by owner decision. Do not run the J1–J5 runbook below.
+
+## K-58 — Why won't my hotkey work? (the globe/fn-key trap) ❌ REMOVED 2026-10-02
+
+> **REMOVED — see `## ✅ K-58 …` under `# DONE — verified, archived` for the removal record + restore pointer.** Fn is no longer a hotkey option, so the advisor is gone with it. Do not run the L1–L4 runbook below.
+
+## F popover manual checklist (Engine Tab — F Popover, 10 states)
+
+- [ ] F1 collapsed: Choose… primary, View/Copy bsec white, no popover
+- [ ] F2 folder chosen: Change/Open/Clear, same
+- [ ] F3 Install popover: Hide well tint, well #F1F0EA brew, notch right:135 centered on Hide, card height stable
+- [ ] F4 Download popover: selchip before well, v2→v3 swaps command, notch pinned
+- [ ] F5 picker open: selchipMenu (v2 ✓) + dimmed well 0.55
+- [ ] F6 verified: green ✓, ON DISK, no View
+- [ ] F6b multiple: 2 models, v2 ON green-t, v3 Use, Missing dimmed
+- [ ] F6c multiple incomplete: warn orange border + chipgrid
+- [ ] F7 incomplete popover: chipgrid inside popover, well #F1F0EA
+- [ ] F8 repo guard: orange guard, GetTheModel dimmed 0.55
+
+# DONE — verified, archived
+
+Everything below has PASSED live verification on a host Mac with recorded evidence.
+Nothing here needs re-running unless the code it covers changes again. Re-run order and
+per-gate reasoning are at the TOP of this file.
+
+---
+
 # Archive — Verified / Closed Gates (moved out of active open-gates runbook)
 
 These gates have passed live verification (host Mac, with evidence); their headings are marked ✅;
 full details remain here for reference. See verification record below for the one-line
-evidence, and see `IMPROVEMENT_PLAN.md` for the per-K execution notes.
+evidence, and see `IMPROVEMENT_PLAN.md` for the per-K execution notes. (K-52 immediately
+below is the exception: closed by owner waiver, not live verification — labeled as such.)
+
+## ✅ K-52 — rapid re-record (closed 2026-10-02, owner waiver — NOT live-verified)
+
+Rapid re-record from `transcribing` parks A in the held chip (never drops); B pastes whole;
+interrupt log is preserve-only. Scope decision (owner): keep the card; drain-discard
+(`finalizing` branch) accepted as correct product behavior.
+Basis for closing without a live preserve-path re-run: (1) drain-discard proven live
+2026-10-01 (`22:34:50.429 ctx=start finalizing(1A8E605C) -> warming(6CFECB94) effects=2` —
+A discarded before `asr-in`, only B pasted); (2) preserve path pinned headlessly
+(`DictationStateMachineTests` + `RecordingSessionTrackerTests` TEST SUCCEEDED 2026-10-02,
+incl. `testRapidReRecordWithDeliveredTranscriptPreservesIt` and
+`testReRecordDuringASRDefersPreservationWithoutCancelling`); (3) live preserve window is
+fractions of a second (drain ~110–632 ms, transcription typically <1 s) and owner accepts
+headless coverage. Full runbook + gate-wording history in git
+(`git log -p -- app/docs/MANUAL_VERIFICATION_CHECKLIST.md`). Reopen only if the preserve
+path (`DictationStateMachine.swift:144-155`, `fulfillPendingPreservation`) is touched.
+
+## ✅ K-53 — WarmEnginePool (PASSED 2026-10-02, all three live legs)
+
+60 s idle: mic glyph stays off (user-confirmed 2026-10-02 — dot only while
+dictating). USB adoption: `take consumed` (C920 UID) ×4 across two builds,
+prepare-Δ 15–19 ≤25 ✓, refills on schedule. Bluetooth last-used convergence
+(pid 22543): 1st press missed as designed (Δ 35, no take line) and re-armed
+(`rebuilt spare uid=3C-4D-BE-8E-5D-7A:input` +276 ms; ring clamped to 480,
+best-effort); 2nd + 3rd presses `take consumed` (BT UID, Δ 14/16), totals
+48/56 → `pttDown->firstBuffer` ≤155 ✓. Permission leg waived live, covered by
+`testPermissionGatePrewarmNoOp` + `testPermissionGateRebuildNoOp`.
+Decisions (owner, 2026-10-02): (1) spare follows last-used (`preferredSpareUID` + 4 pins);
+(2) miss convergence via `ensureSpare` (+3 pins) after the 2nd-BT-press miss
+falsified refill-only re-arming; (3) gate recalibrated — `take consumed`
+primary, prepare-Δ ≤25 secondary (old ≤5 unachievable: ~3 CoreAudio sweeps per
+press even on adopt; adopt-Δ 21 vs rebuild-Δ 35–65 vs early-return-Δ 14).
+Follow-ups filed: K-60 (silent `isFresh` miss — add debug line), K-61 (one UID
+resolution per press instead of three). Standing note: C920 USB engine starts
+ran 226–353 ms across 8 presses (device churn, outside pool scope) — timing
+rows belong on built-in. Full runbook + attempt logs in git
+(`git log -p -- app/docs/MANUAL_VERIFICATION_CHECKLIST.md`). Reopen only if
+pool selection/adoption code is touched.
+
+## ✅ K-54 — SNR-aware post-roll (PASSED 2026-10-02)
+
+Trailing phoneme never clipped: low-SNR stretches to the 1.5 s backstop,
+trusted rooms stop after speech-like quiet; kill-switch keeps the fixed path.
+Evidence (all bluetooth, pids 22873/30825/30886): 7 dictations, all tails
+complete (trailing-speech extension + floor / 250 ms-quiet / backstop stops per
+branch). G3 pairs — "Meeting at ten thirty." → `Meeting at 10:30.` ✓, "Call me
+at five." → `Call me at 5`, "The version is two point five." → `The version is
+2.5.` ✓ — the reported "lost last word" is ITN normalization mistaken for
+clipping (matches pinned T12). Kill-switch: OFF → `mode=fixed`, `roomSNR=0.0`,
+no SNR lines, stop+fetch 209 ms; ON → `snrAware-trusted` returns (snr 15.2,
+`effectiveMaxMs=615` = 0.30×2050 cap). Headless: PostRollDecisionTests green.
+G1-builtin/G2-dedicated runs waived (transports share the post-roll path).
+Side notes: roomSNR swings ±6 dB dictation-to-dictation (mode flaps across the
+12 dB trust line); HFP first-buffer bimodal ~110/460 ms (TAP-TO-WAKE); a trusted
+all-silent tail can burn the full 1.5 s backstop (latency cost only); "Call me
+at 5" dropped its terminal period (cleanup/ITN punctuation nit, not stop
+timing — watch item). Full runbook in git
+(`git log -p -- app/docs/MANUAL_VERIFICATION_CHECKLIST.md`). Reopen only if
+post-roll/trimming code is touched.
+
+## ✅ K-55 — ValidationGate auto-degrade (REMOVED 2026-10-02, owner — silent fallback kept)
+
+The trip counter + auto-degrade + banner were never requested (agent-proposed
+Jot-review batch) and are gone; the invisible reject→raw fallback stays.
+Removed: `Services/ValidationGateTripStore.swift`,
+`KalamTests/ValidationGateTripTests.swift`, `CleanupPane` banner +
+`isDegraded` state, `KalamApp` observer/store/degraded-bypass,
+`UpdatesPane` degraded feed (constant false). Kept:
+`ValidationGate.swift` + `TranscriptPostProcessor` verdict/fallback +
+`ValidationGateTests.swift` (engine 80/80) — full Xcode TEST SUCCEEDED
+post-cut. Restore pointer: `git log --all --oneline --
+Services/ValidationGateTripStore.swift` finds the removal commit;
+`IMPROVEMENT_PLAN.md` K-55 row (❌REMOVED) lists every touched file. The H1–H3
+runbook below was never executed live; full text in git
+(`git log -p -- app/docs/MANUAL_VERIFICATION_CHECKLIST.md`).
+
+## ✅ K-56 — Tier-1 insertion (closed 2026-10-02, headless + lived record — NO live matrix run)
+
+Secure-field refusal before pasteboard; PID-mismatch / frontmost-changed → hold;
+Electron single-insert; no regression with flag unset. Basis: `PasteServiceTier1Tests`
+10/10 green 2026-10-02 (every I-gate pinned: Electron-lie→CmdV-once, secure-field
+×3 variants, PID-mismatch hold without pasteboard, frontmost-changed hold, quirks
+empty-table, slow-SET override, captured-element verified success) + owner lived
+record (dozens of dictations across TextEdit/Sublime/VS Code/Chrome, never one
+wrong-app paste). The I1–I7 live matrix below was judged redundant and never
+executed; full text in git. Reopen only if paste/AX insertion code is touched.
+
+## ✅ K-57 — crash recovery retention (REMOVED 2026-10-02, owner — privacy)
+
+Opt-in "Keep audio for recovery (7 days)" deleted: no audio persistence even
+across crashes. Removed: `Support/FileLayout.swift`,
+`Support/CAFStreamWriter.swift`, `Support/RetentionPolicy.swift`,
+`Services/RecoveryScanner.swift`, `KalamTests/RetentionTests.swift`,
+`AudioRecorder` begin/endRetention + fields, `AudioCaptureExchange` retention
+sink, `KalamApp` sweeper/reindex/begin/end wiring, `Settings` toggle +
+`retentionEnabled` chain (both stores, model, protocol, EnginePane card),
+`DiagnosticsSnapshot` retentionEnabled field/line, `DEVELOPER_GUIDE` section +
+defaults key (also marked the dead K-55 validationGate keys). Also removed the
+leftover `gateDegraded` diagnostics field from the K-55 cut. Verified post-cut:
+app BUILD SUCCEEDED + full Xcode TEST SUCCEEDED (engine 80/80 covers the kept
+silent ValidationGate fallback; no engine files touched). Posture now: capture
+buffers `secureZero()`'d, zero disk writes, always. Stale `retention.enabled`
+defaults key is inert; pre-existing `recordings/` folders (if the toggle was
+ever ON) are orphaned — safe to `rm -rf` manually. Restore pointer: `git log
+--all --oneline -- Support/RetentionPolicy.swift` finds the removal commit;
+`IMPROVEMENT_PLAN.md` K-57 row (❌REMOVED) lists every touched file. The J1–J5
+runbook below was never executed live; full text in git.
+
+## ✅ K-58 — Fn hotkey option + FnUsageAdvisor (REMOVED 2026-10-02, owner — unreliable trigger)
+
+Fn removed as a dictation trigger: `KeyCombination.fn` + `HotkeyPreset.fn` gone
+(menu auto-updates from `allCases`); capture already excluded keyCode 63;
+listener Fn paths removed (`functionDown`, `.fn` match arm, keyCode-63 arms, 63
+dropped from capturable modifiers — stored 63-chords now explicitly refused);
+`KeyCombination.from()` legacy F12-no-mod alias migrates to the app default
+(⇧ + ⌘), so stored Fn residue converges through the existing load path.
+Removed with it (the advisor only protected Fn users):
+`Services/FnUsageAdvisor.swift`, `KalamTests/FnUsageAdvisorTests.swift`,
+launch/active/Karabiner observers + `checkFnAdvisor`,
+`OverlayAction.openKeyboardSettings`, `SystemSettingsDestination.keyboard`.
+Stale `fnAdvisor.*` defaults keys are inert. Verified post-cut: app BUILD
+SUCCEEDED + full Xcode TEST SUCCEEDED. The L1–L4 runbook below was never
+executed live; full text in git.
 
 ## ✅ T16 — K-19 (verified, archived): VoiceOver + Full Keyboard Access (updated for Compass)
 
@@ -476,6 +733,13 @@ gates. Stage-timing lines are info level: grep `Latency stage label=` in the cap
 Baseline numbers to beat: audio-stop+fetch ~190 ms, trim ~13 ms, paste-wait 50-80 ms
 (measured 2026-08-25).
 
+**Gate → K mapping (what tests what):** Gate A = K-49 early-exit timing; Gate B =
+K-49 folded levers (device-ring shrink + converter pre-build); Gate C = K-51 fused
+trim; Gate D = K-50 captured-route settle skip; Gate E = K-49/K-50 PID-post
+experiment (flag OFF by default); Gate F = K-49 staleness regression sweep.
+Gates A–D verified ✅ 2026-08-25 (build `c4d7c7c`); Gates E–F verified ✅ 2026-09-12
+(user sign-off).
+
 ## Where the logs come from (read this first)
 
 Every gate below reads from ONE log capture, started BEFORE you dictate:
@@ -652,7 +916,9 @@ back OFF (`defaults write singhkays.Kalam-test internal.latency.pidPasteEnabled 
 false`), record the failing app, experiment closed as negative. (K-50 still closes ✅ on
 the Gate D captured-route win regardless.)
 
-Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes (per-app): ______________________
+Result: ✅ **PASS (2026-09-12)** — user-confirmed: PID-posted Cmd+V lands in every
+matrix app (Mail/Notes/Messages/TextEdit/Slack/Chrome page field + omnibox/Xcode) or
+falls back to global post — zero dropped pastes. Per-app notes: ______________________
 
 ## Gate F — rapid re-record regression sweep
 
@@ -696,13 +962,24 @@ paste lines show where each landed paste went.
 
 **PASS:** all three clean over the full sweep.
 
-Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
+Result: ✅ **PASS (2026-09-12)** — user-confirmed: full 20× sweep clean — no stale /
+wrong-target paste, mic indicator off after every stop, superseded lines present,
+`dropped=0` hygiene holds. Notes: ______________________________
 
 ---
 
 # Part 4 — Indicator B verification (shipped 2026-08-26, no dwell)
 
-**What shipped:** single-file `DictationOverlayController.swift` — universal rim (1px double-stroke + elevation) for contrast on white `#FFFFFF` and obsidian `#0B0B0D`, green ring `CAGradientLayer` conic `transparent 255deg → #52B788 360deg` + blurred glow twin, gated to **whisper listening slow 3.6s**, **all transcribing fast 2.4s**, **caret listening never**, **machined listening never**, **pausing never**; light bars green in both appearances (`PillLevelGlyphView.ink` and caret chip dot/bars stay `#52B788`); `minStateDwellSeconds` stays `0.25` — no 0.65s hold, transcribing flips to `held`/`success` immediately on ASR return; Reduce Motion shows static 1px hairline at 48% (`#52B788` at `.48`), no rotation. Fallback law intact: `held`/`blocked` → `A` capsule; `H` no-caret → `A`.
+> **2026-09-12 — caret style REJECTED and removed:** the at-the-caret chip only
+> resolves `AXBoundsForRange` in native `NSText` fields (TextEdit/Notes);
+> Chromium/Electron/web views refuse it (`cannotComplete -25204`) and fall back
+> to the deck everywhere — e.g. Vivaldi shows the machined deck with caret
+> selected. A style that promises caret feedback but delivers the deck outside
+> two apps is cut: `IndicatorStyle.caret`, the chip window, `CaretAnchorResolver`,
+> and the caret preview are deleted; stored "caret" migrates to machined. Rows
+> 7–8 below are struck, not runnable.
+
+**Under the hood (reference only):** single-file `DictationOverlayController.swift` — universal rim (1px double-stroke + elevation) for contrast on white `#FFFFFF` and obsidian `#0B0B0D`, green ring `CAGradientLayer` conic `transparent 255deg → #52B788 360deg` + blurred glow twin, gated to **whisper listening slow 3.6s**, **all transcribing fast 2.4s**, **machined listening never**, **pausing never** (caret style rejected + removed 2026-09-12); light bars green in both appearances (`PillLevelGlyphView.ink` stays `#52B788`); `minStateDwellSeconds` stays `0.25` — no 0.65s hold, transcribing flips to `held`/`success` immediately on ASR return; Reduce Motion shows static 1px hairline at 48% (`#52B788` at `.48`), no rotation. Fallback law intact: `held`/`blocked` → `A` capsule.
 
 **Spec authority:** `app/docs/plans/kalam-indicator-v1/contrast-remedy.html` (interactive speeds + rim) and `app/docs/plans/kalam-indicator-v1/index.html` § B variant (shipped 2026-08-26). Tokens untouched: `kalam-onboarding-v3.2 --acc #1A5C3A / #2A9D5C` and `kalam-compass-swiftui-v1.3.8`.
 
@@ -712,431 +989,24 @@ Result: ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes: ______________________________
 
 | # | Desk | Appearance | Style | State | Must show | Result |
 |---|---|---|---|---|---|---|
-| 1 | Paper `#FAFAF7` (Notes) | Light | Whisper | Listening | Pill with **slow 3.6s ambient green arc + glow** + green 3-bar EQ + timer + universal rim visible at 1:1; no white-loss | ☐ PASS ☐ FAIL |
-| 2 | White `#FFFFFF` (TextEdit on white page) | Light | Whisper | Listening | Same pill — **rim holds, no white-on-white vanishing**; green bars stay `#52B788` | ☐ PASS ☐ FAIL |
-| 3 | White `#FFFFFF` | Light | Whisper | Transcribing (≥0.5 s burst) | Pill with **fast 2.4s arc + glow + shimmer** — shows ~75° even on a 0.5 s burst; then flips immediately to held (no dwell) | ☐ PASS ☐ FAIL |
-| 4 | Obsidian `#0B0B0D` (Xcode editor) | Dark | Whisper | Listening | Pill with **slow 3.6s arc + glow** + green EQ — **rim holds on obsidian**, no dark-on-dark vanishing | ☐ PASS ☐ FAIL |
-| 5 | Obsidian `#0B0B0D` | Dark | Machined | Listening | **Deck waveform hero, NO ring** — waveform + timer only; rim + elevation visible on deck | ☐ PASS ☐ FAIL |
-| 6 | Obsidian `#0B0B0D` | Dark | Machined | Transcribing | Deck with **fast 2.4s arc + glow + shimmer** (capsule chrome); immediately flips to held on ASR return | ☐ PASS ☐ FAIL |
-| 7 | Paper `#FAFAF7` | Light | Caret | Listening | **Chip trails caret: text → caret bar → chip** — green dot + 3 green bars + timer, **NO ring**; chip lifts via shadow on paper | ☐ PASS ☐ FAIL |
-| 8 | Paper `#FAFAF7` | Light | Caret | Transcribing | **Fallback deck with fast 2.4s arc** (chip window hidden per fallback law — chip never shows a ring; deck takes over) | ☐ PASS ☐ FAIL |
-| 9 | Any (Paper/White/Obsidian) | Light/Dark | Any | Pausing | **No ring anywhere** — whisper shows pill with floor bars + slow dot; machined shows deck at floor; caret shows dim chip; Reduce Motion still static | ☐ PASS ☐ FAIL |
-| 10 | Any | Light/Dark | Any | Held / Blocked | **Fallback A capsule with Paste / Open Settings** — never a pill or chip; buttons fire per K-36; no ring on the held capsule | ☐ PASS ☐ FAIL |
+| 1 | Paper `#FAFAF7` (Notes) | Light | Whisper | Listening | Pill with **slow 3.6s ambient green arc + glow** + green 3-bar EQ + timer + universal rim visible at 1:1; no white-loss | ✅ PASS |
+| 2 | White `#FFFFFF` (TextEdit on white page) | Light | Whisper | Listening | Same pill — **rim holds, no white-on-white vanishing**; green bars stay `#52B788` | ✅ PASS |
+| 3 | White `#FFFFFF` | Light | Whisper | Transcribing (≥0.5 s burst) | Pill with **fast 2.4s arc + glow + shimmer** — shows ~75° even on a 0.5 s burst; then flips immediately to held (no dwell) | ✅ PASS |
+| 4 | Obsidian `#0B0B0D` (Xcode editor) | Dark | Whisper | Listening | Pill with **slow 3.6s arc + glow** + green EQ — **rim holds on obsidian**, no dark-on-dark vanishing | ✅ PASS |
+| 5 | Obsidian `#0B0B0D` | Dark | Machined | Listening | **Deck waveform hero, NO ring** — waveform + timer only; rim + elevation visible on deck | ✅ PASS |
+| 6 | Obsidian `#0B0B0D` | Dark | Machined | Transcribing | Deck with **fast 2.4s arc + glow + shimmer** (capsule chrome); immediately flips to held on ASR return | ✅ PASS |
+| 7 | ~~Paper `#FAFAF7`~~ | ~~Light~~ | ~~Caret~~ | ~~Listening~~ | ~~REJECTED 2026-09-12 (style removed — see note above)~~ | ❌ REJECTED |
+| 8 | ~~Paper `#FAFAF7`~~ | ~~Light~~ | ~~Caret~~ | ~~Transcribing~~ | ~~REJECTED 2026-09-12 (style removed — see note above)~~ | ❌ REJECTED |
+| 9 | Any (Paper/White/Obsidian) | Light/Dark | Any remaining | Pausing | **No ring anywhere** — whisper shows pill with floor bars + slow dot; machined shows deck at floor; Reduce Motion still static | ✅ PASS |
+| 10 | Any | Light/Dark | Any remaining | Held / Blocked | **Fallback A capsule with Paste / Open Settings** — never a pill; buttons fire per K-36; no ring on the held capsule | ✅ PASS |
 
 **Additional gates carried from `contrast-remedy.html`:**
 
-- [ ] **Reduce Motion ON** — run rows 1 + 7 with System Settings → Accessibility → Display → Reduce motion ON: all spinning becomes the static hairline (`1px #52B788 at 48%` + breathing glow disabled), no rotation; bars remain green; rim still visible. Toggle back OFF and confirm rotation resumes at correct speeds.
-- [ ] **No-dwell proof** — in Whisper mode, dictate a single short word (ASR < 0.6 s) and observe the pill: transcribing appears with the fast arc, then flips to held/success **without a lingering ~0.65 s hold**; paste is immediate. Verify `minStateDwellSeconds` still `0.25` in code (grep `minStateDwellSeconds` in `DictationOverlayController.swift`).
-- [ ] **Universal rim proof** — with rim, place whisper listening pill on White `#FFFFFF` and on Obsidian `#0B0B0D`; Digital Color Meter at the pill edge must read a clear rim delta (the double-stroke + shadow prevents vanishing at either extreme). Toggle appearance Light ↔ Dark; rim adapts (light: black 10% inner + white 65% outer at 16% shadow; dark/machined: white 14% inner + black 18% outer at 28% shadow).
-- [ ] **Light bars proof** — Light appearance, whisper listening and caret listening both show **green `#52B788` bars/dot** (use Digital Color Meter), not black. Toggle Dark and confirm same `#52B788`.
+- [x] **Reduce Motion ON** — run rows 1 + 5 with System Settings → Accessibility → Display → Reduce motion ON: all spinning becomes the static hairline (`1px #52B788 at 48%` + breathing glow disabled), no rotation; bars remain green; rim still visible. Toggle back OFF and confirm rotation resumes at correct speeds.
+- [x] **No-dwell proof** — in Whisper mode, dictate a single short word (ASR < 0.6 s) and observe the pill: transcribing appears with the fast arc, then flips to held/success **without a lingering ~0.65 s hold**; paste is immediate. Verify `minStateDwellSeconds` still `0.25` in code (grep `minStateDwellSeconds` in `DictationOverlayController.swift`).
+- [x] **Universal rim proof** — with rim, place whisper listening pill on White `#FFFFFF` and on Obsidian `#0B0B0D`; Digital Color Meter at the pill edge must read a clear rim delta (the double-stroke + shadow prevents vanishing at either extreme). Toggle appearance Light ↔ Dark; rim adapts (light: black 10% inner + white 65% outer at 16% shadow; dark/machined: white 14% inner + black 18% outer at 28% shadow).
+- [x] **Light bars proof** — Light appearance, whisper listening shows **green `#52B788` bars/dot** (use Digital Color Meter), not black. Toggle Dark and confirm same `#52B788`.
 
-**Evidence to attach to PR / handoff (host Mac):** 10 screenshots (one per row, 1:1, desk label visible) + 2 clips (3.6s slow vs 2.4s fast at arm's length) + 1 no-dwell clip + Digital Color Meter reads for White and Obsidian rims. If a row cannot be captured, mark FAIL and note which gate blocks it — do not mark PASS on description alone.
-
----
-
-## K-52 lifecycle manual gate (round 3 re-run — no-cancel re-record + paste currency gate)
-
-Rapid re-record + Esc behavior after the DictationStateMachine wiring (plan Task 2). Run in toggle mode with stage timing ON (`Lifecycle ctx=…` lines appear per transition) and observe Console (Subsystem `singhkays.Kalam`).
-
-- [ ] 🧑 **Rapid re-record (the P0 pin) — ROUND 3 re-run:** rounds 1-2 compressed (cancel guard ate finished text → commit-before-cancel fix; B's cleanup wiped the shared hold slot → ownership-tag fix). The round-2 re-run found the deepest bug: a cancelled chunked-ASR never returns text, so deferred-preserve had nothing to fulfill → POLICY correction now in tree: re-record from `transcribing` emits ONLY `preserveTranscript(deferredUntilSettled)` (no `cancelWork`; the ASR finishes naturally, commits stale, the hold materializes), and the PASTE leg is stopped by the `recordingSessions.isCurrentSession` currency gate (`KalamApp.swift:1478`); Esc-from-transcribing still cancels+discards. Headless 334/334 green. **Re-run:** toggle mode, stage timing ON (`Lifecycle ctx=…` per transition, Console subsystem `singhkays.Kalam`), dictate sentence A, key-up, IMMEDIATELY start sentence B while the overlay still shows Transcribing. Expect `asr-done` for A, A parks to the held chip (stale A never pastes), B pastes complete; the interrupt log shows preserve-only (no `cancelWork`). PASS = A visible in chip + B pasted whole. Blanks \u2014 A chip text: _____ / B pasted: _____ / log sample: _____
-- [x] 🧑 **Esc during Transcribing** — PASS (round 1): dictate, key-up, press Esc while still Transcribing. Cancels cleanly, nothing pasted, no stale insertion. Log showed `Lifecycle ctx=esc … → cancelled(userEsc) effects=2`.
-- [x] 🧑 **Esc after text delivered** — N/A (with reason, not a pass-by-proxy): the paste leg completes faster than a human can press Esc — which is itself the desired latency outcome. The machine policy for this path is exhaustively pinned headlessly (`testEscIsLiveInEveryActiveState`).
-- [x] 🧑 **K-01 toggle regression** — PASS (round 1): three normal toggle dictations started, stopped, transcribed, and pasted as before Task 2.
-
-
-## K-53 WarmEnginePool — device-warm prepared graph (Task 1) 🧑 60 s glyph + device-change first dictation
-
-Device-warm pool holds ONE spare `AVAudioEngine` keyed by input-device UID. Idle is `construct + prepare()` ONLY (never `start()`/tap — mic glyph must not appear). Permission-gated, 250 ms trailing-debounce coalescing (composes with TAP-TO-WAKE `audioDevicesDidChange` burst, commit `be99b81`). Recalibrated gates (Task-0 data, 2026-08-27): `engineStart→firstBuffer` 91–106 ms is irreducible (mic-indicator law, K-47 already removed the inline graph-build cost) — real wins are device-CHANGE first dictation and freshness.
-
-**Pre-steps (once, ~2 min, host Mac only — VM has no mic):**
-```bash
-cd "/Volumes/My Shared Files/GitHub/Kalam"
-# docs are gitignored -- verify local flips already applied:
-grep -n "K-53" app/docs/IMPROVEMENT_PLAN.md
-# expected: | K-53 | ✅ |
-grep -n -E "^- \[x\] (Build pool|Gate prewarm|Invalidate \+ rebuild|AudioPrepareDecision|Tests \(WarmEngine)" app/docs/dev-design/2026-08-26-k52-k58-jot-adoption-plan.md
-
-# enable stage-timing so toPreparedMs / transport appear
-defaults write singhkays.Kalam internal.latency.enableStageTiming -bool true
-defaults write singhkays.Kalam internal.latency.startStageTiming -bool true
-# quit + relaunch Kalam (Xcode run or /Applications/Kalam.app)
-```
-
-**Log stream (keep this tab open for all gates below):**
-```bash
-log stream --style compact --predicate 'subsystem == "singhkays.Kalam"' --level info 2>&1 | grep --line-buffered -E "WarmEnginePool|AudioRecorder|Recording start latency"
-# WarmEnginePool categories:
-#   WarmEnginePool prewarm ok uid=...
-#   WarmEnginePool take consumed uid=... -- scheduling refill
-#   WarmEnginePool invalidated reason=...
-# AudioRecorder: Adopted warm pool graph / Audio graph already prepared
-# Recording start latency ... transport=... toPreparedMs=... engineStartToFirstBufferMs=...
-```
-
-- [ ] 🧑 **60 s mic-glyph gate (mic-indicator invariant):** Quit Kalam, relaunch, leave **idle 60 s** with the `log stream` tab running. The menu-bar mic glyph (Control Center) must stay **off** the entire window. Logs must show `WarmEnginePool prewarm ok` but **never** an idle `engine.start()` / tap-install. If you see `WarmEnginePool factory returned a RUNNING engine -- stopped (invariant violation)` mark **FAIL**.
-
-- [ ] 🧑 **Built-in device-change first dictation:** With the stream still running:
-  1. Change default input: `System Settings -> Sound -> Input` (Built-in <-> USB) or unplug/plug a USB mic.
-  2. Logs within ~250 ms: `WarmEnginePool invalidated reason=deviceChange` then one `WarmEnginePool prewarm ok` (exactly one, even though CoreAudio posts a burst -- coalescing gate).
-  3. Immediately do one dictation (hold hotkey 2 s, release). Check the `Recording start latency ... transport=builtin ...` line:
-     * `toPreparedMs <=5` (pool hit; stale inline rebuild would be 19-26, seen in baseline `toPrepared 19` vs `1-3`)
-     * overall `pttDown->firstBuffer <=185 ms` (warm p95 175 +10). `engineStart->firstBuffer` stays 91-106 (irreducible, not a failure).
-
-- [ ] 🧑 **Bluetooth (AirPods) device-change first dictation:** Connect AirPods (A2DP-idle), wait for the TAP-TO-WAKE `audioDevicesDidChange` burst (`be99b81`), then check logs show **exactly one** `prewarm ok` after the burst (250 ms coalescing). Do one dictation on AirPods; check `transport=bluetooth` line: `toPreparedMs <=5` and `pttDown->firstBuffer <=155 ms` (warm p95 144 +10). Same vanishing `engineStart->firstBuffer` 91-106 is expected.
-
-- [ ] 🧑 **Permission gate (optional, 1 min):** `System Settings -> Privacy & Security -> Microphone` -> deny Kalam, relaunch. Pool must no-op silently (no log `prewarm ok`, no prompt). Re-grant afterwards and relaunch -- one `prewarm ok` should appear again.
-
-**Post-checks (prove after the sweep):**
-```bash
-# last 5 min of Kalam info logs (host):
-log show --predicate 'subsystem == "singhkays.Kalam"' --info --last 5m 2>&1 | grep -E "WarmEnginePool|AudioRecorder|Recording start latency|toPreparedMs|transport=" | tail -n 80
-log show --predicate 'subsystem == "singhkays.Kalam" AND category == "WarmEnginePool"' --info --last 10m 2>&1 | grep -E "take consumed|invalidated|prewarm|stale"
-log show --predicate 'subsystem == "singhkays.Kalam" AND category == "WarmEnginePool"' --info --last 10m 2>&1 | grep -c "prewarm ok"
-# the last count: burst -> 1, two separate bursts -> 2, etc.
-# full suite gate (VM or host):
-xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO 2>&1 | tail -n 20
-# expected: ** TEST SUCCEEDED ** (ignore *testFailed* in test names, final line wins)
-```
-
-**Fail signals to attach (screenshot + 10-line snippet from the log stream above):** glyph appears while idle; `toPreparedMs` >5 after device-change; burst produces >1 `prewarm ok` in 250 ms; `RUNNING engine` warning.
-
-*Commit `f44d4bd` (local, not pushed) -- leave `K-53 ✅` local; do not push until release tag.*
+**Evidence to attach to PR / handoff (host Mac):** 8 screenshots (rows 1–6 + 9–10, 1:1, desk label visible; rows 7–8 struck as rejected) + 2 clips (3.6s slow vs 2.4s fast at arm's length) + 1 no-dwell clip + Digital Color Meter reads for White and Obsidian rims. If a row cannot be captured, mark FAIL and note which gate blocks it — do not mark PASS on description alone.
 
 ---
-
-## K-54 — SNR-aware post-roll carry-over (Task 3) — trailing-phoneme + logs
-
-**What this proves:** Task 3 extends the K-49 early-exit ceiling per room SNR so the trailing phoneme is not clipped when the hand anticipates the mouth. `PostRollDecision` now has a pure `ExtensionPolicy` (`.fixed` vs `.snrAware(ExtensionConstants)`) fed by a ring read-back SNR estimated from the recent waveform (4096-sample ring, `windowedEnergiesDb` p95-p05) and the segment estimate. Low SNR (<12 dB) stretches toward the 1.5 s backstop and never clips; trusted rooms (≥12 dB) stretch while the tail is speech-like (`floor+3 dB` sensitive threshold, 0.08 linear ratio mapped) and stop after quiet ≥250 ms, capped at 0.30× segment duration. The 60 ms floor + 3-poll rule stays in ALL modes. Device HAL ring shrink read-back is unchanged (see Gate B) but is now compositionally part of the same tail-latency budget.
-
-**Pre-steps (host Mac only — VM has no mic; reuse the Part 1 prep if already running):**
-```bash
-# 1. Enable stage timing + SNR-aware (default ON after Task 3, but confirm):
-defaults read singhkays.Kalam-test internal.latency.snrAwareEnabled  # → 1
-# If 0, flip it: defaults write singhkays.Kalam-test internal.latency.snrAwareEnabled -bool true
-# Retune path (no code change): any of
-#   internal.latency.snrTrustDb (default 12), internal.latency.snrAbsoluteCapMs (1500),
-#   internal.latency.snrQuietToStopMs (250), internal.latency.snrRelativeCap (0.30),
-#   internal.latency.snrFloorMarginDb (3)
-# Example: defaults write singhkays.Kalam-test internal.latency.snrTrustDb -float 10
-
-# 2. Quit + relaunch Kalam (debug build Kalam-test), grant mic, ensure Compass → Engine ready.
-# 3. Start log stream BEFORE dictating (keep tab open):
-log stream --style compact --predicate 'subsystem == "singhkays.Kalam"' --level info 2>&1 | grep --line-buffered -E "PostRoll SNR-aware|Recording timing|Latency stage label=audio-stop\+fetch|Device ring buffer"
-# Expected at launch: one WarmEnginePool prewarm ok (K-53) — ignore for this gate.
-```
-
-**Gate G1 — trusted-room trailing syllable survives (built-in mic):**
-1. Select **Built-in Microphone** as top priority in Compass → Being Heard (or System Settings → Sound → Input).
-2. Dictate 5 short sentences where the last word ends on a soft stop, e.g.:
-   - "Meeting at ten thirty."
-   - "Call me at five five five one two three four."
-   - "The version is two point five."
-   - "We need a two to three pager."
-   - "One of us should go."
-   Note the exact last word you spoke for each.
-3. After each paste, confirm the last word is present (no truncation). One clipped trailing phoneme = **FAIL**.
-
-**Gate G2 — low-SNR backstop (no clipping is the PASS):**
-1. Create a low-SNR environment: run a quiet fan / white-noise app at low volume ~1 m away, or cup your hand loosely around the mic to raise the noise floor without shouting. The log's `roomSNR=` should read **<12 dB** (see capture below) — that is the low-SNR branch.
-2. Dictate 3 longer sentences (8–12 words) holding the PTT ~0.5 s past your last word (mimics hand-early release). Example: "The quarterly report is ready for review and needs approval."
-3. Confirm every paste is complete (no truncated final word). Low SNR **must run longer** — it is REQUIRED to stretch toward 1.5 s and never clip; a short `audio-stop+fetch` that truncates here is the old bug, not a win. Check the log: `mode=snrAware-low` and `effectiveMaxMs=1500`.
-
-**Gate G3 — Bluetooth (AirPods) word-ending:**
-1. Put AirPods in, select them as top device in Compass (row should flip from OFFLINE → TAP TO WAKE → READY after the ~0.8 s HFP wake; see K-53). Confirm `transport=bluetooth` on the next `Recording timing` line.
-2. Repeat G1's 5 sentences on AirPods. Same pass criterion: last word present on every paste. HFP mics have shorter tail energy — this is the transport that most often exposed the 150 ms truncation.
-
-**Gate G4 — logs carry postRollMs + mode + roomSNR (proof of wiring):**
-```bash
-# While the stream is still running, in a second terminal:
-log show --predicate 'subsystem == "singhkays.Kalam"' --info --last 10m 2>&1 | grep -E "PostRoll SNR-aware start|Recording timing.*roomSNR|Latency stage label=audio-stop\+fetch"
-```
-Expected per dictation (2 lines):
-- `PostRoll SNR-aware start snrDb=… mode=snrAware-trusted|snrAware-low segmentEstimateMs=… minMs=60 maxMs=… effectiveMaxMs=…`
-- `Recording timing holdMs=… keyUpToSamplesMs=… … transport=… roomSNR=… postRollMode=… postRollMs=…`
-And `Latency stage label=audio-stop+fetch deltaMs=…` still appears (K-49 labeling unchanged). **FAIL if** `roomSNR` missing, `mode` missing, or `effectiveMaxMs` never exceeds the old 150 ms on a trusted dictation with a long segment (e.g., segment 2000 → effective 600).
-
-**Gate G5 — kill-switch + goldens (regression guard):**
-1. Disable SNR-aware: `defaults write singhkays.Kalam-test internal.latency.snrAwareEnabled -bool false` → quit + relaunch.
-2. Dictate one G1 sentence. Log should show `mode=fixed` (or no `PostRoll SNR-aware` line) and `roomSNR=0.0`. Paste must still be correct (fixed path unchanged).
-3. Re-enable: `defaults write singhkays.Kalam-test internal.latency.snrAwareEnabled -bool true` → relaunch. Confirm `mode=snrAware-…` returns.
-4. Headless: `xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/PostRollDecisionTests` must still report `testGoldensUnchanged_FixedConfigMatchesLegacy` PASS (proves fixed policy not regressed).
-
-**Post-checks (attach to handoff):**
-```bash
-log show --predicate 'subsystem == "singhkays.Kalam"' --info --last 15m 2>&1 | grep -E "PostRoll SNR-aware|Recording timing.*roomSNR|Device ring buffer" | tail -n 40
-xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/PostRollDecisionTests 2>&1 | tail -n 30
-# Expected: PostRoll lines with both modes observed across built-in/bluetooth; roomSNR varies (≈ 5–25 dB across environments); all PostRollDecisionTests 22/22 pass.
-```
-
-**Result:** ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes (attach 10-line log snippet + per-sentence last-word checklist):
-- Built-in G1 last words: _____
-- Low-SNR G2 mode/roomSNR: _____
-- AirPods G3 last words: _____
-- G4 log sample: _____
-- G5 kill-switch flip: _____
-
-*Commit for Task 3: local (not pushed) — leave `K-54 🔄→✅` local until G1–G5 all PASS; do not push until release tag.*
-
----
-
-## K-55 ValidationGate — auto-degrade banner + trip window (Task 4)
-
-**What this proves:** `ValidationGate` inside `KalamTextEngine` validates raw→clean divergence (length 0.18…1.65, containment ≥0.30, trigram ≥0.05; all 13 goldens accept). On `.reject` the pipeline falls back to raw and counts a trip; 3 trips in 86 400 s → auto-degrade (cleanup bypassed until relaunch or Re-enable, `Notification.Name.validationGateAutoDegraded` once, `CleanupPane` banner). Success streak 5 resets.
-
-**Pre-steps (host Mac, no mic needed for the degrade path):**
-```bash
-# Build & run Kalam-test, grant mic/AX, ensure log stream running as in Part 1 prep step 2
-# The degrade path is app-side UserDefaults, so we can drive it without dictating:
-# In a second terminal, use the headless trip helper (or run the unit test target once):
-xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/ValidationGateTripTests 2>&1 | tail -n 20
-# Expected: 7/7 pass — trip/window/streak pins.
-```
-
-**Gate H1 — triple-degrade flips banner exactly once:**
-1. With Kalam running, open Settings → Cleanup. Note the pane shows no banner.
-2. From `lldb` or a one-liner, record 3 rejects into the app's defaults (or dictate 3 divergent fixtures via the test helper):
-   ```bash
-   # Force 3 trips via defaults (timestamps now):
-   /usr/bin/python3 -c "import subprocess, json, time; import os; print('use ValidationGateTripStore directly via a small Swift snippet')"
-   # Simpler: run the app's debug helper if exposed, or trigger 3 pastes that are known divergent:
-   # Use the engine's divergent fixtures: raw 40×'word ' → 'hi' (run via a local Swift script that calls ValidationGateTripStore)
-   ```
-   Practical shortcut for manual: dictate 3× the divergent pair `raw="word "×40 → "hi"` via a test helper that calls `ValidationGateTripStore().record(.reject)` — or use the `ValidationGateTripTests` as a harness and then check the app's `UserDefaults` suite.
-   Expected: after the 3rd trip, `defaults read singhkays.Kalam-test validationGate.isDegraded` → 1, and a banner **Auto-paused — using raw transcription until relaunch** appears in Cleanup pane after you close/reopen Settings (or on next dictation the overlay shows **Cleanup auto-paused — last 3 pastes had formatting issues.** for 5 s). The banner must appear **once**; a 4th reject while already degraded must NOT post a second notification (check `log stream` shows `ValidationGate auto-degraded` once).
-
-3. Dictate a normal sentence ("hello world") — it must paste via raw (no cleanup), e.g. fillers preserved if you said "um hello world".
-4. Click **Re-enable** in the banner — `validationGate.isDegraded` → 0, banner disappears.
-5. Dictate 5 normal sentences — after the 5th accept the success streak must have reset `validationGate.trips` to empty (`defaults read … validationGate.trips` → missing or empty, and `isDegraded` stays 0).
-
-**Gate H2 — window expiry (headless pin):**
-```bash
-xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/ValidationGateTripTests/testWindowExpiryResets 2>&1 | tail -n 20
-# Must show PASS — trips older than 86 400 s are dropped, degraded clears after streak 5.
-```
-
-**Gate H3 — no double-insert (Task 5 cross-check):**
-After H1's degrade, dictate into TextEdit and into an Electron app (VS Code). Each paste must be exactly one insertion (no double). Check `log stream` shows `ValidationGate verdict=reject fallback=true` on the degraded dictations, but the paste still lands once.
-
-**Post-checks:**
-```bash
-defaults read singhkays.Kalam-test validationGate.isDegraded  # → 0 after Re-enable + streak
-log show --predicate 'subsystem == "singhkays.Kalam"' --info --last 10m 2>&1 | grep -E "ValidationGate|validationGateAutoDegraded" | tail -n 20
-xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/ValidationGateTripTests 2>&1 | tail -n 20
-# Expected: 7/7 pass
-```
-
-**Result:** ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes (attach banner screenshot + `defaults read` output + log snippet):
-- H1 triple banner once: _____
-- H1 Re-enable + streak 5: _____
-- H2 window expiry: _____
-- H3 no double-insert: _____
-
-*Commit for Task 4: local — leave `K-55 ✅` local until H1–H3 PASS.*
-
----
-
-## K-56 Tier-1 insertion hardening — read-back verify + secure/PID/frontmost (Task 5)
-
-**What this proves:** `PasteService` Tier-1 verified AX (`kAXSelectedTextAttribute` SET + 3×40 ms read-back; unchanged → fall through to `Cmd+V`, never double-post), secure-field / `IsSecureEventInputEnabled()` / `IORegistry IOConsoleUsers` probe refusal before any pasteboard exposure, `AXUIElementGetPid != dictationTargetPID` → hold (`.focusElsewhere`), `AppQuirks.forcePaste` table (empty, governance), `AccessibilityWaker.wakeIfNeeded` while speaking, frontmost re-check after ~350 ms AX window before global `postUnicodeText`/`postCmdV` (mismatch → hold), optional `internal.paste.setVerifyTimeoutOverrideMs` (0 unset, 1.2–1.5 s, global stays 0.75 s per `AXUIElement.h:387`).
-
-**Pre-steps (host Mac, needs mic + AX):**
-```bash
-# 1. Build & run Kalam-test, grant mic/AX, enable stage timing for paste logs
-defaults write singhkays.Kalam-test internal.latency.enableStageTiming -bool true
-# 2. Log stream for paste
-log stream --style compact --predicate 'subsystem == "singhkays.Kalam"' --level info 2>&1 | grep --line-buffered -E "PasteService|SecureInput|AccessibilityWaker|AppQuirks|frontmost" | tee ~/kalam-tier1.txt
-# 3. Keep TextEdit frontmost for baseline; have VS Code (Electron) and a password field ready.
-```
-
-**Gate I1 — Electron lie-success → exactly one insertion (headless pin + manual):**
-```bash
-xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/PasteServiceTier1Tests/testElectronLieFallsThroughToCmdVExactlyOnce 2>&1 | tail -n 20
-# Must pass — verifies AX lie (SET success but value unchanged) falls through to Cmd+V exactly once, no double.
-```
-Manual: dictate a long paragraph (>200 UTF-16, ~40 words) into **VS Code** (Electron, Tier-1 often lies). The paste must land once, no double (check the file has one copy, not two). `~/kalam-tier1.txt` should show `AX verification failed … fall through to global legs` then `Paste succeeded via Cmd+V` (or unicode) — never `Paste succeeded via Accessibility (verified)` followed by a second `Cmd+V` for the same dictation.
-
-**Gate I2 — Secure-field refusal before pasteboard:**
-1. Focus a password field (e.g. System Settings → Users & Groups → password, or Safari save-password prompt, or Keychain Access new item).
-2. Set clipboard sentinel: `printf 'KALAM-SECURE-TEST' | pbcopy`
-3. Dictate a short sentence while the secure field is focused.
-Expected: **no paste**, overlay shows **Secure field — transcript ready. Paste into <app>?** held chip (or similar), and `pbpaste` still prints `KALAM-SECURE-TEST` (pasteboard never exposed). Log shows `Secure field role AXSecureTextField → refusing` and no `writeAndTrackPasteboardState`. **FAIL if** transcript appears in the secure field or clipboard changes.
-
-**Gate I3 — PID mismatch → hold (requires two apps):**
-1. Focus TextEdit, start dictating, **while still holding PTT** switch to Notes (so `dictationTargetPID` = TextEdit, `frontmostPIDAtDecision` = Notes). Release.
-Expected: transcript **held** for TextEdit (chip says **PID mismatch — transcript ready. Paste into TextEdit?**), not blindly pasted into Notes. Log shows `PID mismatch elementPid=… preferPid=… → hold`. Click **Paste** in the chip — it must activate TextEdit and paste there.
-
-**Gate I4 — Frontmost changed during AX window → hold:**
-Same as I3 but the switch happens *after* the AX attempt window: dictate into TextEdit, release, and *immediately* cmd-tab to another app before the paste lands (within ~350 ms). The frontmost re-check before global legs must detect `frontmostChanged` and hold. Log shows `Frontmost changed during AX window`. **FAIL if** paste lands in the wrong app.
-
-**Gate I5 — AppQuirks empty table:**
-```bash
-xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/PasteServiceTier1Tests/testAppQuirksForcePasteSkipsTier1 2>&1 | tail -n 20
-# Must pass — empty table does not force, Tier-1 is still attempted.
-```
-
-**Gate I6 — Slow SET with override (headless):**
-```bash
-xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/PasteServiceTier1Tests/testSlowSetWithOverrideSucceedsViaAXOnly 2>&1 | tail -n 20
-# Must pass — with internal.paste.setVerifyTimeoutOverrideMs=1500, slow app succeeds via AX only (0 CmdV). Without override (default 0) the same slow app would fall through to CmdV — verify by removing the defaults key and seeing 1 CmdV.
-```
-
-**Gate I7 — No regression when flag unset (default):**
-With `defaults delete singhkays.Kalam-test internal.paste.setVerifyTimeoutOverrideMs` (or 0), dictate 3 normal sentences into TextEdit and 3 into VS Code. Each must land once, no change in latency or double-insert vs before Task 5. Log must show no `Per-element verify timeout override` line.
-
-**Post-checks:**
-```bash
-log show --predicate 'subsystem == "singhkays.Kalam"' --info --last 15m 2>&1 | grep -E "PasteService|SecureInput|AppQuirks|frontmost|Per-element" | tail -n 60
-xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/PasteServiceTier1Tests 2>&1 | tail -n 30
-# Expected: 8/8 pass
-```
-
-**Result:** ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes (attach `~/kalam-tier1.txt` snippet + per-gate checklist):
-- I1 Electron single-insert (headless + manual VS Code): _____
-- I2 Secure field hold + clipboard intact: _____
-- I3 PID mismatch hold: _____
-- I4 Frontmost-changed hold: _____
-- I5 Quirks empty: _____
-- I6 Slow override: _____
-- I7 Flag unset no regression: _____
-
-*Commit for Task 5: local — leave `K-56 ✅` local until I1–I7 PASS.*
-
----
-
-## K-57 Crash recovery — opt-in retention, streaming CAF, sweep (Task 6)
-
-**What this proves:** Toggle default OFF is byte-identical to today's ephemeral (zero writes when OFF); when ON, per-session `<ISO8601>-<uuid>/audio.caf` (streaming CAF, `mAudioDataByteCount=-1`, never rewrites header per tick) + `meta.json` (isComplete false until `endRetention(markComplete:true)`) under `~/Library/Application Support/Kalam/recordings/`; `RetentionPolicy` 6 h timer, 7 d TTL, newest-first `RecoveryScanner`; `OFF` path verified via `fs_usage`.
-
-**Pre-steps (host Mac, needs mic):**
-```bash
-# 1. Build & run Kalam-test
-# 2. Log stream for retention
-log stream --style compact --predicate 'subsystem == "singhkays.Kalam"' --level info 2>&1 | grep --line-buffered -E "Retention|RecoveryScanner|CAFStreamWriter|recordings" | tee ~/kalam-retention.txt
-# 3. Note the recordings root:
-ls -ld ~/Library/Application\ Support/Kalam/recordings 2>&1 | head -n 5
-```
-
-**Gate J1 — Toggle OFF → zero disk writes (honest zero-off):**
-1. In Settings → Engine, ensure **Keep audio for recovery (7 days)** is **OFF** (default).
-2. In a second terminal, start `fs_usage` filtered to the recordings path (leave it running):
-   ```bash
-   sudo fs_usage -w -f filesys Kalam-test 2>&1 | grep --line-buffered -i "recordings.*audio.caf\|recordings.*meta.json" | tee ~/kalam-fs-off.txt
-   # If sudo is unavailable, use the headless pin as proof:
-   xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/RetentionTests/testRetentionToggleOffDoesZeroWrites 2>&1 | tail -n 20
-   # Must pass — asserts no folder created when OFF.
-   ```
-3. Dictate 3 normal sentences. While dictating, `~/kalam-fs-off.txt` must stay **empty** (no `audio.caf`/`meta.json` writes). `ls ~/Library/Application\ Support/Kalam/recordings` must stay empty or unchanged.
-**FAIL if** any `audio.caf` appears while OFF, or the headless test fails.
-
-**Gate J2 — Toggle ON → streaming CAF per session:**
-1. Flip the toggle **ON** in Settings → Engine. Quit and relaunch Kalam-test (or toggle observer will pick it up).
-2. `sudo fs_usage` as above but now tee to `~/kalam-fs-on.txt`.
-3. Dictate one short sentence, release. Immediately:
-   ```bash
-   ls -R ~/Library/Application\ Support/Kalam/recordings 2>&1 | head -n 40
-   cat ~/Library/Application\ Support/Kalam/recordings/*/meta.json 2>&1 | head -n 40
-   ```
-   Expected: one new folder `<ISO>-<uuid>/` with `audio.caf` (size > header, `file audio.caf` shows `Apple CAF`) and `meta.json` (`isComplete` true after paste, `deviceUID` present, `sampleRate` 16000). While still holding PTT on the *next* dictation, `~/kalam-fs-on.txt` should show **incremental** `audio.caf` writes (multiple `write` lines, not one final rewrite) — proves streaming, not per-tick header rewrite.
-4. Dictate 2 more sentences — each must create a new folder (3 total). `RecoveryScanner` log should show `Retention reindex count=3` on next launch.
-
-**Gate J3 — Kill -9 mid-recording → recoverable next launch:**
-1. With toggle still ON, start a dictation and **while still holding PTT** (recording), kill the app:
-   ```bash
-   pkill -9 Kalam-test; sleep 1; ls -R ~/Library/Application\ Support/Kalam/recordings 2>&1 | tail -n 40
-   ```
-   Expected: the newest folder's `meta.json` has `isComplete` **false** and `audio.caf` exists with non-zero size (streaming header allowed a playable file even without `close`). `log show` last lines before kill should include `Retention begin folder=…`.
-2. Relaunch Kalam-test. Log should show `RecoveryScanner` `newest interrupted session=…` and (deferred) a held row or log about auto-transcribe. The folder must still be present (not swept).
-**FAIL if** `isComplete` is true after kill -9, or `audio.caf` is 0 bytes, or the folder was not created.
-
-**Gate J4 — Retention sweep (headless pin + manual TTL):**
-```bash
-xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/RetentionTests/testRetentionPolicySweepRemovesOldFolders 2>&1 | tail -n 20
-# Must pass — 8-day folder purged, 1-day kept.
-xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/RetentionTests/testRecoveryScannerNewestFirstOrdering 2>&1 | tail -n 20
-# Must pass — newest-first.
-```
-Manual TTL check (optional, not waiting 7 days): set a folder's mtime to 8 days ago (`touch -t $(date -v-8d +%Y%m%d%H%M) <folder>`), then `killall Kalam-test` and relaunch — the 6 h timer will sweep on next launch, or run `xcodebuild test … testRetentionPolicySweepRemovesOldFolders` as proof.
-
-**Gate J5 — Toggle OFF again → no new writes, old folders remain until TTL:**
-Flip toggle **OFF**, dictate once more — `~/kalam-fs-on.txt` must show **no new** `audio.caf`/`meta.json` writes (only the earlier ON folders remain). Existing `recordings/*` folders are **not** deleted immediately; they age out via the 7 d sweep. This proves OFF is byte-identical to the pre-Task-6 ephemeral path.
-
-**Post-checks:**
-```bash
-ls -R ~/Library/Application\ Support/Kalam/recordings 2>&1 | head -n 60
-log show --predicate 'subsystem == "singhkays.Kalam"' --info --last 15m 2>&1 | grep -E "Retention|RecoveryScanner|CAFStreamWriter" | tail -n 40
-xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/RetentionTests 2>&1 | tail -n 30
-# Expected: 7/7 pass
-```
-
-**Result:** ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes (attach `~/kalam-retention.txt` + `~/kalam-fs-on/off.txt` snippets + `ls -R` + per-gate checklist):
-- J1 OFF zero writes (fs_usage empty + headless): _____
-- J2 ON streaming CAF + meta per session: _____
-- J3 kill -9 interrupted folder: _____
-- J4 sweep + ordering (headless): _____
-- J5 OFF again no new writes: _____
-
-*Commit for Task 6: local — leave `K-57 ✅` local until J1–J5 PASS.*
-
----
-
-## K-58 FnUsageAdvisor — silent-trigger support trap (Task 7)
-
-**What this proves:** `Services/FnUsageAdvisor` reads `com.apple.HIToolbox AppleFnUsageType` only when present (absent → UNKNOWN → no banner), interprets via OS-version-documented table (0=Do Nothing OK, 1/2/3→advise, verified 2026-08-27 on macOS 14.6/26.5), detects `org.pqrs.Karabiner-Elements` independently, fires once per condition-change, deep-links System Settings → Keyboard, hides when resolved. Never logs transcript.
-
-**Headless pins (already green):**
-```bash
-xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/FnUsageAdvisorTests 2>&1 | tail -n 20
-# Must show 6/6 pass: absent quiet, confirmed-bad once, Karabiner decoupled
-```
-
-**Gate L1 — Absent-key stock config → no banner:**
-1. On a stock Mac (no `AppleFnUsageType` key — verify: `defaults read com.apple.HIToolbox AppleFnUsageType` → `Domain ... does not exist`), launch Kalam-test, watch `log stream --predicate 'subsystem == "singhkays.Kalam"' --info | grep FnUsageAdvisor` and the overlay. **No banner** must appear, no `FnUsageAdvisor firing advisory` log. Headless `testAbsentKeyIsQuiet` already pins this.
-
-**Gate L2 — Confirmed-bad → banner once, deep-link, then cleared:**
-1. With Kalam not running: `defaults write com.apple.HIToolbox AppleFnUsageType -int 1` (Change Input Source — confirmed-bad for this OS version; see code table). Launch Kalam-test.
-2. Expected: overlay shows **Fn key is set to Change Input Source … Check System Settings → Keyboard → Press Fn key to.** with **Open** button → click it → System Settings → Keyboard opens. Log shows `FnUsageAdvisor firing advisory` once.
-3. Without quitting, `defaults write com.apple.HIToolbox AppleFnUsageType -int 1` again and wait 30 s — **no second banner** must appear (once-per-condition).
-4. Fix: `defaults delete com.apple.HIToolbox AppleFnUsageType` (or `defaults write … -int 0` for Do Nothing), then `killall Kalam-test` and relaunch, or just trigger a re-check by switching apps. Banner must **not** reappear and the stored `fnAdvisor.lastNotifiedReason` must be cleared (check `defaults read singhkays.Kalam-test fnAdvisor.lastShouldAdvise` → 0 or missing). Dictating with `fn` as hotkey should now work if that was the blocker.
-5. Repeat with `AppleFnUsageType -int 2` (Show Emoji) to confirm the second bad value also fires once with its own reason, then clears.
-
-**Gate L3 — Karabiner-Elements decoupled:**
-1. With `AppleFnUsageType` absent (or 0), launch **Karabiner-Elements** (install from `https://karabiner-elements.pqrs.org` if not present; bundle `org.pqrs.Karabiner-Elements`).
-2. Launch or re-activate Kalam-test (or just switch apps to trigger `didLaunchApplicationNotification`).
-3. Expected: banner shows **Karabiner-Elements is intercepting the Fn key** (or combined with fn reason if both), even though `AppleFnUsageType` is absent/OK. Log shows `karabiner=true` and `reason` contains `Karabiner`. Quit Karabiner, re-activate Kalam — banner must clear and not reappear (condition resolved). Headless `testKarabinerDecoupledFromDomainRead` pins the logic.
-
-**Gate L4 — No transcript logging:**
-While `log stream --level info` is running, dictate a sentence containing a sensitive word. Verify the `FnUsageAdvisor` log lines contain only `reason`/`karabiner`/`fnState`, never the transcript text.
-
-**Post-checks:**
-```bash
-defaults read com.apple.HIToolbox AppleFnUsageType 2>&1 | head -n 5
-defaults read singhkays.Kalam-test fnAdvisor.lastNotifiedReason 2>&1 | head -n 5
-log show --predicate 'subsystem == "singhkays.Kalam"' --info --last 15m 2>&1 | grep -E "FnUsageAdvisor|fnAdvisor" | tail -n 20
-xcodebuild test -project app/Kalam.xcodeproj -scheme Kalam -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -only-testing:KalamTests/FnUsageAdvisorTests 2>&1 | tail -n 20
-# Expected: no banner on stock, banner once for 1/2/3 and for Karabiner, cleared when resolved; 6/6 tests pass
-```
-
-**Result:** ☐ PASS ☐ FAIL ☐ UNCLEAR — Notes (attach log snippet + `defaults read` outputs + banner screenshot):
-- L1 absent quiet: _____
-- L2 bad fires once + deep-link + clear: _____
-- L3 Karabiner decoupled: _____
-- L4 no transcript log: _____
-
-*Status: ✅ implemented & headless-verified 2026-08-27; manual gate L1–L4 pending host with remapped fn/Karabiner (see `KalamTests/FnUsageAdvisorTests` for pins). Commit for Task 7: local — leave `K-58 ✅` local until L1–L4 PASS.*
-
-
-
----
-
-## F popover manual checklist (Engine Tab — F Popover, 10 states)
-
-- [ ] F1 collapsed: Choose… primary, View/Copy bsec white, no popover
-- [ ] F2 folder chosen: Change/Open/Clear, same
-- [ ] F3 Install popover: Hide well tint, well #F1F0EA brew, notch right:135 centered on Hide, card height stable
-- [ ] F4 Download popover: selchip before well, v2→v3 swaps command, notch pinned
-- [ ] F5 picker open: selchipMenu (v2 ✓) + dimmed well 0.55
-- [ ] F6 verified: green ✓, ON DISK, no View
-- [ ] F6b multiple: 2 models, v2 ON green-t, v3 Use, Missing dimmed
-- [ ] F6c multiple incomplete: warn orange border + chipgrid
-- [ ] F7 incomplete popover: chipgrid inside popover, well #F1F0EA
-- [ ] F8 repo guard: orange guard, GetTheModel dimmed 0.55

@@ -60,7 +60,15 @@ Core files:
   - System audio ducking (delegates to `Services/SystemAudioDucker.swift`)
   - Dictionary engine/persistence
 - `DictationOverlayController.swift`
-  - Overlay capsule UI (`OverlayCapsuleView`/`WaveformView`), placement, waveform/timer updates
+  - Overlay **orchestration** (AppKit window ownership, placement, fades, auto-hide, AX focus hints, telemetry). Content is SwiftUI — see the `Indicator*` files below.
+- `IndicatorSurfaces.swift` / `IndicatorTokens.swift` / `IndicatorWaveformView.swift`
+  - SwiftUI indicator surfaces, design tokens, waveform view (the AppKit content layer was deleted at the SwiftUI cutover `556d70a`)
+- `IndicatorStateModel.swift` / `IndicatorStyle.swift`
+  - Pure 5-state model + fallback law; persisted style enum (`machined`/`whisper`; the at-the-caret chip was rejected and removed 2026-09-12)
+- `IndicatorWaveformMath.swift`
+  - Framework-free metering math (dBFS window, absolute floor + slow-adaptive ceiling, 3-bar glyph levels) — headless-testable
+- `IndicatorPresentationState.swift`
+  - The single state published once per transition; the indicator's only state source
 - `Services/AudioRecorder.swift`
   - AVAudioEngine capture, 16 kHz mono resample, secureZero'd audio buffers, `AudioRecorderError`
 - `Services/SilenceTrimmer.swift`
@@ -203,24 +211,24 @@ global `postUnicodeText`/`postCmdV` legs (mismatch → hold). Optional per-refer
 `internal.paste.setVerifyTimeoutOverrideMs` (0 unset, default OFF) raises only the SET+verify element
 toward 1.2–1.5 s (global stays 0.75 s; legal per `AXUIElement.h:387–397`).
 
-**Crash recovery (K-57).** Opt-in `retention.enabled` (default OFF, `UserDefaults` `retention.enabled`).
-When ON, `AudioRecorder` streams converted 16 kHz mono Float32 via `AudioCaptureExchange` retention sink
-to `Support/CAFStreamWriter` (streaming CAF, `mAudioDataByteCount=-1`, never rewrites header per tick)
-in `~/Library/Application Support/Kalam/recordings/<ISO8601>-<uuid>/audio.caf` + `meta.json`
-(`SessionMeta` isComplete false until `endRetention(markComplete:true)`). `Support/FileLayout`
-is source of truth; `Support/RetentionPolicy` sweeps every 6 h (TTL 7 days, injected clock);
-`Services/RecoveryScanner` reindexes newest-first on launch; newest interrupted auto-transcribed
-ON-DEVICE (deferred), older surfaced as recovered rows. When OFF, zero disk writes (no folder, no
-`audio.caf` — verified via `RetentionTests` and manual `fs_usage`). Toggle lives in `Settings`
-`EnginePane` ("Keep audio for recovery").
+**Crash recovery (K-57) — REMOVED 2026-10-02 (owner: no audio persistence, even
+across crashes).** Audio lives in memory only: capture buffers are `secureZero()`'d
+after use and nothing is ever written to disk. The former opt-in retention stack
+(`Support/FileLayout`, `Support/CAFStreamWriter`, `Support/RetentionPolicy`,
+`Services/RecoveryScanner`, `AudioRecorder` begin/endRetention,
+`AudioCaptureExchange` retention sink, `Settings` toggle, `RetentionTests`) is
+deleted; restore via git history if ever reconsidered. If a `recordings/`
+directory predates the removal, it is orphaned data — safe to delete manually.
 
-**Fn-key advisor (K-58).** `Services/FnUsageAdvisor` reads `com.apple.HIToolbox AppleFnUsageType`
-only when present (absent → `unknown` → no banner, verified `defaults read` exit 1 on stock;
-table 0=Do Nothing OK, 1=Change Input Source/2=Show Emoji/3=Start Dictation→advise, documented for
-macOS 14.6/26.5). `isKarabinerRunning()` checks `org.pqrs.Karabiner-Elements` bundle (independent of
-fn domain). `shouldFireNow` fires once per condition-change via `UserDefaults` `fnAdvisor.*`,
-deep-links `x-apple.systempreferences:com.apple.Keyboard-Settings.extension` via
-`SystemSettingsDestination.keyboard` and `DictationOverlayController.OverlayAction.openKeyboardSettings`.
+**Fn hotkey option + Fn-key advisor (K-58) — REMOVED 2026-10-02 (owner: Fn is an
+unreliable trigger).** The `fn` preset is gone from `KeyCombination` and
+`HotkeyPreset` (menu, capture already excluded keyCode 63, listener Fn paths
+removed); stored Fn residue (preset raw value or legacy F12-no-mod alias)
+migrates to the app default (⇧ + ⌘) at load. `Services/FnUsageAdvisor` +
+tests + launch/active/Karabiner observers + `OverlayAction.openKeyboardSettings`
++ `SystemSettingsDestination.keyboard` removed with it (the advisor only
+protected Fn users). Stale `fnAdvisor.*` defaults keys are inert. Restore via
+git history if ever reconsidered.
 
 **Fused trim stage.** `SilenceTrimmer.trimAndNormalize` performs endpointing + peak
 normalization in one output pass via vDSP (`vDSP_maxmgv` peak scan, scale + clamp),
@@ -435,8 +443,8 @@ UserDefaults keys include:
 - `internal.latency.snrRelativeCap` (`Float`, default `0.30`)
 - `internal.latency.snrFloorMarginDb` (`Float`, default `3`)
 - `internal.paste.setVerifyTimeoutOverrideMs` (`Int`, default `0` unset) — K-56 per-reference SET+verify override (1.2–1.5 s when set)
-- `retention.enabled` (`Bool`, default `false`) — K-57 opt-in; when true, per-session `recordings/<ts>-<uuid>/` + 6 h sweep / 7 d TTL
-- `validationGate.isDegraded` (`Bool`, UserDefaults) + `validationGate.trips` (`[Double]`) + `validationGate.successStreak` (`Int`) — K-55 auto-degrade state (rolling 86,400 s, threshold 3, streak reset 5); degraded disables `TextCleanupEngine` until relaunch or manual reset; `Notification.Name.validationGateAutoDegraded` posted once per episode
+- `retention.enabled` — REMOVED with K-57 (2026-10-02); no writer remains, a stale key is inert
+- `validationGate.isDegraded` / `validationGate.trips` / `validationGate.successStreak` — REMOVED with the K-55 auto-degrade cut (2026-10-02); the silent reject→raw fallback keeps no persisted state
 - `textCleanup.enabled`
 - `textCleanup.removeFillers`
 - `textCleanup.backtrack`
