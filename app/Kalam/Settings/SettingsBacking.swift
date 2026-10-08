@@ -73,9 +73,6 @@ protocol SettingsBacking: AnyObject {
     /// Free bytes on the model folder's volume, nil when unknown.
     var engineFolderFreeBytes: Int64? { get }
 
-    // Retention — Task 6 (K-57) opt-in crash recovery, default OFF
-    var retentionEnabled: Bool { get set }
-
     // Meta
     var releaseURL: URL { get }
     var onChange: AsyncStream<Void> { get }
@@ -202,7 +199,6 @@ enum HotkeyPreset: String, CaseIterable, Identifiable, Sendable {
     case none
     case rightCmd, rightOpt, rightShift, rightCtrl
     case optCmd, ctrlCmd, ctrlOpt, shiftCmd, optShift, ctrlShift
-    case fn
     /// Not a stored value — menu action that starts capture.
     case record
 
@@ -217,7 +213,7 @@ enum HotkeyPreset: String, CaseIterable, Identifiable, Sendable {
 
     var usesMonoLabel: Bool {
         switch self {
-        case .none, .record, .fn: return false
+        case .none, .record: return false
         default: return true
         }
     }
@@ -235,7 +231,6 @@ enum HotkeyPreset: String, CaseIterable, Identifiable, Sendable {
         case .shiftCmd: return "⇧ + ⌘"
         case .optShift: return "⌥ + ⇧"
         case .ctrlShift: return "⌃ + ⇧"
-        case .fn: return "Fn"
         case .record: return "Record shortcut…"
         }
     }
@@ -253,14 +248,13 @@ enum HotkeyPreset: String, CaseIterable, Identifiable, Sendable {
         case .shiftCmd: return "Shift + Command"
         case .optShift: return "Option + Shift"
         case .ctrlShift: return "Control + Shift"
-        case .fn: return "Fn"
         }
     }
 
     /// Plain-word spelling shown beside glyph-only combo rows in the preset
     /// menu (hotkey onboarding card UX seventh round): first-run users may not read modifier
     /// glyphs yet, and onboarding is where they learn them. Single-key rows
-    /// already say "Right …"; Fn/None/Record carry no glyphs.
+    /// already say "Right …"; None/Record carry no glyphs.
     var plainNameHint: String? {
         switch self {
         case .optCmd: return "Option Command"
@@ -287,7 +281,6 @@ enum HotkeyPreset: String, CaseIterable, Identifiable, Sendable {
         case .shiftCmd: return .shiftCommand
         case .optShift: return .optionShift
         case .ctrlShift: return .controlShift
-        case .fn: return .fn
         }
     }
 

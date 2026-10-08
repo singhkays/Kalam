@@ -40,7 +40,6 @@ enum KeyCombination: String, CaseIterable, Identifiable {
     case controlShift = "controlShift"
     
     // Special
-    case fn = "fn"
     case notSpecified = "notSpecified"
     
     var id: String { rawValue }
@@ -67,8 +66,6 @@ enum KeyCombination: String, CaseIterable, Identifiable {
             return [.option, .shift]
         case .controlShift:
             return [.control, .shift]
-        case .fn:
-            return [.function]
         case .notSpecified:
             return nil
         }
@@ -86,7 +83,6 @@ enum KeyCombination: String, CaseIterable, Identifiable {
         case .shiftCommand: return "⇧ + ⌘"
         case .optionShift: return "⌥ + ⇧"
         case .controlShift: return "⌃ + ⇧"
-        case .fn: return "Fn"
         case .notSpecified: return "Not specified"
         }
     }
@@ -114,17 +110,17 @@ enum KeyCombination: String, CaseIterable, Identifiable {
             return (.space, false, true, true, false)
         case .controlShift:
             return (.space, false, true, false, true)
-        case .fn:
-            return (.f12, false, false, false, false)
         case .notSpecified:
             return (.d, true, true, false, false)
         }
     }
     
-    /// Creates a KeyCombination from legacy configuration
+    /// Creates a KeyCombination from legacy configuration.
+    /// Fn alias retired 2026-10-02 (unreliable trigger): legacy F12-with-no-modifiers
+    /// (the residue `apply(.fn)` wrote) migrates to the app default.
     static func from(key: PTTHotkeyKey, command: Bool, shift: Bool, option: Bool, control: Bool) -> KeyCombination {
         if key == .f12 && !command && !shift && !option && !control {
-            return .fn
+            return .shiftCommand
         }
 
         // Check for specific combinations

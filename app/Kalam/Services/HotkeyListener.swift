@@ -24,7 +24,6 @@ final class HotkeyListener {
     private var rightShiftDown = false
     private var leftControlDown = false
     private var rightControlDown = false
-    private var functionDown = false
     var onPTTChanged: ((Bool) -> Void)?
     
     func start() {
@@ -87,9 +86,9 @@ final class HotkeyListener {
         logger.info("Hotkey registered custom \(chord.displayVerbose, privacy: .public)")
     }
 
-    /// Modifier virtual key codes: right/left cmd, opt, ctrl, shift (+ fn, preset-only in capture).
+    /// Modifier virtual key codes: right/left cmd, opt, ctrl, shift (fn removed 2026-10-02 — unreliable trigger).
     private static func isModifierKeyCode(_ keyCode: UInt16) -> Bool {
-        [54, 55, 58, 59, 60, 61, 62, 63].contains(keyCode)
+        [54, 55, 58, 59, 60, 61, 62].contains(keyCode)
     }
 
     private static func modifierFlag(for keyCode: UInt16) -> NSEvent.ModifierFlags {
@@ -98,7 +97,6 @@ final class HotkeyListener {
         case 61, 58: return .option
         case 60, 56: return .shift
         case 62, 59: return .control
-        case 63: return .function
         default: return []
         }
     }
@@ -117,7 +115,6 @@ final class HotkeyListener {
         rightShiftDown = false
         leftControlDown = false
         rightControlDown = false
-        functionDown = false
 
         localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             self?.handleFlagsChanged(event)
@@ -143,7 +140,6 @@ final class HotkeyListener {
         rightShiftDown = false
         leftControlDown = false
         rightControlDown = false
-        functionDown = false
 
         localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             self?.handleFlagsChanged(event)
@@ -177,7 +173,6 @@ final class HotkeyListener {
         rightShiftDown = false
         leftControlDown = false
         rightControlDown = false
-        functionDown = false
     }
 
     private func handleFlagsChanged(_ event: NSEvent) {
@@ -210,8 +205,6 @@ final class HotkeyListener {
             rightControlDown = resolveSideKeyState(current: rightControlDown, relevantFlag: .control, newFlags: flags)
         case 59:
             leftControlDown = resolveSideKeyState(current: leftControlDown, relevantFlag: .control, newFlags: flags)
-        case 63:
-            functionDown.toggle()
         default:
             break
         }
@@ -231,9 +224,6 @@ final class HotkeyListener {
         if !flags.contains(.control) {
             leftControlDown = false
             rightControlDown = false
-        }
-        if !flags.contains(.function) {
-            functionDown = false
         }
     }
 
@@ -269,8 +259,6 @@ final class HotkeyListener {
             return rightShiftDown && !leftShiftDown && matchesExactly([.shift])
         case .rightControl:
             return rightControlDown && !leftControlDown && matchesExactly([.control])
-        case .fn:
-            return functionDown && matchesExactly([.function])
         case .optionCommand, .controlCommand, .controlOption, .shiftCommand, .optionShift, .controlShift:
             return matchesExactly(activeModifierFlags)
         case .notSpecified:
@@ -288,7 +276,6 @@ final class HotkeyListener {
         case 56: return leftShiftDown
         case 62: return rightControlDown
         case 59: return leftControlDown
-        case 63: return functionDown
         default: return false
         }
     }

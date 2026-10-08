@@ -486,7 +486,6 @@ final class LiveSettingsBackingTests: XCTestCase {
     func testSingleKeyAndSpecialRowsNeedNoSpelledName() {
         XCTAssertNil(HotkeyPreset.none.plainNameHint)
         XCTAssertNil(HotkeyPreset.record.plainNameHint)
-        XCTAssertNil(HotkeyPreset.fn.plainNameHint)
         for side in [HotkeyPreset.rightCmd, .rightOpt, .rightShift, .rightCtrl] {
             XCTAssertNil(side.plainNameHint, "\(side) already says Right in words")
         }

@@ -99,12 +99,12 @@ struct KeyCapture: View {
 }
 
 /// Maps NSEvent → KeyChord (settings redesign: real formatter — the stub's placeholder tables are gone).
-/// Accepts: bare modifiers (right/left cmd/opt/ctrl/shift — fn is preset-only, its flagsChanged
-/// is unreliable), and key+modifier chords over the live allowlist (letters/digits/Space/F1–F12)
+/// Accepts: bare modifiers (right/left cmd/opt/ctrl/shift — fn removed 2026-10-02,
+/// unreliable trigger), and key+modifier chords over the live allowlist (letters/digits/Space/F1–F12)
 /// where a modifier is required unless the key is a function key (mirrors normalized()).
 /// Escape (53) is handled by the caller (cancel). Unstable keys return nil → reject flash.
 enum KeyChordFormatter {
-    /// Bare modifiers users may capture (fn excluded — preset-only).
+    /// Bare modifiers users may capture (fn excluded — removed 2026-10-02).
     static let capturableModifierKeyCodes: Set<UInt16> = [54, 55, 58, 59, 60, 61, 62]
 
     static func chord(from event: NSEvent) -> KeyChord? {
