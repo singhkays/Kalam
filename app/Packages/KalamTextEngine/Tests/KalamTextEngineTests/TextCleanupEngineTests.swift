@@ -118,6 +118,48 @@ import Foundation
     #expect(result.stats.listItemsFormatted == 2)
 }
 
+@Test func numberedListFormattingLeavesDecimalOnePointTwoAlone() {
+    // 2026-10-08: "How's the one point two release CI doing" became
+    // "1. Point / 2. Release CI doing" — "one" + "point" is a decimal lead
+    // for ITN ("1.2"), never a list marker.
+    let result = TextCleanupEngine().clean("How's the one point two release CI doing", configuration: config())
+    #expect(result.text == "How's the one point two release CI doing")
+    #expect(result.stats.listItemsFormatted == 0)
+}
+
+@Test func numberedListFormattingLeavesBareDecimalAlone() {
+    let result = TextCleanupEngine().clean("one point two", configuration: config())
+    #expect(result.text == "one point two")
+    #expect(result.stats.listItemsFormatted == 0)
+}
+
+@Test func numberedListFormattingLeavesVersionDecimalAlone() {
+    let result = TextCleanupEngine().clean("version one point two is out", configuration: config())
+    #expect(result.text == "version one point two is out")
+    #expect(result.stats.listItemsFormatted == 0)
+}
+
+@Test func numberedListFormattingLeavesDotDecimalAlone() {
+    let result = TextCleanupEngine().clean("one dot two", configuration: config())
+    #expect(result.text == "one dot two")
+    #expect(result.stats.listItemsFormatted == 0)
+}
+
+@Test func numberedListFormattingAllowsDemonstrativePronounItems() {
+    // 2026-10-08: "One, let's do that. Two, let's not do that. Three, fix
+    // that." never formatted — trailing "that" tripped the continuation guard
+    // even though "let's do that" is a complete imperative.
+    let result = TextCleanupEngine().clean("One, let's do that. Two, let's not do that. Three, fix that.", configuration: config())
+    #expect(result.text == "1. let's do that\n2. let's not do that\n3. fix that")
+    #expect(result.stats.listItemsFormatted == 3)
+}
+
+@Test func numberedListFormattingStillTruncatesOnDanglingConjunction() {
+    // The guard keeps working for genuinely incomplete items.
+    let result = TextCleanupEngine().clean("One, pack socks and Two, bring boots", configuration: config())
+    #expect(result.stats.listItemsFormatted == 0)
+}
+
 @Test func numberedListFormattingWithOutofSequenceNumbersAndLongPrefix() {
     let input = "From Hell to 1968 to Siri in 2011 we have come so far 1 computers now ununderstand 2 machines listen to words 3 voice controls the future in 20 thirty."
     let result = TextCleanupEngine().clean(input, configuration: config())

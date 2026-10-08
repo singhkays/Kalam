@@ -202,6 +202,16 @@ public struct TextCleanupEngine: Sendable {
         let wordsAfter = afterMarker.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
         let firstWordAfter = wordsAfter.first?.lowercased().trimmingCharacters(in: .punctuationCharacters)
 
+        // Decimal construction ("one point two" → ITN's "1.2"): "one" followed
+        // by point/dot is a decimal lead, never a list marker. Rejecting here
+        // breaks the expected-number chain (a later "two" no longer counts),
+        // so "How's the one point two release CI doing" survives for ITN
+        // instead of becoming "1. Point / 2. Release CI doing" (2026-10-08).
+        if String(text[markerRange]).lowercased() == "one",
+           let w = firstWordAfter, w == "point" || w == "dot" {
+            return true
+        }
+
         let multipliers: Set<String> = ["hundred", "thousand", "million", "billion", "trillion", "percent", "dollars", "times"]
         if let w = firstWordAfter, multipliers.contains(w) {
             return true
@@ -533,9 +543,16 @@ public struct TextCleanupEngine: Sendable {
             .filter { !$0.isEmpty }
 
         guard let lastWord = words.last else { return true }
+        // Dangling conjunctions, prepositions, articles and possessives signal
+        // a genuinely incomplete item ("pack socks and", "call your").
+        // Demonstrative pronouns (that/this/these/those) are NOT in the set:
+        // "let's do that" is a complete imperative, and excluding it missed
+        // real lists (2026-10-08) to prevent hypothetical dangling-"that"
+        // fragments. A missed list degrades to a plain readable sentence;
+        // a mangled one does not — but "that"-final items are complete.
         let continuationWords: Set<String> = [
             "and", "or", "to", "for", "with", "of", "the", "a", "an",
-            "my", "your", "our", "their", "this", "that", "these", "those", "even"
+            "my", "your", "our", "their", "even"
         ]
         return continuationWords.contains(lastWord)
     }
