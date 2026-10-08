@@ -494,19 +494,26 @@ final class DictationOverlayController {
         guard let w = window else { return }
         let screenFrame = screen.visibleFrame
         let placement = GeneralSettingsConfiguration.load().indicatorPlacement
-        let frame = frameForPlacement(placement, visibleFrame: screenFrame)
+        let frame = frameForPlacement(placement, visibleFrame: screenFrame, screenFrame: screen.frame)
         w.setFrame(frame, display: false)
         // Re-derive the WindowServer shadow from the content alpha after every frame
         // change (surface switches resize the window; stale shape = wrong halo).
         w.invalidateShadow()
     }
 
-    private func frameForPlacement(_ placement: IndicatorPlacement, visibleFrame: CGRect) -> CGRect {
+    private func frameForPlacement(_ placement: IndicatorPlacement, visibleFrame: CGRect, screenFrame: CGRect) -> CGRect {
         let ww = currentWindowSize.width
         let wh = currentWindowSize.height
+        // Center X on the PHYSICAL screen, not the visible frame (owner decision
+        // 2026-10-08): a side dock shrinks visibleFrame asymmetrically, so
+        // visible-centering sat ~half a dock width off physical center —
+        // noticeable on the narrow built-in screen, invisible on wide externals.
+        // The capsule (~300 pt) can never reach a side dock on any real Mac;
+        // the clamp below keeps it inside the visible area regardless. Y stays
+        // on visibleFrame so the bottom inset still clears a bottom dock.
+        let centeredX = screenFrame.midX - (ww * 0.5)
         let maxX = visibleFrame.maxX - ww
         let maxY = visibleFrame.maxY - wh
-        let centeredX = visibleFrame.midX - (ww * 0.5)
         let clampedCenterX = max(visibleFrame.minX, min(centeredX, maxX))
 
         let origin: CGPoint
