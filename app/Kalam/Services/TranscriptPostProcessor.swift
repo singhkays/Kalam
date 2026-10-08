@@ -49,8 +49,9 @@ struct TranscriptPostProcessor: Sendable {
         if case .reject = gateVerdict {
             gateRawFallback = true
             // Fallback to raw ASR, bypassing ITN/dictionary to preserve the user's words.
-            // Dictionary is deliberately not applied on fallback — the gate's trip will
-            // auto-degrade the next dictation to raw anyway (Task 3 wiring).
+            // Dictionary is deliberately not applied on fallback. Rejects fall
+            // back silently, every time (the K-55 auto-degrade trip store was
+            // removed 2026-10-02 — there is no degraded mode anymore).
             itnResult = (text: rawInput, changed: false, durationMs: 0, available: NemoTextProcessing.isAvailable, enabled: false, spanTokens: 0, spansMasked: 0)
             replacements = 0
             finalText = rawInput

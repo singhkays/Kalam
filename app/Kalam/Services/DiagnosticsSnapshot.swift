@@ -64,7 +64,6 @@ struct DiagnosticsSnapshotInputs: Sendable, Equatable {
     var duckEnabled: Bool
     var muteOtherAudio: Bool
     var cleanupEnabled: Bool
-    var gateDegraded: Bool
     // Dictionary (counts only)
     var dictionaryTotal: Int
     var dictionaryEnabled: Int
@@ -90,10 +89,9 @@ struct DiagnosticsSnapshotInputs: Sendable, Equatable {
     var itnEnabled: Bool
     var itnAvailable: Bool
     var itnVersion: String?
-    // Trigger + retention
+    // Trigger (no retention: audio is never persisted — K-57 removed 2026-10-02)
     var activationMode: String
     var hotkeySet: Bool
-    var retentionEnabled: Bool
     // Last dictation (numbers only, nil = not recorded this launch)
     var lastTrimmedMs: Int?
     var lastAsrMs: Int?
@@ -125,7 +123,6 @@ enum DiagnosticsSnapshot {
         out.append("duckEnabled=\(yesNo(inputs.duckEnabled))")
         out.append("muteOtherAudio=\(yesNo(inputs.muteOtherAudio))")
         out.append("cleanupEnabled=\(yesNo(inputs.cleanupEnabled))")
-        out.append("gateDegraded=\(yesNo(inputs.gateDegraded))")
         out.append("dictionaryTotal=\(inputs.dictionaryTotal)")
         out.append("dictionaryEnabled=\(inputs.dictionaryEnabled)")
         out.append("lastASRInitError=\(inputs.lastASRInitError ?? "none")")
@@ -145,7 +142,6 @@ enum DiagnosticsSnapshot {
         out.append("itnVersion=\(inputs.itnVersion ?? "unknown")")
         out.append("activationMode=\(inputs.activationMode)")
         out.append("hotkeySet=\(yesNo(inputs.hotkeySet))")
-        out.append("retentionEnabled=\(yesNo(inputs.retentionEnabled))")
         out.append("lastTrimmedMs=\(inputs.lastTrimmedMs.map(String.init) ?? "not-recorded")")
         out.append("lastAsrMs=\(inputs.lastAsrMs.map(String.init) ?? "not-recorded")")
         out.append("lastReplacements=\(inputs.lastReplacements.map(String.init) ?? "not-recorded")")

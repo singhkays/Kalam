@@ -41,11 +41,6 @@ final class AudioCaptureExchange: @unchecked Sendable {
     /// Drop counter for buffers lost to lock contention. Guarded by its own lock
     /// because the drop path is exactly the path where `lock` is unavailable.
     private let dropCounter = OSAllocatedUnfairLock(initialState: 0)
-    /// Task 6 (K-57): incremental retention sink — when retention is enabled,
-    /// the converted Float32 mono 16kHz chunk is also forwarded to the CAF writer
-    /// without blocking the render thread (try-lock, drop on contention).
-    private var retentionSink: (@Sendable ([Float]) -> Void)?
-    private let retentionSinkLock = OSAllocatedUnfairLock(initialState: (@Sendable ([Float]) -> Void)?(nil))
 
     let recentWaveformCapacity = 4096
     let targetFormat = AVAudioFormat(
@@ -63,18 +58,14 @@ final class AudioCaptureExchange: @unchecked Sendable {
     ///   `collecting == false` are skipped but return `true` (not a drop).
     @discardableResult
     func publish(_ buffer: AVAudioPCMBuffer) -> Bool {
-        guard let chunkOpt = lock.withLockIfAvailable({ state -> [Float]? in
-            guard state.collecting else { return nil }
+        guard lock.withLockIfAvailable({ state -> Bool in
+            guard state.collecting else { return true }
             state.callbackCount += 1
-            return processLocked(buffer, into: &state)
-        }) else {
+            _ = processLocked(buffer, into: &state)
+            return true
+        }) ?? false else {
             dropCounter.withLockIfAvailable { $0 += 1 }
             return false
-        }
-        // Task 6: stream to retention CAF without blocking the render thread.
-        if let chunk = chunkOpt, !chunk.isEmpty, let sink = retentionSinkLock.withLock({ $0 }) {
-            // Dispatch to utility queue to avoid stalling audio; sink handles thread-safety.
-            DispatchQueue.global(qos: .utility).async { sink(chunk) }
         }
         return true
     }
@@ -83,16 +74,6 @@ final class AudioCaptureExchange: @unchecked Sendable {
 
     func withExclusiveAccess<R: Sendable>(_ body: @Sendable (inout State) throws -> R) rethrows -> R {
         try lock.withLock(body)
-    }
-
-    // MARK: Task 6 retention sink
-
-    func setRetentionSink(_ sink: (@Sendable ([Float]) -> Void)?) {
-        retentionSinkLock.withLock { $0 = sink }
-    }
-
-    private func retentionSinkIfAvailable() -> (@Sendable ([Float]) -> Void)? {
-        retentionSinkLock.withLock { $0 }
     }
 
     func resetForNewSession() {

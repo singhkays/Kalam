@@ -525,21 +525,10 @@ final class LiveSettingsBacking: SettingsBacking {
         }
     }
 
-    // MARK: - Retention (Task 6)
-
-    var retentionEnabled: Bool {
-        get { defaults.bool(forKey: "retention.enabled") }
-        set {
-            defaults.set(newValue, forKey: "retention.enabled")
-            // No notification needed beyond ping — UI reads revision.
-            ping()
-        }
-    }
-
     // MARK: - Engine wizard (Option D Setup)
 
-    /// Step-2 tool-install attestation. Same load/save/notify pattern as
-    /// `retention.enabled`. Machine-wide on purpose: `chooseModelFolder`
+    /// Step-2 tool-install attestation. Same load/save/notify pattern as the
+    /// other Engine-wizard keys. Machine-wide on purpose: `chooseModelFolder`
     /// never touches this key, so Change-folder re-activates Step 3 directly.
     var hasConfirmedHFCLIInstall: Bool {
         get { defaults.bool(forKey: "engine.hfCLIConfirmed") }

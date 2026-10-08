@@ -39,7 +39,6 @@ final class InMemorySettingsStore: SettingsBacking {
     var grammarPass: GrammarPass = .light { didSet { ping() } }
 
     var rules: [ReplacementRule] = [] { didSet { ping() } }
-    var retentionEnabled: Bool = false { didSet { ping() } }
 
     // MARK: - Engine wizard (Option D Setup) mirrors
 

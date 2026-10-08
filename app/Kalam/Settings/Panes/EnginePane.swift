@@ -58,43 +58,6 @@ struct EnginePane: View {
             .overlay(RoundedRectangle(cornerRadius: SettingsLayout.cardRadius).stroke(Color.kHair))
             .cornerRadius(SettingsLayout.cardRadius)
             .padding(.top, 14)
-
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Text("Crash recovery")
-                        .font(SettingsType.styleCardHeaderLabel)
-                        .compassTracking(SettingsType.trackCardHeaderLabel)
-                        .textCase(.uppercase)
-                        .foregroundStyle(Color.kInk3)
-                    Spacer()
-                }
-                .padding(SettingsLayout.diveCardHeaderPad)
-                // Header casts its own shadow into its bottom padding
-                // (v1.3.8): matches the Setup / Active model / Key headers.
-                .overlay(alignment: .bottom) {
-                    HeaderWash()
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Toggle("Keep audio for recovery (7 days)", isOn: Binding(
-                        get: { model.retentionEnabled },
-                        set: { model.retentionEnabled = $0 }
-                    ))
-                    .font(SettingsFont.body(12.5))
-                    .tint(Color.kGreen)
-                    Text("When on, Kalam streams each dictation to ~/Library/Application Support/Kalam/recordings/<timestamp>-<uuid>/audio.caf + meta.json. Audio never leaves this Mac. 7-day TTL, 6h sweep. Default OFF — when off, no audio touches disk (verified via fs_usage).")
-                        .font(SettingsFont.body(11))
-                        .foregroundStyle(Color.kInk2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 8)
-                .padding(.bottom, 14)
-            }
-            .background(Color.kPanel)
-            .overlay(RoundedRectangle(cornerRadius: SettingsLayout.cardRadius).stroke(Color.kHair))
-            .cornerRadius(SettingsLayout.cardRadius)
-            .padding(.top, 14)
         }
         // No rescan-on-appear: the body above already reads live state on
         // first render (populating the backing memo), and returning later

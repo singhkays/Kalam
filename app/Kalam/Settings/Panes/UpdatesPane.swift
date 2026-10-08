@@ -194,8 +194,6 @@ private func gatherDiagnosticsInputs(model: SettingsModel) -> DiagnosticsSnapsho
         duckEnabled: defaults.bool(forKey: "duckEnabled"),
         muteOtherAudio: model.muteOtherAudio,
         cleanupEnabled: model.cleanupEnabled,
-        // Mirrors ValidationGateTripStore degradedKey (private).
-        gateDegraded: defaults.bool(forKey: "validationGate.isDegraded"),
         dictionaryTotal: entries.count,
         dictionaryEnabled: entries.filter(\.isEnabled).count,
         engineState: engineState,
@@ -218,7 +216,6 @@ private func gatherDiagnosticsInputs(model: SettingsModel) -> DiagnosticsSnapsho
         itnVersion: NemoTextProcessing.version,
         activationMode: model.activation.rawValue,
         hotkeySet: model.hotkey != nil,
-        retentionEnabled: model.retentionEnabled,
         lastTrimmedMs: nil,
         lastAsrMs: nil,
         lastReplacements: nil,

@@ -2,9 +2,6 @@ import SwiftUI
 
 struct CleanupPane: View {
     @Bindable var model: SettingsModel
-    // K-55 degraded state is app-side UserDefaults (ValidationGateTripStore), not via SettingsBacking.
-    // Poll revision to refresh when store changes (notification posts on main).
-    @State private var isDegraded: Bool = UserDefaults.standard.bool(forKey: "validationGate.isDegraded")
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -15,32 +12,9 @@ struct CleanupPane: View {
                 .foregroundStyle(Color.kGreen)
                 .accessibilityAddTraits(.isHeader)
 
-            // K-55 degraded banner
-            if isDegraded {
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Auto-paused — using raw transcription until relaunch")
-                            .font(SettingsType.styleRowTitle).compassTracking(SettingsType.trackRowTitle)
-                            .foregroundStyle(Color.kInk)
-                        Text("Last 3 pastes had formatting issues. Cleanup is bypassed to preserve your words.")
-                            .font(SettingsType.styleRowDetail)
-                            .foregroundStyle(Color.kInk2)
-                    }
-                    Spacer()
-                    Button("Re-enable") {
-                        ValidationGateTripStore().reset()
-                        isDegraded = false
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-                .padding(SettingsLayout.diveRowPad)
-                .background(Color.kPanel)
-                .overlay(RoundedRectangle(cornerRadius: SettingsLayout.cardRadius).stroke(Color.kHair))
-                .cornerRadius(SettingsLayout.cardRadius)
-                .padding(.top, 12)
-            }
-
+            // K-55 auto-degrade banner removed 2026-10-02 (owner: unrequested
+            // feature). Rejects fall back to raw silently; there is no
+            // degraded mode and no banner.
             (
                 Text("Messy in, ").font(SettingsType.styleDiveDisplay).compassTracking(SettingsType.trackDiveDisplay).foregroundStyle(Color.kInk)
                     + Text("Clean out.").font(SettingsType.styleDiveDisplayItalic).compassTracking(SettingsType.trackDiveDisplay).foregroundStyle(Color.kInk2)
@@ -140,12 +114,6 @@ struct CleanupPane: View {
             .cornerRadius(SettingsLayout.cardRadius)
             .opacity(model.cleanupEnabled ? 1 : SettingsLayout.dimOpacity)
             .padding(.top, 18)
-        }
-        .onAppear {
-            isDegraded = UserDefaults.standard.bool(forKey: "validationGate.isDegraded")
-        }
-        .onReceive(NotificationCenter.default.publisher(for: ValidationGateTripStore.didAutoDegrade)) { _ in
-            isDegraded = true
         }
     }
 
