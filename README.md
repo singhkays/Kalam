@@ -44,33 +44,19 @@ Most dictation apps hand you the raw transcript and make you clean it up yoursel
 
 ## What it actually does
 
-Every example below is real output from the cleanup engine, not a mockup.
+Every row below is real output from the cleanup engine, not a mockup.
 
-**Fillers go, real words stay.** Standalone `um` and `uh` are removed. Words that merely contain those letters are not.
+| | You say | Kalam types |
+|---|---|---|
+| **Fillers** | `um I think uh we should ship it on Friday` | `I think we should ship it on Friday` |
+| **Backtracks** | `send the invoice today scratch that send it next Monday` | `send it next Monday` |
+| **Spoken lists** | `the plan is one gather logs two isolate the bug three ship the fix` | `the plan is`<br>`1. gather logs`<br>`2. isolate the bug`<br>`3. ship the fix` |
+| **Punctuation** | `hello ,world!!this is fine` | `hello, world! this is fine` |
+| **Your dictionary** | `my iphone broke` | `my iPhone broke` |
 
-| You said | Kalam types |
-|---|---|
-| `um I think uh we should ship it on Friday` | `I think we should ship it on Friday` |
+Two details worth knowing. Fillers are removed as whole words only, so `mum` and `aluminum` survive. And a spoken list is validated before it's formatted, so a stray number won't scramble the list it was meant to be part of.
 
-**Backtracks take effect.** Say "scratch that" and the clause before it is removed.
-
-| You said | Kalam types |
-|---|---|
-| `send the invoice today scratch that send it next Monday` | `send it next Monday` |
-
-**Spoken lists get formatted.** Sequences are validated before they're formatted, so a stray number won't scramble your list.
-
-| You said | Kalam types |
-|---|---|
-| `the plan is one gather logs two isolate the bug three ship the fix` | `the plan is`<br>`1. gather logs`<br>`2. isolate the bug`<br>`3. ship the fix` |
-
-**Your dictionary knows your words.** Casing is matched to how you said it.
-
-| You said | Kalam types |
-|---|---|
-| `my iphone broke` | `my iPhone broke` |
-
-Also included: punctuation normalization, optional written-form conversion for spoken numbers and dates (on-device, off by default), and optional sentence-level grammar cleanup.
+Also available: optional written-form conversion for spoken numbers and dates (on-device, off by default), and optional sentence-level grammar cleanup.
 
 ## Works wherever you can type
 
