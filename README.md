@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/readme/hero-indicator.gif" alt="The Kalam recording indicator moving through its states: listening, pausing, transcribing, transcript ready, and microphone unavailable." width="620">
+  <img src="assets/readme/hero-indicator.png" alt="The Kalam recording indicator moving through its states: a live waveform while listening, the meter dropping while you pause, then transcribing." width="620">
 </p>
 
 <p align="center">

@@ -260,15 +260,29 @@ write_frames_script() {
   var src = document.querySelector(SEL);
   if (!src) { document.documentElement.setAttribute('data-kalam-frames', 'MISS'); return; }
 
-  // A traveling envelope: the crest sweeps left to right as the frame index
-  // advances, which reads as speech rather than as a pulsing bar chart.
+  // The app's waveform is a scrolling history buffer: the newest sample enters
+  // at the right edge and the whole trace drifts left. That needs a travelling
+  // shape, not a per-bar oscillation — an oscillation just shimmers in place
+  // because the total energy stays centred.
+//
+// u runs -1 (left edge) to +1 (right edge). Two bumps travel from +1 to -1 as
+  // the frame index advances; distance is measured on a circle so each bump
+  // wraps off the left edge and re-enters at the right, and because bump() goes
+  // to zero at the wrap point the seam is invisible and the cycle loops clean.
+  function bump(u, centre, width) {
+    var d = Math.abs(u - centre);
+    if (d > 1) d = 2 - d;
+    var t = d / width;
+    return Math.exp(-t * t * 2.4);
+  }
   function waveH(i, n, f) {
-    var u = n > 1 ? i / (n - 1) : 0.5;
-    var speech = Math.sin(Math.PI * u);
-    var phase = i * 0.52 - f * 0.85;
-    var wobble = 0.5 + 0.5 * Math.sin(phase) * Math.cos(i * 0.21 + f * 0.35);
-    if (wobble < 0.16) wobble = 0.16;
-    return (0.06 + 0.82 * speech * wobble).toFixed(3);
+    var u = (n > 1 ? i / (n - 1) : 0.5) * 2 - 1;
+    var travel = f / COUNT;
+    var c1 = 1 - travel * 2;
+    var c2 = -1 - travel * 2 + 0.9;
+    var floor = 0.05 + 0.035 * Math.sin(i * 0.9 + f * 0.6);
+    var h = floor + 0.78 * bump(u, c1, 0.42) + 0.45 * bump(u, c2, 0.30);
+    return Math.min(0.95, h).toFixed(3);
   }
 
   var stack = document.createElement('div');
@@ -361,12 +375,18 @@ CSS
 # Frames per animated state, and how long each frame is held. The hero is meant
 # to read as calm, so the frame rate is low and each state is held long enough
 # to land before it moves on.
-FRAMES=20
-FPS=8
+# The hero is an APNG, not a GIF. GitHub will not autoplay video and strips
+# <video>, so an animated image is the only option; APNG animates in an <img>
+# like a GIF but keeps 24-bit colour and alpha and compresses far better, which
+# is what makes a smooth frame rate affordable.
+#
+# Motion is deliberately slow: the frame rate is high enough to look continuous
+# while each state is held long enough to read.
+FRAMES=48
+FPS=20
 SHIMMER_PERIOD=1.2
-LISTEN_SECONDS=2.5
 PAUSE_SECONDS=1.5
-TRANSCRIBE_SECONDS=2.5
+HERO_WIDTH=720
 
 # Per-frame hold. Integer math rather than awk: BSD awk parses 1/8 in a printf
 # argument ambiguously, and the duration has to be exact for the concat demuxer.
@@ -377,8 +397,8 @@ if (( 1000 % FPS != 0 )); then
 fi
 FRAME_SEC="0.$(printf '%03d' $((1000 / FPS)))"
 
-build_hero_gif() {
-  echo "hero gif"
+build_hero_apng() {
+  echo "hero apng"
   command -v ffmpeg >/dev/null 2>&1 || {
     echo "  skip (ffmpeg not installed)" >&2
     return 0
@@ -401,17 +421,18 @@ build_hero_gif() {
   # Repeat the last frame so the loop does not cut on a missing duration.
   printf "file '%s'\n" "$(printf '%s/write-%02d.png' "$frames_dir" $((FRAMES - 1)))" >> "$list"
 
-  # 64 colours with dithering off: the desk gradient is dark and low-contrast,
-  # so banding is not visible, and skipping the dither roughly halves the file
-  # against bayer at the same palette size.
+  # -f apng is required: a .png output otherwise goes to the image2 muxer,
+  # which refuses more than one file. -plays 0 loops forever. The last input's
+  # duplicated frame gives the loop a matching first and last pose, so it does
+  # not visibly jump.
   ffmpeg -hide_banner -loglevel error -y \
     -f concat -safe 0 -i "$list" \
-    -vf "fps=$FPS,scale=720:-2:flags=lanczos,setsar=1,split[pa][pb];\
-[pa]palettegen=max_colors=64[p];\
-[pb][p]paletteuse=dither=none:diff_mode=rectangle" \
-    -loop 0 "$OUT_DIR/hero-indicator.gif"
+    -vf "fps=$FPS,scale=${HERO_WIDTH}:-2:flags=lanczos,setsar=1" \
+    -f apng -plays 0 "$OUT_DIR/hero-indicator.png"
 
-  echo "  hero-indicator.gif  $(du -h "$OUT_DIR/hero-indicator.gif" | cut -f1)  ~6s"
+  local total
+  total=$(awk "BEGIN{printf \"%.1f\", ($FRAMES * $FRAME_SEC) + $PAUSE_SECONDS + ($FRAMES * $FRAME_SEC)}")
+  echo "  hero-indicator.png  $(du -h "$OUT_DIR/hero-indicator.png" | cut -f1)  ${total}s  ${FRAMES}f/state @ ${FPS}fps"
 }
 
 # --------------------------------------------------------------------------
@@ -505,7 +526,7 @@ echo "-- capturing to $OUT_DIR --"
 capture_indicator_states
 capture_onboarding
 capture_settings
-build_hero_gif
+build_hero_apng
 
 echo "-- done --"
 ls -la "$OUT_DIR"

@@ -708,14 +708,25 @@ assets/readme/                    generated README images (see below)
 KEEP_WORK=1 ./scripts/capture-readme-visuals.sh  # keep the generated HTML variants
 ```
 
-The script finds a Chrome binary (`CHROME_BIN`, then the local Playwright cache, then a system install), isolates one element per study, screenshots it at 2x, and writes to `assets/readme/`. `ffmpeg` stitches the five indicator states into `hero-indicator.gif`; without it the stills are still produced and only the GIF is skipped.
+The script finds a Chrome binary (`CHROME_BIN`, then the local Playwright cache, then a system install), isolates one element per study, screenshots it at 2x, and writes to `assets/readme/`. `ffmpeg` assembles the hero animation; without it the stills are still produced and only the animation is skipped.
 
-Four things worth knowing before editing it:
+### The hero is an APNG, not a GIF
+
+GitHub will not autoplay video and strips `<video>` from markdown, so an
+animated image is the only option. APNG animates inside an `<img>` exactly like
+a GIF, but keeps 24-bit colour and alpha and compresses far better, which is
+what makes 20 fps affordable at the same file size as an 8 fps GIF. It is
+encoded with `-f apng -plays 0` (`-f` is required; a `.png` target otherwise
+goes to the `image2` muxer, which refuses more than one file). `num_plays=0` is
+the infinite loop.
+
+Five things worth knowing before editing it:
 
 - **Probe scripts are injected at the end of the body, not in the head.** The studies link Google Fonts, and with no network the window `load` event never fires, so a load listener would never run.
 - **Target sizes are constants, not measured.** Chrome intermittently dumps the DOM before the probe script runs, so the capture path never measures; every target's size is fixed in CSS instead. `--measure` is a diagnostic only.
 - **Chrome failures are logged, not fatal.** `run_chrome` captures stderr and reports it rather than letting `set -e` abort silently.
-- **The animated hero is built from clones.** The studies drive waveform bars from a `requestAnimationFrame` loop, which overwrites any inline value before paint. Clones made after that loop has registered its bars are never touched by it, so a clone keeps whatever `--h` it is given. CSS animations (the shimmer) are frozen instead with a negative `animation-delay` plus `animation-play-state:paused`. One browser launch produces all 20 frames as a tall strip, which ffmpeg slices.
+- **The animated hero is built from clones.** The studies drive waveform bars from a `requestAnimationFrame` loop, which overwrites any inline value before paint. Clones made after that loop has registered its bars are never touched by it, so a clone keeps whatever `--h` it is given. CSS animations (the shimmer) are frozen instead with a negative `animation-delay` plus `animation-play-state:paused`. One browser launch produces every frame as a tall strip, which ffmpeg slices.
+- **The waveform has to travel, not oscillate.** The app's meter is a scrolling history buffer: newest sample at the right edge, whole trace drifting left. Per-bar oscillation looks like a shimmer but not a scroll, because a symmetric envelope keeps the total energy centred no matter the phase. The generator places two travelling bumps that move from the right edge to the left, with distance measured on a circle so each bump wraps off the left and re-enters at the right; the bump goes to zero at the wrap point, so the loop seam is invisible.
 - **The page background is transparent.** Captured surfaces are rounded panels; without `--default-background-color=00000000` the page background shows through as square corners that read as a stray box once the image sits on a different background in the README. The frame capture hides `body`'s existing children rather than `body` itself — `visibility:hidden` on `body` does not paint reliably headless.
 
 After changing an indicator surface, update `app/docs/plans/kalam-indicator-v1/index.html`, then re-run the script. Three guards are deliberate: string copy must match `IndicatorStateModel.presentation(state:targetApp:)`; the rejected "H caret chip" variant is never captured; and the `held` and `blocked` states are excluded from the hero, because they are a confirmation and a permission warning and should not be a reader's first impression.
