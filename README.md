@@ -34,17 +34,15 @@
 
 ## Why Kalam
 
-Most dictation apps hand you the raw transcript and make you clean it up yourself. Kalam does the cleanup as part of dictation, so what lands in your app is already written.
+Most dictation apps hand you the raw transcript and make you clean it up yourself. Kalam cleans it as it transcribes, so the text that lands in your app is already written.
 
-**It edits what you actually said.** Standalone fillers go, spoken corrections take effect, and rundown lists turn into real lists.
-
-**It learns your vocabulary.** A personal dictionary rewrites the words you mispronounce or the names only you use, with smart casing, every time.
-
-**It never sends anything anywhere.** There is no network entitlement in the app bundle. Not &ldquo;we don&rsquo;t send it&rdquo; &mdash; the app is physically incapable of sending it.
+- **Editing.** `um` and `uh` come out, `scratch that` deletes the clause before it, and a spoken list arrives formatted.
+- **Vocabulary.** A personal dictionary rewrites the words you mispronounce and the names only you use.
+- **Privacy.** No network entitlement sits in the app bundle, so the app cannot open a connection.
 
 ## What it actually does
 
-Every row below is real output from the cleanup engine, not a mockup.
+Every row below is real output from the cleanup engine.
 
 | | You say | Kalam types |
 |---|---|---|
@@ -54,13 +52,13 @@ Every row below is real output from the cleanup engine, not a mockup.
 | **Punctuation** | `hello ,world!!this is fine` | `hello, world! this is fine` |
 | **Your dictionary** | `my iphone broke` | `my iPhone broke` |
 
-Two details worth knowing. Fillers are removed as whole words only, so `mum` and `aluminum` survive. And a spoken list is validated before it's formatted, so a stray number won't scramble the list it was meant to be part of.
+Fillers are removed as whole words, so `mum` and `aluminum` survive. Kalam checks a spoken list before formatting it, so a stray number won't scramble it.
 
-Also available: optional written-form conversion for spoken numbers and dates (on-device, off by default), and optional sentence-level grammar cleanup.
+Two more features are off by default and run on-device: converting spoken numbers and dates to written form, and a grammar pass.
 
 ## Works wherever you can type
 
-Kalam injects text at the system level into whatever is focused. Slack, Notion, Xcode, Terminal, email, browsers, code editors, design tools &mdash; anywhere there's a caret.
+Kalam types into whatever is focused. Slack, Notion, Xcode, Terminal, email, browsers, code editors &mdash; anywhere there's a caret.
 
 <p align="center">
   <img src="assets/readme/settings-map.png" alt="The Kalam settings window, showing its overview: microphone, trigger, cleanup, dictionary, and engine status." width="760">
@@ -71,29 +69,31 @@ Kalam injects text at the system level into whatever is focused. Slack, Notion, 
 Privacy claims are cheap. This one is checkable.
 
 - **No network entitlement.** `com.apple.security.network.client` is absent from `app/Kalam/Kalam.entitlements`. The app bundle cannot open a network connection. See [`app/docs/SECURITY.md`](app/docs/SECURITY.md).
-- **Everything runs on device.** Speech recognition uses Parakeet CoreML models on the Apple Neural Engine.
+- **Everything runs on device.** Speech recognition uses Parakeet CoreML models on your Mac.
 - **Audio is wiped after use.** Recording buffers are securely zeroed once transcription completes.
 - **Nothing is logged.** Transcript and audio content are never written to disk. Logs carry counts and timings only.
 - **No accounts, no telemetry, no analytics.**
 
-You can read the source and check all of this yourself. That's what the [MIT license](LICENSE) is for.
+The [MIT license](LICENSE) lets you check every claim above in the source.
 
 ## Install &amp; first run
 
-**1. Open it.** Kalam is an independent project and is not distributed through the Mac App Store, so Gatekeeper will stop you the first time. Right-click (or Control-click) the Kalam app, choose **Open**, then **Open** again. You only do this once.
+**1. Open it.** Kalam isn't on the Mac App Store, so Gatekeeper stops you the first time. Right-click (or Control-click) the Kalam app, choose **Open**, then **Open** again. You only do this once.
 
 **2. Follow the setup.** Kalam walks you through four steps:
 
-- **Microphone** &mdash; required for capture. Choose from your connected inputs.
-- **Accessibility** &mdash; required for Kalam to type into other apps.
-- **Hotkey** &mdash; pick your trigger.
-- **Model** &mdash; point Kalam at a folder to hold the speech model.
+| Step | What it does |
+|---|---|
+| Microphone | Required for capture. Choose from your connected inputs. |
+| Accessibility | Required for Kalam to type into other apps. |
+| Hotkey | Pick your trigger. |
+| Model | Point Kalam at a folder to hold the speech model. |
 
 <p align="center">
   <img src="assets/readme/onboarding-steps.png" alt="Kalam's model setup step, showing the three numbered steps needed to place a speech model on the Mac." width="480">
 </p>
 
-**3. Download a model.** Kalam is compiled without network access, so it can't fetch a model for you. It shows you the exact command and you paste it into Terminal yourself &mdash; the app never runs shell commands.
+**3. Download a model.** Kalam has no network access, so it can't fetch one. It shows you the command; you paste it into Terminal. The app never runs shell commands.
 
 ```bash
 # install the Hugging Face CLI once
@@ -113,8 +113,6 @@ Pick the destination folder in **Settings &rarr; Models** first, then copy the c
 
 ### Models
 
-You choose which one to install:
-
 | Model | Languages | Size | Notes |
 |---|---|---|---|
 | Parakeet TDT v2 | English | ~450 MB | Highest accuracy (2.1% WER) |
@@ -130,11 +128,11 @@ You choose which one to install:
 | **Toggle** | Press once to start, press again to stop. |
 | **Double Tap** | Tap twice quickly to start and stop. |
 
-Trigger keys include the right-hand modifiers (Right Command, Right Option, Right Shift, Right Control) and common combinations.
+The trigger can be a right-hand modifier (Right Command, Right Option, Right Shift, Right Control) or one of six combinations: Command-Option, Control-Command, Control-Option, Shift-Command, Option-Shift, Control-Shift.
 
 ## Recording indicator
 
-The indicator shows what the app is doing at every step, and it's visible in your app rather than hidden in a menu.
+The indicator sits over your app rather than hiding in a menu.
 
 | State | What you see |
 |---|---|
@@ -150,9 +148,9 @@ The indicator shows what the app is doing at every step, and it's visible in you
 
 ## Updates
 
-Kalam doesn't check for updates automatically, because that would require a network entitlement. To get the latest version, use **View Latest Release** in the menu bar item, or open the [releases page](https://github.com/singhkays/Kalam/releases/latest).
+Kalam can't check for updates, because that would need a network entitlement. For the latest version, use **View Latest Release** in the menu bar item, or open the [releases page](https://github.com/singhkays/Kalam/releases/latest).
 
-To hear about new releases without giving up that posture, watch the repository on GitHub: **Watch &rarr; Custom &rarr; Releases**.
+For release notifications, watch the repository on GitHub: **Watch &rarr; Custom &rarr; Releases**.
 
 ## FAQ
 
@@ -163,7 +161,7 @@ No. Kalam is compiled without network entitlements. Audio is processed on-device
 Yes. MIT licensed, no subscriptions, no usage limits, no premium tier. Download it, read it, fork it.
 
 **What happens when I go quiet?**
-Nothing gets cut off. While you're silent the indicator drops to a low meter to show you're still being heard, and when you stop talking the whole take is processed at once. Silence at the edges is trimmed afterwards; a pause mid-sentence never ends the recording.
+Nothing gets cut. While you're silent the indicator drops to a low meter so you know it's still listening. Kalam processes the whole take when you stop talking, trimming silence at the edges.
 
 **Why won't Kalam paste into my password field?**
 On purpose. It refuses secure text fields and any app with secure input active, so your transcript never lands on the pasteboard by accident.
@@ -194,11 +192,8 @@ Run the engine tests without Xcode:
 
 ## Contributing
 
-Issues and pull requests are welcome. If you're proposing a change to the
-dictation pipeline, please read [`AGENTS.md`](AGENTS.md) first &mdash; it
-documents the invariants that must hold (no network code, no logging of
-transcript or audio content, clipboard-restore semantics).
+Issues and pull requests are welcome. Before changing the dictation pipeline, read [`AGENTS.md`](AGENTS.md). It documents the invariants: no network code, no logging of transcript or audio content, and clipboard-restore semantics.
 
 ## License
 
-MIT &mdash; see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
