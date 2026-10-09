@@ -710,12 +710,15 @@ KEEP_WORK=1 ./scripts/capture-readme-visuals.sh  # keep the generated HTML varia
 
 The script finds a Chrome binary (`CHROME_BIN`, then the local Playwright cache, then a system install), isolates one element per study, screenshots it at 2x, and writes to `assets/readme/`. `ffmpeg` stitches the five indicator states into `hero-indicator.gif`; without it the stills are still produced and only the GIF is skipped.
 
-Two things worth knowing before editing it:
+Four things worth knowing before editing it:
 
 - **Probe scripts are injected at the end of the body, not in the head.** The studies link Google Fonts, and with no network the window `load` event never fires, so a load listener would never run.
-- **Meter envelopes are pinned with CSS `!important`.** The studies drive waveform bars from a `requestAnimationFrame` loop that overwrites any inline value before paint.
+- **Target sizes are constants, not measured.** Chrome intermittently dumps the DOM before the probe script runs, so the capture path never measures; every target's size is fixed in CSS instead. `--measure` is a diagnostic only.
+- **Chrome failures are logged, not fatal.** `run_chrome` captures stderr and reports it rather than letting `set -e` abort silently.
+- **The animated hero is built from clones.** The studies drive waveform bars from a `requestAnimationFrame` loop, which overwrites any inline value before paint. Clones made after that loop has registered its bars are never touched by it, so a clone keeps whatever `--h` it is given. CSS animations (the shimmer) are frozen instead with a negative `animation-delay` plus `animation-play-state:paused`. One browser launch produces all 20 frames as a tall strip, which ffmpeg slices.
+- **The page background is transparent.** Captured surfaces are rounded panels; without `--default-background-color=00000000` the page background shows through as square corners that read as a stray box once the image sits on a different background in the README. The frame capture hides `body`'s existing children rather than `body` itself — `visibility:hidden` on `body` does not paint reliably headless.
 
-After changing an indicator surface, update `app/docs/plans/kalam-indicator-v1/index.html`, then re-run the script. Two guards are deliberate: string copy must match `IndicatorStateModel.presentation(state:targetApp:)`, and the rejected "H caret chip" variant is never captured.
+After changing an indicator surface, update `app/docs/plans/kalam-indicator-v1/index.html`, then re-run the script. Three guards are deliberate: string copy must match `IndicatorStateModel.presentation(state:targetApp:)`; the rejected "H caret chip" variant is never captured; and the `held` and `blocked` states are excluded from the hero, because they are a confirmation and a permission warning and should not be a reader's first impression.
 
 ## Current Notes
 

@@ -5,12 +5,18 @@
 # app/docs/plans/ so the marketing images stay traceable to the approved
 # designs instead of being hand-maintained binaries.
 #
-# Method: each source mockup is copied to a temp file with an injected
-# stylesheet that hides every element except one target, pins that target to
-# the viewport origin, drops the study's own annotation labels, and freezes
-# animations. A first pass dumps the DOM to measure the target; a second pass
-# screenshots the window at that size. Both passes share the same stylesheet,
-# so a measured size always matches the captured size.
+# Two capture paths:
+#
+#   shoot         one still, isolated to a single element
+#   shoot_frames  the same element cloned N times down the page, each with a
+#                 different animation phase, captured as one tall strip and
+#                 sliced into N frames by ffmpeg. This is how the animated hero
+#                 is made: one browser launch produces the whole cycle.
+#
+# The studies drive their waveform from a requestAnimationFrame loop. Clones
+# created after that loop has registered its bars are never touched by it, so a
+# clone keeps whatever inline --h we give it. That is what makes the frames
+# controllable.
 #
 # Usage:
 #   ./scripts/capture-readme-visuals.sh            # capture everything
@@ -19,6 +25,7 @@
 # Env overrides:
 #   CHROME_BIN   path to a Chrome / chrome-headless-shell binary
 #   OUT_DIR      output directory (default: assets/readme)
+#   KEEP_WORK=1  keep the generated HTML variants for inspection
 
 set -euo pipefail
 
@@ -67,6 +74,12 @@ if ! CHROME="$(find_chrome)"; then
   exit 1
 fi
 
+# Transparent page background everywhere. The captured surfaces are rounded
+# panels; without this the page background shows through as square corners that
+# read as a stray box once the image sits on a different background in the README.
+CHROME_OPTS=(--headless --disable-gpu --hide-scrollbars --virtual-time-budget=3000
+             --default-background-color=00000000)
+
 # --------------------------------------------------------------------------
 # Variant construction
 # --------------------------------------------------------------------------
@@ -92,18 +105,18 @@ build_variant() {
   ' "$src" > "$dest"
 }
 
-# write_css <file> <sel> <bg> <phase> <extra>
+# write_css <file> <sel> <phase> <extra>
 # phase is an optional negative CSS animation-delay in seconds, used to freeze
 # a looping visual at a chosen phase so captures are reproducible.
-# extra is caller CSS, e.g. forcing every captured surface onto one appearance.
+# extra is caller CSS, e.g. forcing a surface onto one appearance.
 write_css() {
-  local out="$1" sel="$2" bg="$3" phase="$4" extra="$5"
+  local out="$1" sel="$2" phase="$3" extra="$4"
   local phase_rule=""
   [[ -n "$phase" ]] && \
     phase_rule="*,*::before,*::after{animation-delay:${phase}s!important;animation-play-state:paused!important}"
   cat > "$out" <<CSS
 <style id="kalam-readme-capture">
-  html,body{margin:0!important;padding:0!important;overflow:hidden!important;background:${bg}!important}
+  html,body{margin:0!important;padding:0!important;overflow:hidden!important;background:transparent!important}
   body *{visibility:hidden!important}
   ${sel},${sel} *{visibility:visible!important}
   ${sel}{position:fixed!important;left:0!important;top:0!important;z-index:2147483647!important;
@@ -116,46 +129,10 @@ write_css() {
 CSS
 }
 
-# measure <source-html> <sel> <bg> <phase> <extra>
-# Prints WxH for the target element, MISS if the selector does not resolve.
-measure() {
-  local src="$1" sel="$2" bg="$3" phase="$4" extra="$5"
-  local variant="$WORK_DIR/measure.html"
-  local css="$WORK_DIR/measure.css"
-  local probe="$WORK_DIR/measure-probe.html"
-  write_css "$css" "$sel" "$bg" "$phase" "$extra"
-  cat > "$probe" <<HTML
-<script>
-(function () {
-  var el = document.querySelector('${sel}');
-  if (!el) {
-    document.documentElement.setAttribute('data-kalam-measure', 'MISS');
-    return;
-  }
-  var r = el.getBoundingClientRect();
-  document.documentElement.setAttribute('data-kalam-measure',
-    Math.ceil(r.width) + 'x' + Math.ceil(r.height));
-})();
-</script>
-HTML
-  build_variant "$src" "$css" "$WORK_DIR/measure-styled.html" head
-  build_variant "$WORK_DIR/measure-styled.html" "$probe" "$variant" body
-  "$CHROME" --headless --disable-gpu --hide-scrollbars --virtual-time-budget=3000 \
-    --window-size=1600,1200 --dump-dom "file://$variant" 2>/dev/null \
-    | grep -o 'data-kalam-measure="[^"]*"' \
-    | head -1 \
-    | sed 's/data-kalam-measure="//; s/"$//'
-}
-
 # write_meter_pose <file> <sel>
-# The studies drive the waveform and level meters from a requestAnimationFrame
-# loop, so any inline style set before paint gets overwritten on the next tick.
-# A stylesheet declaration marked !important outranks an inline custom property,
-# so the meter envelope is pinned with CSS instead.
-#
-# The shape is deterministic: a raised-cosine speech envelope over the bar
-# array, modulated by a fixed two-frequency wobble, so repeated captures of the
-# same state are byte-identical.
+# Pins a static speech envelope onto the waveform bars for still captures.
+# A stylesheet declaration marked !important outranks the inline custom property
+# the study's animation loop writes, so this survives the loop.
 write_meter_pose() {
   local out="$1" sel="$2" i h e
   {
@@ -182,88 +159,224 @@ write_meter_pose() {
   } > "$out"
 }
 
-# shoot <source-html> <sel> <outfile> <bg> <phase> <extra>
-shoot() {
-  local src="$1" sel="$2" out="$3" bg="$4" phase="$5" extra="$6"
-  local dims
-  dims="$(measure "$src" "$sel" "$bg" "$phase" "$extra")"
-  if [[ -z "$dims" || "$dims" == "MISS" ]]; then
-    echo "  skip $(basename "$out") (selector missed: $sel)" >&2
-    return 1
-  fi
+# measure <source-html> <sel> <phase> <extra>
+# Diagnostic only. Chrome intermittently dumps the DOM before the inline probe
+# runs, so the capture path never depends on this: every target below has a
+# size that is fixed in CSS, either by the study itself or by the extra rules
+# we inject. Kept so --measure can confirm a study still lays out as expected.
+measure() {
+  local src="$1" sel="$2" phase="$3" extra="$4"
+  local variant="$WORK_DIR/measure.html"
+  local css="$WORK_DIR/measure.css"
+  local probe="$WORK_DIR/measure-probe.html"
+  write_css "$css" "$sel" "$phase" "$extra"
+  cat > "$probe" <<HTML
+<script>
+(function () {
+  var el = document.querySelector('${sel}');
+  if (!el) {
+    document.documentElement.setAttribute('data-kalam-measure', 'MISS');
+    return;
+  }
+  var r = el.getBoundingClientRect();
+  document.documentElement.setAttribute('data-kalam-measure',
+    Math.ceil(r.width) + 'x' + Math.ceil(r.height));
+})();
+</script>
+HTML
+  build_variant "$src" "$css" "$WORK_DIR/measure-styled.html" head
+  build_variant "$WORK_DIR/measure-styled.html" "$probe" "$variant" body
 
+  local dump="" attempt
+  for attempt in 1 2 3 4; do
+    dump=$("${CHROME_OPTS[@]}" --window-size=1600,1200 --dump-dom "file://$variant" 2>/dev/null \
+      | grep -o 'data-kalam-measure="[^"]*"' \
+      | head -1 \
+      | sed 's/data-kalam-measure="//; s/"$//' || true)
+    [[ -n "$dump" ]] && break
+    sleep 0.3
+  done
+  printf '%s' "$dump"
+}
+
+# run_chrome <log-label> <args...>
+# Runs Chrome, never aborts the script on a non-zero exit, and echoes the
+# captured stderr when the run fails. Chrome is flaky enough under headless
+# that a single failure should be reported, not silently fatal.
+run_chrome() {
+  local label="$1"; shift
+  local log="$WORK_DIR/$label.chrome.log"
+  if "$CHROME" "$@" >"$log" 2>&1; then
+    return 0
+  fi
+  echo "  chrome failed for $label:" >&2
+  sed 's/^/    /' "$log" >&2
+  return 1
+}
+
+# shoot <source-html> <sel> <outfile> <w> <h> <phase> <extra>
+shoot() {
+  local src="$1" sel="$2" out="$3" w="$4" h="$5" phase="$6" extra="$7"
   local inject="$WORK_DIR/$(basename "$out").inject"
   local pose="$WORK_DIR/$(basename "$out").pose"
   local variant="$WORK_DIR/$(basename "$out").html"
-  write_css "$inject" "$sel" "$bg" "$phase" "$extra"
+  write_css "$inject" "$sel" "$phase" "$extra"
   write_meter_pose "$pose" "$sel"
   cat "$inject" "$pose" > "$WORK_DIR/$(basename "$out").combined"
   build_variant "$src" "$WORK_DIR/$(basename "$out").combined" "$variant" head
 
-  local w="${dims%x*}" h="${dims#*x}"
-  "$CHROME" --headless --disable-gpu --hide-scrollbars --virtual-time-budget=3000 \
-    --force-device-scale-factor=2 --window-size="$w,$h" \
-    --screenshot="$out" "file://$variant" >/dev/null 2>&1
+  run_chrome "$(basename "$out")" \
+    --headless --disable-gpu --hide-scrollbars --virtual-time-budget=3000 \
+    --default-background-color=00000000 --force-device-scale-factor=2 \
+    --window-size="$w,$h" --screenshot="$out" "file://$variant"
 
+  if [[ ! -s "$out" ]]; then
+    echo "  skip $(basename "$out") (screenshot produced nothing)" >&2
+    return 1
+  fi
   echo "  $(basename "$out")  ${w}x${h}"
 }
 
 # --------------------------------------------------------------------------
-# Targets
+# Animated frame strip
 # --------------------------------------------------------------------------
 
-# Hero frames are forced onto one dark desktop at one fixed size, so the
-# crossfade neither strobes between light and dark appearances nor jumps when
-# the states differ in natural width. The isolation stylesheet pins the target
-# with position:fixed, which takes it out of flow, so the size must be set
-# explicitly rather than through flex-basis.
-DARK='.desk{width:520px!important;height:168px!important;min-height:168px!important;flex:none!important;background:radial-gradient(120% 85% at 50% 0%, rgba(130,130,140,0.12) 0%, rgba(0,0,0,0) 55%), linear-gradient(170deg, #242427 0%, #141417 55%, #0B0B0D 100%)!important}'
-
-# nth-of-type counts div siblings only, and each section's first div is
-# .sec-head, so the three .row blocks in #style-a are divs 2, 3 and 4. Within a
-# row, .desk-light and .desk-dark are divs 1 and 2.
+# write_frames_script <file> <sel> <count> <w> <h> <shimmer-period>
 #
-# String copy is pinned to app/Kalam/IndicatorStateModel.swift. The rejected
-# "H caret chip" variant is deliberately absent: it was removed on 2026-09-12
-# (see AGENTS.md), so it must not appear in the README.
-capture_indicator_states() {
-  echo "indicator states (machined A / whisper E)"
-  shoot "$INDICATOR_SRC" '#style-a .row:nth-of-type(2) .desk:nth-of-type(1)' \
-    "$OUT_DIR/state-listening.png" '#141417' '-0.9' "$DARK"
-  shoot "$INDICATOR_SRC" '#style-a .row:nth-of-type(2) .desk:nth-of-type(2)' \
-    "$OUT_DIR/state-pausing.png" '#141417' '-1.6' "$DARK"
-  shoot "$INDICATOR_SRC" '#style-a .row:nth-of-type(3) .desk:nth-of-type(1)' \
-    "$OUT_DIR/state-transcribing.png" '#141417' '' "$DARK"
-  shoot "$INDICATOR_SRC" '#style-a .row:nth-of-type(3) .desk:nth-of-type(2)' \
-    "$OUT_DIR/state-held.png" '#141417' '' "$DARK"
-  shoot "$INDICATOR_SRC" '#style-a .row:nth-of-type(4) .desk:nth-of-type(1)' \
-    "$OUT_DIR/state-blocked.png" '#141417' '' "$DARK"
-  # whisper pill, the compact alternative
-  shoot "$INDICATOR_SRC" '#style-e .row:nth-of-type(2) .desk:nth-of-type(1)' \
-    "$OUT_DIR/state-whisper.png" '#141417' '-1.1' ''
+# Builds a vertical strip of `count` clones of the target, each frozen at a
+# different point in its animation, so one screenshot yields the whole cycle.
+#
+# The waveform is driven by the study's requestAnimationFrame loop, which only
+# touches the bars it registered at init. These clones are made afterwards and
+# are never registered, so setting --h inline sticks. CSS animations (the
+# shimmer) are frozen instead with a negative animation-delay plus
+# animation-play-state:paused, which is exact rather than sampled.
+write_frames_script() {
+  local out="$1" sel="$2" count="$3" w="$4" h="$5" period="$6"
+  cat > "$out" <<HTML
+<script>
+(function () {
+  var SEL = '${sel}', COUNT = ${count}, W = ${w}, H = ${h}, PERIOD = ${period};
+  var src = document.querySelector(SEL);
+  if (!src) { document.documentElement.setAttribute('data-kalam-frames', 'MISS'); return; }
+
+  // A traveling envelope: the crest sweeps left to right as the frame index
+  // advances, which reads as speech rather than as a pulsing bar chart.
+  function waveH(i, n, f) {
+    var u = n > 1 ? i / (n - 1) : 0.5;
+    var speech = Math.sin(Math.PI * u);
+    var phase = i * 0.52 - f * 0.85;
+    var wobble = 0.5 + 0.5 * Math.sin(phase) * Math.cos(i * 0.21 + f * 0.35);
+    if (wobble < 0.16) wobble = 0.16;
+    return (0.06 + 0.82 * speech * wobble).toFixed(3);
+  }
+
+  var stack = document.createElement('div');
+  stack.id = 'kalam-frame-stack';
+  stack.style.cssText = 'position:relative;margin:0;padding:0;width:' + W + 'px';
+
+  for (var f = 0; f < COUNT; f++) {
+    var clone = src.cloneNode(true);
+    clone.style.cssText += ';position:absolute;left:0;top:0;margin:0;transform:none';
+
+    var bars = clone.querySelectorAll('.wave .bar');
+    for (var b = 0; b < bars.length; b++) {
+      bars[b].style.setProperty('--h', waveH(b, bars.length, f));
+    }
+    var eq = clone.querySelectorAll('.eq b');
+    for (var q = 0; q < eq.length; q++) {
+      eq[q].style.setProperty('--e', (0.2 + 0.8 * Math.abs(Math.sin(f * 0.4 + q * 0.8))).toFixed(3));
+    }
+
+    var t = -(f / COUNT) * PERIOD;
+    var anim = clone.querySelectorAll('.shimmer b, .dot, .b');
+    for (var a = 0; a < anim.length; a++) {
+      anim[a].style.animationDelay = t.toFixed(3) + 's';
+      anim[a].style.animationPlayState = 'paused';
+    }
+
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'width:' + W + 'px;height:' + H + 'px;overflow:hidden;position:relative';
+    wrap.appendChild(clone);
+    stack.appendChild(wrap);
+  }
+  stack.style.height = (H * COUNT) + 'px';
+  document.body.appendChild(stack);
+  document.documentElement.setAttribute('data-kalam-frames', 'OK');
+})();
+</script>
+HTML
 }
 
-capture_onboarding() {
-  echo "onboarding deck"
-  # figure 6 is the model-folder step, which shows the numbered wizard list
-  shoot "$ONBOARDING_SRC" 'figure.shot:nth-of-type(6) .frame > .scaler > div[data-w]' \
-    "$OUT_DIR/onboarding-steps.png" '#F7F5EF' '' ''
+# shoot_frames <source-html> <sel> <outdir> <base> <count> <w> <h> <period> <extra>
+# Captures `count` frames at 2x into <outdir>/<base>-NN.png
+shoot_frames() {
+  local src="$1" sel="$2" outdir="$3" base="$4" count="$5" w="$6" h="$7" period="$8" extra="$9"
+  local css="$WORK_DIR/$base.css"
+  local script="$WORK_DIR/$base.frames.js"
+  local variant="$WORK_DIR/$base.frames.html"
+
+  # The strip replaces the page: everything already in the body is removed from
+  # layout and the stack, appended by the script, is left to render. Hiding
+  # siblings rather than body itself matters: visibility on body does not paint
+  # reliably in headless.
+  cat > "$css" <<CSS
+<style id="kalam-frames-capture">
+  html,body{margin:0!important;padding:0!important;overflow:hidden!important;background:transparent!important}
+  body > *:not(#kalam-frame-stack){display:none!important}
+  .desk-label,.cap,figcaption,.note{display:none!important}
+  ${extra}
+</style>
+CSS
+  write_frames_script "$script" "$sel" "$count" "$w" "$h" "$period"
+  build_variant "$src" "$css" "$WORK_DIR/$base.styled.html" head
+  build_variant "$WORK_DIR/$base.styled.html" "$script" "$variant" body
+
+  mkdir -p "$outdir"
+  local strip="$WORK_DIR/$base-strip.png"
+  run_chrome "$base-strip" \
+    --headless --disable-gpu --hide-scrollbars --virtual-time-budget=3000 \
+    --default-background-color=00000000 --force-device-scale-factor=2 \
+    --window-size="$w,$((h * count))" --screenshot="$strip" "file://$variant"
+
+  if [[ ! -s "$strip" ]]; then
+    echo "  skip $base (strip capture produced nothing)" >&2
+    return 1
+  fi
+
+  # The strip is 2x, so each frame is twice the CSS height.
+  local i
+  for i in $(seq 0 $((count - 1))); do
+    ffmpeg -hide_banner -loglevel error -y -i "$strip" \
+      -vf "crop=iw:$((h * 2)):0:$((i * h * 2))" \
+      "$(printf '%s/%s-%02d.png' "$outdir" "$base" "$i")"
+  done
+  echo "  $base  ${count} frames  ${w}x${h}"
 }
 
-capture_settings() {
-  echo "settings map"
-  # The study pins .cw to 980x660 but the map body only fills the top ~880px,
-  # so the height is released to avoid a large empty band in the README.
-  shoot "$SETTINGS_SRC" 'figure.shot:nth-of-type(1) .cw' \
-    "$OUT_DIR/settings-map.png" '#1A1A18' '' '.cw{height:auto!important;min-height:0!important}'
-}
+# --------------------------------------------------------------------------
+# Hero assembly
+# --------------------------------------------------------------------------
 
-# build_hero_gif
-# The five machined states in sequence, each held for $HOLD seconds, with the
-# final frame repeated so the loop closes cleanly. Hard cuts are used rather
-# than xfade: crossfading two indicator surfaces reads as a smear, and xfade
-# over looping image inputs emits non-monotonic timestamps that truncate the
-# output.
+# Frames per animated state, and how long each frame is held. The hero is meant
+# to read as calm, so the frame rate is low and each state is held long enough
+# to land before it moves on.
+FRAMES=20
+FPS=8
+SHIMMER_PERIOD=1.2
+LISTEN_SECONDS=2.5
+PAUSE_SECONDS=1.5
+TRANSCRIBE_SECONDS=2.5
+
+# Per-frame hold. Integer math rather than awk: BSD awk parses 1/8 in a printf
+# argument ambiguously, and the duration has to be exact for the concat demuxer.
+# Requires FPS to divide 1000.
+if (( 1000 % FPS != 0 )); then
+  echo "error: FPS must divide 1000 (got $FPS)" >&2
+  exit 1
+fi
+FRAME_SEC="0.$(printf '%03d' $((1000 / FPS)))"
+
 build_hero_gif() {
   echo "hero gif"
   command -v ffmpeg >/dev/null 2>&1 || {
@@ -271,31 +384,102 @@ build_hero_gif() {
     return 0
   }
 
-  local states=(state-listening state-pausing state-transcribing state-held state-blocked)
-  local f
-  for f in "${states[@]}"; do
-    if [[ ! -f "$OUT_DIR/$f.png" ]]; then
-      echo "  skip (missing $f.png)" >&2
-      return 0
-    fi
-  done
-
-  local hold=0.9
+  local frames_dir="$WORK_DIR/frames"
   local list="$WORK_DIR/hero-concat.txt"
   : > "$list"
-  for f in "${states[@]}"; do
-    printf "file '%s'\nduration %s\n" "$OUT_DIR/$f.png" "$hold" >> "$list"
-  done
-  printf "file '%s'\n" "$OUT_DIR/state-blocked.png" >> "$list"
 
+  local f
+  for f in $(seq 0 $((FRAMES - 1))); do
+    printf "file '%s'\nduration %s\n" \
+      "$(printf '%s/listen-%02d.png' "$frames_dir" "$f")" "$FRAME_SEC" >> "$list"
+  done
+  printf "file '%s'\nduration %s\n" "$WORK_DIR/state-pausing.png" "$PAUSE_SECONDS" >> "$list"
+  for f in $(seq 0 $((FRAMES - 1))); do
+    printf "file '%s'\nduration %s\n" \
+      "$(printf '%s/write-%02d.png' "$frames_dir" "$f")" "$FRAME_SEC" >> "$list"
+  done
+  # Repeat the last frame so the loop does not cut on a missing duration.
+  printf "file '%s'\n" "$(printf '%s/write-%02d.png' "$frames_dir" $((FRAMES - 1)))" >> "$list"
+
+  # 64 colours with dithering off: the desk gradient is dark and low-contrast,
+  # so banding is not visible, and skipping the dither roughly halves the file
+  # against bayer at the same palette size.
   ffmpeg -hide_banner -loglevel error -y \
     -f concat -safe 0 -i "$list" \
-    -vf "fps=12,scale=720:-2:flags=lanczos,setsar=1,split[pa][pb];\
-[pa]palettegen=max_colors=128:stats_mode=diff[pal];\
-[pb][pal]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" \
+    -vf "fps=$FPS,scale=720:-2:flags=lanczos,setsar=1,split[pa][pb];\
+[pa]palettegen=max_colors=64[p];\
+[pb][p]paletteuse=dither=none:diff_mode=rectangle" \
     -loop 0 "$OUT_DIR/hero-indicator.gif"
 
-  echo "  hero-indicator.gif  $(du -h "$OUT_DIR/hero-indicator.gif" | cut -f1)"
+  echo "  hero-indicator.gif  $(du -h "$OUT_DIR/hero-indicator.gif" | cut -f1)  ~6s"
+}
+
+# --------------------------------------------------------------------------
+# Targets
+# --------------------------------------------------------------------------
+
+# nth-of-type counts div siblings only, and each section's first div is
+# .sec-head, so the three .row blocks in #style-a are divs 2, 3 and 4. Within a
+# row, .desk-light and .desk-dark are divs 1 and 2.
+#
+# String copy is pinned to app/Kalam/IndicatorStateModel.swift. The rejected
+# "H caret chip" variant is deliberately absent: it was removed on 2026-09-12
+# (see AGENTS.md), so it must not appear in the README. Neither are the held or
+# blocked states: they are error and confirmation surfaces, and a reader's first
+# impression of the app should not be a permission warning.
+#
+# Sizes are fixed in CSS rather than measured. The isolation stylesheet pins the
+# target with position:fixed, which takes it out of flow, so the desk size is
+# set explicitly. Every hero frame shares one size so the cut between states
+# does not jump.
+DESK_W=520
+DESK_H=168
+DARK=".desk{width:${DESK_W}px!important;height:${DESK_H}px!important;min-height:${DESK_H}px!important;flex:none!important;background:radial-gradient(120% 85% at 50% 0%, rgba(130,130,140,0.12) 0%, rgba(0,0,0,0) 55%), linear-gradient(170deg, #242427 0%, #141417 55%, #0B0B0D 100%)!important}"
+
+SEL_LISTEN='#style-a .row:nth-of-type(2) .desk:nth-of-type(1)'
+SEL_PAUSE='#style-a .row:nth-of-type(2) .desk:nth-of-type(2)'
+SEL_WRITE='#style-a .row:nth-of-type(3) .desk:nth-of-type(1)'
+SEL_WHISPER='#style-e .row:nth-of-type(2) .desk:nth-of-type(1)'
+SEL_ONBOARD='figure.shot:nth-of-type(6) .frame > .scaler > div[data-w]'
+SEL_SETTINGS='figure.shot:nth-of-type(1) .cw'
+
+capture_indicator_states() {
+  echo "indicator states"
+
+  # Animated: listening, the waveform sweep. One browser launch, all frames.
+  shoot_frames "$INDICATOR_SRC" "$SEL_LISTEN" \
+    "$WORK_DIR/frames" listen "$FRAMES" "$DESK_W" "$DESK_H" "$SHIMMER_PERIOD" "$DARK"
+
+  # Animated: transcribing, the shimmer.
+  shoot_frames "$INDICATOR_SRC" "$SEL_WRITE" \
+    "$WORK_DIR/frames" write "$FRAMES" "$DESK_W" "$DESK_H" "$SHIMMER_PERIOD" "$DARK"
+
+  # Static holds: pausing (goes into the GIF, not into the README, so it is
+  # written to the work dir), and the whisper pill as a standalone still.
+  shoot "$INDICATOR_SRC" "$SEL_PAUSE" \
+    "$WORK_DIR/state-pausing.png" "$DESK_W" "$DESK_H" '-1.6' "$DARK"
+  shoot "$INDICATOR_SRC" "$SEL_WHISPER" \
+    "$OUT_DIR/state-whisper.png" 320 "$DESK_H" '-1.1' \
+    ".desk{width:320px!important;height:${DESK_H}px!important;min-height:${DESK_H}px!important;flex:none!important}"
+}
+
+capture_onboarding() {
+  echo "onboarding deck"
+  # figure 6 is the model-folder step, which shows the numbered wizard list.
+  # The card is width:700px;height:600px inline in the study.
+  shoot "$ONBOARDING_SRC" "$SEL_ONBOARD" \
+    "$OUT_DIR/onboarding-steps.png" 700 600 '' ''
+}
+
+capture_settings() {
+  echo "settings map"
+  # .cw is width:980px;height:660px in the study, but the map grid ends around
+  # 470px and the Updates footer below it never paints under headless (a nested
+  # overflow-y:auto inside .cw's overflow:hidden). Capturing the full 660 leaves
+  # a large empty band; capturing at content height keeps the rounded frame
+  # intact and drops the dead space.
+  shoot "$SETTINGS_SRC" "$SEL_SETTINGS" \
+    "$OUT_DIR/settings-map.png" 980 486 '' '.cw{height:486px!important}'
 }
 
 # --------------------------------------------------------------------------
@@ -306,23 +490,17 @@ MEASURE_ONLY=0
 mkdir -p "$OUT_DIR"
 
 if [[ $MEASURE_ONLY -eq 1 ]]; then
-  echo "-- measuring targets --"
-  while IFS='|' read -r sel src; do
-    [[ -z "$sel" ]] && continue
-    printf '%-58s %s\n' "$sel" "$(measure "$src" "$sel" '#141417' '' "$DARK")"
-  done <<TARGETS
-#style-a .row:nth-of-type(2) .desk:nth-of-type(1)|$INDICATOR_SRC
-#style-a .row:nth-of-type(2) .desk:nth-of-type(2)|$INDICATOR_SRC
-#style-a .row:nth-of-type(3) .desk:nth-of-type(1)|$INDICATOR_SRC
-#style-a .row:nth-of-type(3) .desk:nth-of-type(2)|$INDICATOR_SRC
-#style-a .row:nth-of-type(4) .desk:nth-of-type(1)|$INDICATOR_SRC
-#style-e .row:nth-of-type(2) .desk:nth-of-type(1)|$INDICATOR_SRC
-figure.shot:nth-of-type(6) .frame > .scaler > div[data-w]|$ONBOARDING_SRC
-figure.shot:nth-of-type(1) .cw|$SETTINGS_SRC
-TARGETS
+  echo "-- measured (expected in parens) --"
+  printf '%-52s %-10s %s\n' "listening"  "$(measure "$INDICATOR_SRC" "$SEL_LISTEN" '' "$DARK")"  "(${DESK_W}x${DESK_H})"
+  printf '%-52s %-10s %s\n' "pausing"   "$(measure "$INDICATOR_SRC" "$SEL_PAUSE" '' "$DARK")"   "(${DESK_W}x${DESK_H})"
+  printf '%-52s %-10s %s\n' "transcribing" "$(measure "$INDICATOR_SRC" "$SEL_WRITE" '' "$DARK")" "(${DESK_W}x${DESK_H})"
+  printf '%-52s %-10s %s\n' "whisper"    "$(measure "$INDICATOR_SRC" "$SEL_WHISPER" '' '')"     "(320x${DESK_H})"
+  printf '%-52s %-10s %s\n' "onboarding" "$(measure "$ONBOARDING_SRC" "$SEL_ONBOARD" '' '')"    "(700x600)"
+  printf '%-52s %-10s %s\n' "settings"   "$(measure "$SETTINGS_SRC" "$SEL_SETTINGS" '' '')"     "(980x660)"
   exit 0
 fi
 
+echo "chrome: $CHROME"
 echo "-- capturing to $OUT_DIR --"
 capture_indicator_states
 capture_onboarding
