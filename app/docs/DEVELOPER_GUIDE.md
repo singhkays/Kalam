@@ -657,6 +657,66 @@ Run:
 
 Exit codes: `0` = all present models transcribed correctly, `1` = failure, `2` = nothing ran (models/fixture missing). Transcripts and load/transcribe timings print to the log for inspection.
 
+## Golden corpus and pipeline harness
+
+Two mechanisms sit above the unit tests, for cases where a pass/fail assertion per rule is not enough.
+
+### `app/KalamTests/engine_golden_tests.json`
+
+The shared golden corpus: named input/expected pairs covering nested backtracks, false-positive list markers, mixed ITN, and aggressive punctuation. One JSON file, read by both runners:
+
+- `KalamEngineIntegrationTests` loads it from the test bundle and asserts every case end to end through the full pipeline.
+- `ValidationGateTests` loads it from disk and asserts every case **accepts** — the corpus doubles as the invariant that the gate never vetoes legitimate cleanup.
+
+Because the corpus is shared, a cleanup change that improves one rule and regresses another shows up as a single named failure rather than a pile of individual assertions. Each entry carries a `description` explaining what it pins down; keep those accurate when adding cases.
+
+### `KalamTestRunner`
+
+`Kalam/KalamTestRunner.swift` is a special-mode harness for exercising the pipeline without going through ASR or the UI:
+
+- `runTextPipeline(_:configuration:)` starts from a transcript string, as if ASR had already run.
+- The audio variant starts from raw samples.
+
+Both return an `EngineResult` carrying `afterCleanup`, `afterITN`, and `final`, so intermediate stages can be inspected instead of only the end of the chain. This is the tool to reach for when a bug reproduces only at a specific pipeline stage.
+
+## Repository layout
+
+```
+app/                              macOS app (Swift 6, AppKit + SwiftUI)
+app/Kalam/                        app source
+app/Kalam/Services/               ASR, audio, hotkey, paste services
+app/Kalam/Settings/               settings window tabs and panes
+app/Packages/KalamTextEngine/     cleanup engine + dictionary compiler (SwiftPM)
+app/KalamTests/                   XCTest target, includes the golden corpus
+app/docs/                         this guide, SECURITY.md, CODEBASE_MAP.md
+app/docs/plans/                   HTML design studies (mockups are build inputs)
+app/docs/dev-design/              dated implementation plans
+scripts/test-engine.sh            headless engine tests, no Xcode required
+scripts/capture-readme-visuals.sh regenerates the README images
+scripts/parakeet-smoke.sh         real-model ASR smoke tests
+landing-page/                     Vite/React marketing site
+assets/readme/                    generated README images (see below)
+```
+
+## README visuals
+
+`README.md` uses images generated from the HTML design studies rather than hand-maintained screenshots, so the marketing images cannot silently drift from the approved designs.
+
+```bash
+./scripts/capture-readme-visuals.sh            # capture everything
+./scripts/capture-readme-visuals.sh --measure  # print target sizes only
+KEEP_WORK=1 ./scripts/capture-readme-visuals.sh  # keep the generated HTML variants
+```
+
+The script finds a Chrome binary (`CHROME_BIN`, then the local Playwright cache, then a system install), isolates one element per study, screenshots it at 2x, and writes to `assets/readme/`. `ffmpeg` stitches the five indicator states into `hero-indicator.gif`; without it the stills are still produced and only the GIF is skipped.
+
+Two things worth knowing before editing it:
+
+- **Probe scripts are injected at the end of the body, not in the head.** The studies link Google Fonts, and with no network the window `load` event never fires, so a load listener would never run.
+- **Meter envelopes are pinned with CSS `!important`.** The studies drive waveform bars from a `requestAnimationFrame` loop that overwrites any inline value before paint.
+
+After changing an indicator surface, update `app/docs/plans/kalam-indicator-v1/index.html`, then re-run the script. Two guards are deliberate: string copy must match `IndicatorStateModel.presentation(state:targetApp:)`, and the rejected "H caret chip" variant is never captured.
+
 ## Current Notes
 
 - App currently relies on CGEvent unicode, then Cmd+V paste, then Accessibility insertion, so target-app behavior can vary.
