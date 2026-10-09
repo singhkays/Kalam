@@ -720,7 +720,21 @@ encoded with `-f apng -plays 0` (`-f` is required; a `.png` target otherwise
 goes to the `image2` muxer, which refuses more than one file). `num_plays=0` is
 the infinite loop.
 
-Five things worth knowing before editing it:
+### The logo has a dark-mode twin
+
+`assets/quill-logo.png` is a black silhouette, which disappears against a dark
+background, and GitHub renders READMEs light or dark according to the reader's
+OS setting. The README picks between two files with `<picture>` and
+`prefers-color-scheme`.
+
+`build_logo_variants` in the capture script produces the dark twin by reusing
+the source alpha and refilling the colour with the landing page's cream
+(`alphaextract` to a mask, then `alphamerge` over a flat fill). Reusing the
+alpha rather than redrawing means the two cannot drift apart in shape — the
+alpha channels are byte-identical. If the logo itself is replaced, re-run the
+script so the twin is regenerated with it.
+
+Five things worth knowing before editing the capture script:
 
 - **Probe scripts are injected at the end of the body, not in the head.** The studies link Google Fonts, and with no network the window `load` event never fires, so a load listener would never run.
 - **Target sizes are constants, not measured.** Chrome intermittently dumps the DOM before the probe script runs, so the capture path never measures; every target's size is fixed in CSS instead. `--measure` is a diagnostic only.

@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/quill-logo.png" width="84" alt="Kalam">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/quill-logo-dark.png">
+    <img src="assets/quill-logo.png" width="84" alt="Kalam">
+  </picture>
 </p>
 
 <h1 align="center">Speak messy. Type clean <em>(privately)</em>.</h1>

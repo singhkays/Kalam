@@ -503,6 +503,42 @@ capture_settings() {
     "$OUT_DIR/settings-map.png" 980 486 '' '.cw{height:486px!important}'
 }
 
+# build_logo_variants
+# assets/quill-logo.png is a black silhouette, which disappears against a dark
+# background, and GitHub renders READMEs in light or dark according to the
+# reader's OS setting. The README picks between the two with a <picture> and
+# prefers-color-scheme, so this produces the dark-mode twin: the same alpha,
+# refilled with the landing page's cream.
+#
+# The source alpha is reused rather than redrawn, so the two stay identical in
+# shape by construction.
+build_logo_variants() {
+  local logo="$REPO_ROOT/assets/quill-logo.png"
+  local out="$REPO_ROOT/assets/quill-logo-dark.png"
+  echo "logo variants"
+  if [[ ! -f "$logo" ]]; then
+    echo "  skip $logo (not found)" >&2
+    return 0
+  fi
+  if ! command -v ffmpeg >/dev/null 2>&1; then
+    echo "  skip (ffmpeg not installed; README falls back to the light logo)" >&2
+    return 0
+  fi
+  local dims size
+  dims=$(ffprobe -v error -show_entries stream=width,height -of csv=p=0 "$logo" | head -1)
+  size="${dims%%,*}"
+  dims="${dims#*,}"
+
+  ffmpeg -hide_banner -loglevel error -y -i "$logo" \
+    -vf "alphaextract,format=gray" "$WORK_DIR/logo-mask.png"
+  ffmpeg -hide_banner -loglevel error -y \
+    -f lavfi -i "color=c=0xF7F5EF:s=${size}x${dims}" \
+    -i "$WORK_DIR/logo-mask.png" \
+    -filter_complex "[0][1]alphamerge" -frames:v 1 "$out"
+
+  echo "  $(basename "$out")  ${size}x${dims}"
+}
+
 # --------------------------------------------------------------------------
 
 MEASURE_ONLY=0
@@ -523,6 +559,7 @@ fi
 
 echo "chrome: $CHROME"
 echo "-- capturing to $OUT_DIR --"
+build_logo_variants
 capture_indicator_states
 capture_onboarding
 capture_settings
