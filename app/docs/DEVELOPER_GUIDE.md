@@ -689,8 +689,7 @@ app/Kalam/Settings/               settings window map/dive panes
 app/Packages/KalamTextEngine/     cleanup engine + dictionary compiler (SwiftPM)
 app/KalamTests/                   XCTest target, includes the golden corpus
 app/docs/                         this guide, SECURITY.md, CODEBASE_MAP.md
-app/docs/plans/                   HTML design studies (mockups are build inputs)
-app/docs/dev-design/              dated implementation plans
+app/docs/plans/                   HTML design studies, local-only (gitignored)
 scripts/test-engine.sh            headless engine tests, no Xcode required
 scripts/capture-readme-visuals.sh regenerates the README images
 scripts/parakeet-smoke.sh         real-model ASR smoke tests
