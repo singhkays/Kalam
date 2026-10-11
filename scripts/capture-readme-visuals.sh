@@ -503,40 +503,44 @@ capture_settings() {
     "$OUT_DIR/settings-map.png" 980 486 '' '.cw{height:486px!important}'
 }
 
-# build_logo_variants
-# assets/quill-logo.png is a black silhouette, which disappears against a dark
-# background, and GitHub renders READMEs in light or dark according to the
-# reader's OS setting. The README picks between the two with a <picture> and
-# prefers-color-scheme, so this produces the dark-mode twin: the same alpha,
-# refilled with the landing page's cream.
+# build_logo_mark
+# The source logo is a black silhouette, which disappears against a dark
+# background. A <picture> with prefers-color-scheme looks like the fix but is
+# not: GitHub drives its theme from data-color-mode, not the OS media query, so
+# someone with GitHub set to Dark on a light-mode OS renders the light variant
+# on a dark page. The README picked a logo that reads on both backgrounds
+# instead of one that swaps.
 #
-# The source alpha is reused rather than redrawn, so the two stay identical in
-# shape by construction.
-build_logo_variants() {
+# #2A9D5C is the landing page's accent green and clears the 3:1 graphical
+# contrast threshold against both GitHub's light (#ffffff, 3.46:1) and dark
+# (#0d1117, 5.48:1) backgrounds. The black original is left alone as a brand
+# asset; this is the README's copy.
+build_logo_mark() {
   local logo="$REPO_ROOT/assets/quill-logo.png"
-  local out="$REPO_ROOT/assets/quill-logo-dark.png"
-  echo "logo variants"
+  local out="$REPO_ROOT/assets/quill-logo-mark.png"
+  echo "logo mark"
   if [[ ! -f "$logo" ]]; then
     echo "  skip $logo (not found)" >&2
     return 0
   fi
   if ! command -v ffmpeg >/dev/null 2>&1; then
-    echo "  skip (ffmpeg not installed; README falls back to the light logo)" >&2
+    echo "  skip (ffmpeg not installed)" >&2
     return 0
   fi
-  local dims size
+  local dims
   dims=$(ffprobe -v error -show_entries stream=width,height -of csv=p=0 "$logo" | head -1)
-  size="${dims%%,*}"
-  dims="${dims#*,}"
+  local w="${dims%%,*}" h="${dims#*,}"
 
+  # Reuse the source alpha rather than redrawing, so the mark cannot drift
+  # from the logo it is derived from.
   ffmpeg -hide_banner -loglevel error -y -i "$logo" \
     -vf "alphaextract,format=gray" "$WORK_DIR/logo-mask.png"
   ffmpeg -hide_banner -loglevel error -y \
-    -f lavfi -i "color=c=0xF7F5EF:s=${size}x${dims}" \
+    -f lavfi -i "color=c=0x2A9D5C:s=${w}x${h}" \
     -i "$WORK_DIR/logo-mask.png" \
     -filter_complex "[0][1]alphamerge" -frames:v 1 "$out"
 
-  echo "  $(basename "$out")  ${size}x${dims}"
+  echo "  $(basename "$out")  ${w}x${h}"
 }
 
 # --------------------------------------------------------------------------
@@ -559,7 +563,7 @@ fi
 
 echo "chrome: $CHROME"
 echo "-- capturing to $OUT_DIR --"
-build_logo_variants
+build_logo_mark
 capture_indicator_states
 capture_onboarding
 capture_settings

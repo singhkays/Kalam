@@ -719,19 +719,23 @@ encoded with `-f apng -plays 0` (`-f` is required; a `.png` target otherwise
 goes to the `image2` muxer, which refuses more than one file). `num_plays=0` is
 the infinite loop.
 
-### The logo has a dark-mode twin
+### The README logo is not the brand logo
 
-`assets/quill-logo.png` is a black silhouette, which disappears against a dark
-background, and GitHub renders READMEs light or dark according to the reader's
-OS setting. The README picks between two files with `<picture>` and
-`prefers-color-scheme`.
+`assets/quill-logo.png` is a black silhouette, so it disappears against a dark
+background. A `<picture>` with `prefers-color-scheme` looks like the fix but is
+not: **GitHub drives its theme from `data-color-mode`, not the OS media
+query.** Someone with GitHub set to Dark on a light-mode OS renders the light
+variant on a dark page, which is exactly what happened.
 
-`build_logo_variants` in the capture script produces the dark twin by reusing
-the source alpha and refilling the colour with the landing page's cream
-(`alphaextract` to a mask, then `alphamerge` over a flat fill). Reusing the
-alpha rather than redrawing means the two cannot drift apart in shape — the
-alpha channels are byte-identical. If the logo itself is replaced, re-run the
-script so the twin is regenerated with it.
+So the README uses `assets/quill-logo-mark.png`, a single mark in `#2A9D5C`
+(the landing page's accent green) that reads on both. It clears the 3:1
+graphical contrast threshold against GitHub's light (`#ffffff`, 3.46:1) and
+dark (`#0d1117`, 5.48:1) backgrounds. The black original stays as a brand asset;
+`build_logo_mark` reuses its alpha and only changes the colour, so the two
+cannot drift apart in shape.
+
+If you change the brand accent, re-check both ratios before shipping rather
+than trusting the dark twin to cover it.
 
 Five things worth knowing before editing the capture script:
 
