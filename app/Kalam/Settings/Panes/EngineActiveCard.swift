@@ -1,8 +1,10 @@
 import SwiftUI
 
 // MARK: - EngineActiveCard — Active model selector (Task 6)
-// Card 3 of the F 3-card Engine pane. HTML parity with
-// kalam-compass-v1.5.html F6/F6b/F6c/F7 and kalam-existing-settings.html Step 3 (merged into Active).
+// Card 3 of the Engine pane. Visual ancestry: the retired v1.5 F6/F6b/F6c/F7
+// states, merged into Active; current truth is the v1.7 mockup's D section
+// (app/docs/plans/kalam-compass-1.7/kalam-compass-v1.7.html, incl. the
+// Verified-multi F6b-grammar figure) plus the state list below.
 //
 // Header: "Active model" with trailing statusLabel/trailingColor
 //   verified (kGreen), missing (kBad), incomplete (kWarn),

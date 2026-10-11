@@ -43,7 +43,7 @@ Kalam is a privacy-first macOS menu bar dictation app (Swift 6, deployment targe
 | `AccessibilityHelper.swift` | `AccessibilityHelper` — AX trust check/prompt + explainer. |
 | `AppRelauncher.swift` | `AppRelauncher` — relaunch via `NSWorkspace.openApplication` + orderly `NSApp.terminate` gated on launch success (relaunch lifecycle rework). |
 | `AppMetadata.swift` | `KalamExternalLinks` + `KalamAppVersion` (used by Settings UI and AppDelegate). |
-| `SettingsUI.swift` | Settings window shell: `SettingsView` orchestration (tab state, config load/persist). Per-tab views live in `Kalam/Settings/`. |
+| `SettingsWindow.swift` | Settings window hosting: `SettingsRoot` (map/dive `NavigationStack`) in a borderless window owned by AppDelegate. Per-dive panes live in `Kalam/Settings/Panes/`. |
 | `OnboardingFlow.swift` | 4-step setup (Microphone, Accessibility, Hotkey, Model) + `OnboardingFlowController`. |
 | `ModelsConfiguration.swift` | Model version metadata, security-scoped bookmark (UserDefaults `models.modelLibraryBookmark`), availability checks. |
 | `ModelSetupSupport.swift`, `ModelAcquisitionPanel.swift` | Model folder picker + **copy-paste-only** `hf download` command (the app never executes shell commands). |
@@ -87,7 +87,7 @@ ASR → TextCleanupEngine.clean → ITN (if enabled) → CustomDictionaryManager
 - **Add a dictionary feature** → `DictionaryEntry.swift` / `ReplacementCompiler.swift` + tests.
 - **Change paste behavior** → `Services/PasteService.swift`; respect the clipboard guard; test the failure path (clipboard restore on failed paste).
 - **Touch the grammar pass** → `app/Packages/KalamTextEngine/Sources/KalamTextEngine/TextCleanupEngine.swift` (AppKit-gated section); tests are headless via `./scripts/test-engine.sh`.
-- **Add Settings UI** → `Kalam/Settings/` (tab views: `GeneralSettingsTab`, `ShortcutSettingsTab`, `CleanupSettingsTab`, `ModelsSettingsTab`, `UpdatesSettingsTab`, `WordReplacementView`; shared helpers in `SettingsSharedComponents.swift`; config persistence stays in the `SettingsView` shell). Use `KalamTheme`/`KalamControlStyles`; label icon-only buttons (accessibility labels for icon-only buttons).
+- **Add Settings UI** → one dive pane per destination in `Kalam/Settings/Panes/` (shared controls in `Kalam/Settings/Controls/`); state flows through `SettingsModel` over the `SettingsBacking` protocol, never direct store access. Use `KalamTheme`/`KalamControlStyles`; label icon-only buttons (accessibility labels for icon-only buttons).
 
 ## Shared-mount git workflow (IMPORTANT)
 

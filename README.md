@@ -109,7 +109,7 @@ hf download FluidInference/parakeet-tdt-0.6b-v2-coreml \
   --local-dir '/path/to/your/models/parakeet-tdt-0.6b-v2'
 ```
 
-Pick the destination folder in **Settings &rarr; Models** first, then copy the command it generates. It always matches the model you selected.
+Pick the destination folder in **Settings &rarr; The engine** first, then copy the command it generates. It always matches the model you selected.
 
 ### Models
 

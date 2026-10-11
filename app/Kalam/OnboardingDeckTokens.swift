@@ -12,10 +12,10 @@ import SwiftUI
 // the card IS the window ground (#FAFAF7, edge-to-edge) and the rail is the
 // site's instrument-panel dark (#222220 — DictationEngine/CleanupDemo panels),
 // i.e. dark means "the machine", never window chrome. Dark values come from
-// the v3.0 handoff §2 (Obsidian Studio): charcoal card fills the window, rail
-// stays #1F1F1C.
+// the v3.2 Tokens table (Obsidian Studio — carried forward from the v3.0
+// handoff §2): charcoal card fills the window, rail stays #1F1F1C.
 //
-// Contrast targets (from v3.0 handoff): dark body #D5D3C8 on card #181816,
+// Contrast targets (from the v3.2 Tokens table): dark body #D5D3C8 on card #181816,
 // rail labels #52B788 (~6.5:1 on #222220), muted silver #8E8B82.
 
 enum OnboardingDeckTokens {

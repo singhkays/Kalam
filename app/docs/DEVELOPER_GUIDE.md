@@ -26,7 +26,7 @@ Kalam is a macOS menu bar dictation app that records audio with push-to-talk, ru
 - Cleanup configuration persisted in UserDefaults
 - System audio ducking while recording (optional; runtime-verified because sandboxed/CoreAudio behavior can vary)
 - CGEvent unicode paste with guarded clipboard snapshot/restore and AX fallback
-- Recording indicator with premium translucent design and noise texture (placed Mid-Top or Mid-Bottom)
+- Recording indicator with premium translucent design and noise texture (Top center or Bottom center placement)
 
 ## Usage Benefits
 
@@ -34,7 +34,7 @@ Kalam is a macOS menu bar dictation app that records audio with push-to-talk, ru
   - Keeps dictation private and available even with unstable network conditions.
 - Flexible hotkey activation (Hold, Toggle, Double Tap, Hold-or-Toggle)
   - Supports both quick burst dictation and longer continuous speaking without mode switching.
-- Text cleanup pipeline (`Refine` tab)
+- Text cleanup pipeline (Cleanup dive)
   - Reduces common ASR noise (fillers, spoken corrections, punctuation drift) before text reaches your app.
 - Optional grammar pass (`Off` / `Light` / `Full`)
   - Lets you trade speed vs polish while enforcing a strict timeout so paste latency stays predictable.
@@ -114,7 +114,7 @@ Core files:
 ## Runtime Flow
 
 1. User activates hotkey.
-2. App resolves mode behavior (hold/toggle/double-tap/auto).
+2. App resolves mode behavior (hold/toggle/doubleTap/holdOrToggle).
 3. Recording starts:
    - Optional beep
    - Optional system ducking
@@ -494,7 +494,7 @@ Kalam requires Parakeet TDT models for on-device transcription. Models are loade
    
    The `--local-dir` path must match your chosen folder from Step 1.
 
-4. **Select the model** (Settings → Models → Step 3)
+4. **Select the model** (Settings → The engine → Step 3)
 
 Onboarding copies the command for the user to run in Terminal; Kalam does not execute shell commands or download model files itself. The generated `--local-dir` destination is POSIX shell-quoted, so spaces, apostrophes, Unicode, and shell metacharacters in a selected folder remain data rather than command syntax.
 
@@ -685,7 +685,7 @@ Both return an `EngineResult` carrying `afterCleanup`, `afterITN`, and `final`, 
 app/                              macOS app (Swift 6, AppKit + SwiftUI)
 app/Kalam/                        app source
 app/Kalam/Services/               ASR, audio, hotkey, paste services
-app/Kalam/Settings/               settings window tabs and panes
+app/Kalam/Settings/               settings window map/dive panes
 app/Packages/KalamTextEngine/     cleanup engine + dictionary compiler (SwiftPM)
 app/KalamTests/                   XCTest target, includes the golden corpus
 app/docs/                         this guide, SECURITY.md, CODEBASE_MAP.md
