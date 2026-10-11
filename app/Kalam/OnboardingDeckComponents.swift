@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct OnboardingCardContent<Content: View, Footer: View>: View {
     let headingFocused: AccessibilityFocusState<Bool>.Binding
@@ -411,43 +412,53 @@ struct OnboardingManifestPanel: View {
 // MARK: - Drag-to-Settings tile (v3 adoption, Task 7)
 
 /// A draggable copy of Kalam's app icon. The Accessibility (and Microphone)
-/// lists in System Settings are standard drop targets that accept a drag whose
-/// payload is a file URL to an `.app` bundle — dropping it adds the entry with
-/// the toggle ON, replacing the whole `+` → Finder-picker dance (the pattern
-/// Cursor/ChatGPT/Codex use in their onboarding).
+/// lists in System Settings accept a drag whose payload is a *file URL
+/// reference* to an `.app` bundle — the same promise Finder puts on the
+/// drag pasteboard when you drag the app out of /Applications. Dropping it
+/// adds the entry to the list (the switch itself still needs one manual
+/// flip on current macOS), replacing the `+` → Finder-picker dance (the
+/// pattern Cursor/ChatGPT/Codex use in their onboarding).
+///
+/// Implementation note: the payload MUST be a file-URL reference
+/// (`NSItemProvider(object: bundleURL as NSURL)`), not
+/// `NSItemProvider(contentsOf:)` — the latter is a data-backed provider
+/// meant for flat files, and an `.app` is a *directory* bundle. As data it
+/// arrives with the wrong UTI, and System Settings silently rejects the
+/// drop. Setting `suggestedName` must also keep the `.app` extension for
+/// the same UTI reason.
 ///
 /// Pointer-only affordance: this tile is an *enhancement* on top of the
 /// existing "Open System Settings" path, never a replacement — VoiceOver and
-/// keyboard users keep the buttons.
+/// keyboard users keep the buttons. A "Show in Finder" fallback covers the
+/// case where an in-app drag is rejected: a drag that starts in Finder
+/// always carries the right promise.
 struct OnboardingDragTile: View {
     var body: some View {
         VStack(spacing: 8) {
-            Image(nsImage: NSApp.applicationIconImage)
-                .resizable()
-                .frame(width: 56, height: 56)
-                .onDrag {
-                    // Payload = THIS build's bundle (Kalam-test.app in Debug),
-                    // so System Settings registers the running flavor, not a
-                    // differently-named production install.
-                    let provider = NSItemProvider(contentsOf: Bundle.main.bundleURL)
-                        ?? NSItemProvider()
-                    provider.suggestedName = KalamAppName.current
-                    return provider
-                } preview: {
-                    Image(nsImage: NSApp.applicationIconImage)
-                        .resizable()
-                        .frame(width: 52, height: 52)
-                }
+            VStack(spacing: 8) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 56, height: 56)
 
-            Text("Drag \(KalamAppName.current) into the list")
-                .font(SettingsFont.body(12.5, weight: 500))
-                .foregroundStyle(OnboardingDeckTokens.ink2)
+                Text("Drag \(KalamAppName.current) into the list")
+                    .font(SettingsFont.body(12.5, weight: 500))
+                    .foregroundStyle(OnboardingDeckTokens.ink2)
 
-            Text("Dropping adds it with the switch on.")
-                .font(SettingsFont.body(11.5, weight: 300))
-                .foregroundStyle(OnboardingDeckTokens.ink3)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+                Text("Dropping adds it to the list — then flip its switch on.")
+                    .font(SettingsFont.body(11.5, weight: 300))
+                    .foregroundStyle(OnboardingDeckTokens.ink3)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Draggable \(KalamAppName.current) icon. Alternative: use Open System Settings and the add button, or Show in Finder and drag from there.")
+
+            Button("Show \(KalamAppName.current) in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+            }
+            .buttonStyle(.link)
+            .font(SettingsFont.body(11.5, weight: 400))
+            .accessibilityLabel("Show \(KalamAppName.current) in Finder, so you can drag it into System Settings from there")
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 18)
@@ -462,8 +473,28 @@ struct OnboardingDragTile: View {
                     style: StrokeStyle(lineWidth: 1, dash: [5, 4])
                 )
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Draggable \(KalamAppName.current) icon. Alternative: use Open System Settings and the add button.")
+        // Whole-tile drag target: the icon alone is a 56pt hit area and
+        // reads as broken when a grab starts on the text. The window stays
+        // movable via the top drag strip (isMovableByWindowBackground is
+        // false), so this does not fight window positioning.
+        .onDrag {
+            // Payload = THIS build's bundle (Kalam-test.app in Debug),
+            // so System Settings registers the running flavor, not a
+            // differently-named production install. File-URL *reference*,
+            // never file contents (see type note above).
+            let url = Bundle.main.bundleURL
+            // NSURL conforms to NSItemProviderWriting and promises a
+            // public.file-url — exactly the Finder-style reference System
+            // Settings accepts.
+            let provider = NSItemProvider(object: url as NSURL)
+            // Keep the .app extension — System Settings keys the drop off it.
+            provider.suggestedName = url.lastPathComponent
+            return provider
+        } preview: {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 52, height: 52)
+        }
     }
 }
 
