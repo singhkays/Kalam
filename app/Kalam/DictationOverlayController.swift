@@ -104,10 +104,29 @@ final class DictationOverlayController {
     /// never pays window construction. The window stays unordered (invisible).
     func prewarm() {
         ensureWindow()
-        if let screen = placementScreen ?? fallbackScreen() {
+        // Stale-screen guard: a persisted placementScreen from a previous
+        // launch never survives (new process), but a live window can outlive
+        // a display reconfiguration between prewarm and first show — always
+        // position on a screen that exists right now.
+        if validatedPlacementScreen() == nil {
+            placementScreen = fallbackScreen()
+        }
+        if let screen = validatedPlacementScreen() ?? fallbackScreen() {
             positionWindow(on: screen)
         }
         window?.alphaValue = 0.0
+    }
+
+    /// A persisted placementScreen pointing at a disconnected/slept display
+    /// positions the window on a stale frame — off-screen on the remaining
+    /// display, sticky until restart. Identity check: after a topology
+    /// change AppKit drops the old instance from NSScreen.screens, so a
+    /// non-member is stale by definition. False invalidation (same display,
+    /// new instance) only costs one re-resolve to the same display.
+    private func validatedPlacementScreen() -> NSScreen? {
+        guard let ps = placementScreen else { return nil }
+        guard NSScreen.screens.contains(where: { $0 === ps }) else { return nil }
+        return ps
     }
 
     func showRecording(isHoldMode: Bool) {
@@ -231,22 +250,20 @@ final class DictationOverlayController {
                     .size(withAttributes: [.font: buttonFont]).width + 28
                 let needed = ceil(textWidth) + ceil(buttonWidth)
                     + 12 + 10 + 8 + 12 // label padding + button gap + capsule hPadding (OverlayCapsuleView.Metrics.hPadding)
-                let maxWidth = ((placementScreen ?? fallbackScreen())?.visibleFrame.width ?? Metrics.overlayWidth) * 0.7
+                let maxWidth = ((validatedPlacementScreen() ?? fallbackScreen())?.visibleFrame.width ?? Metrics.overlayWidth) * 0.7
                 let width = min(max(needed, Metrics.overlayWidth), maxWidth)
                 if width > Metrics.overlayWidth {
                     currentWindowSize = NSSize(width: width, height: Metrics.compactHeight)
                 }
             }
         }
-        if placementScreen == nil {
+        if validatedPlacementScreen() == nil {
             placementScreen = resolvePlacementScreen(from: nil) ?? fallbackScreen()
         }
-        if let screen = placementScreen ?? fallbackScreen() {
+        if let screen = validatedPlacementScreen() ?? fallbackScreen() {
             positionWindow(on: screen)
         }
         guard let w = window else { return }
-        // Corner-halo geometry diagnostics removed (hunt is over): re-add behind
-        // KalamDiagnosticFlags.verboseAudio if window geometry is ever suspect again.
         currentStateSetTime = CFAbsoluteTimeGetCurrent()
         // overlay action buttons unclickable: the overlay is click-through EXCEPT while an actionable state
         // (held-transcript "Paste", error "Open") is presented — with
@@ -263,6 +280,11 @@ final class DictationOverlayController {
         indicatorDiag.debug("SwiftUI indicator presented style=\(self.sessionStyle.rawValue, privacy: .public) state=\(String(describing: canonical), privacy: .public) ring=\(ringOn, privacy: .public) glow=\(glowOn, privacy: .public)")
         w.alphaValue = 0.0
         w.orderFrontRegardless()
+        // Visibility heartbeat (INFO, persisted): geometry only, never content.
+        // This is what proves a sticky-overlay in production bundles — the
+        // debug line above never reaches OSLogStore.
+        let f = w.frame
+        indicatorDiag.info("Indicator visible frameX=\(Int(f.origin.x), privacy: .public) frameY=\(Int(f.origin.y), privacy: .public) frameW=\(Int(f.size.width), privacy: .public) frameH=\(Int(f.size.height), privacy: .public) alpha=\(w.alphaValue, privacy: .public) isVisible=\(w.isVisible, privacy: .public) screens=\(NSScreen.screens.count, privacy: .public) style=\(self.sessionStyle.rawValue, privacy: .public) state=\(String(describing: canonical), privacy: .public)")
         let presentDuration = isRecordingState(state) ? recordingFadeDuration : fadeDuration
         NSAnimationContext.runAnimationGroup { context in
             context.duration = presentDuration
@@ -492,9 +514,13 @@ final class DictationOverlayController {
 
     private func positionWindow(on screen: NSScreen) {
         guard let w = window else { return }
-        let screenFrame = screen.visibleFrame
+        // Belt-and-suspenders: never position on a screen that no longer
+        // exists (sleep/disconnect between resolve and position).
+        let live = NSScreen.screens.contains(where: { $0 === screen }) ? screen : (fallbackScreen() ?? screen)
+        if live !== screen { placementScreen = live }
+        let screenFrame = live.visibleFrame
         let placement = GeneralSettingsConfiguration.load().indicatorPlacement
-        let frame = frameForPlacement(placement, visibleFrame: screenFrame, screenFrame: screen.frame)
+        let frame = frameForPlacement(placement, visibleFrame: screenFrame, screenFrame: live.frame)
         w.setFrame(frame, display: false)
         // Re-derive the WindowServer shadow from the content alpha after every frame
         // change (surface switches resize the window; stale shape = wrong halo).

@@ -64,3 +64,8 @@ app/docs/plans/
 
 # Local agent session artifacts (never commit)
 app/.commandcode/
+
+# Runtime/build artifacts (never commit)
+default.profraw
+kalam.log
+app/package.json

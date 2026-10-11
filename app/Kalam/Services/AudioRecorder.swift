@@ -426,8 +426,14 @@ final class AudioRecorder: @unchecked Sendable {
         }
         // Task 0: classify the bound device's transport once per graph build
         // (built-in / usb / bluetooth) so baseline logs are route-filterable.
-        timingMarks.setTransportTag(AudioTransportTag.label(forDeviceID: boundDeviceID))
-        if let boundDeviceID {
+        let boundTransportTag = AudioTransportTag.label(forDeviceID: boundDeviceID)
+        timingMarks.setTransportTag(boundTransportTag)
+        if boundTransportTag == "bluetooth" {
+            // HFP/SCO streams renegotiate on open — reconfiguring the
+            // device ring mid-flip drops tap callbacks (HAL overload).
+            // The shrink is a latency lever only; Bluetooth keeps its default.
+            if KalamDiagnosticFlags.verboseAudio { logger.debug("Device ring shrink skipped: bluetooth transport (HFP setup protection)") }
+        } else if let boundDeviceID {
             if let applied = Self.shrinkDeviceRingBuffer(deviceID: boundDeviceID) {
                 if KalamDiagnosticFlags.verboseAudio { logger.debug("Device ring buffer applied frames=\(applied, privacy: .public)") }
             } else {

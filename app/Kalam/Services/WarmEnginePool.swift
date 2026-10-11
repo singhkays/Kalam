@@ -82,7 +82,11 @@ final class WarmEnginePool: @unchecked Sendable {
             },
             scheduler: { delay, work in
                 let item = DispatchWorkItem(block: work)
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+                // Hang hardening: the rebuild factory binds + prepares a HAL
+                // graph, which parks on a wedged USB device (observed: C920
+                // after a superseded start). Never run that on main — a
+                // post-failure flush would beachball the app into force-quit.
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: item)
                 return item
             }
         )

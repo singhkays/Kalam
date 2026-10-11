@@ -1174,7 +1174,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 pendingStartGeneration &+= 1
                 let pendingGeneration = pendingStartGeneration
                 pendingStartTask = Task { @MainActor [weak self] in
-                    await self?.startRecording(triggerMode: triggerMode)
+                    // Generation-guarded rollback: a superseded task that
+                    // resumes after a newer press committed must not wipe the
+                    // live session (unconditional rollback vaporized it).
+                    let started = await self?.performStartRecording(triggerMode: triggerMode) ?? false
+                    if !started, self?.pendingStartGeneration == pendingGeneration {
+                        self?.pttState.rollbackPending()
+                    }
                     self?.clearPendingStart(generation: pendingGeneration)
                 }
             case .stop:
@@ -1217,17 +1223,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return nil
     }
 
-    /// Rolls the machine's pending start back if the recording did not commit
+    /// Failed-start contract: the generation-guarded task above rolls the
+    /// machine's pending start back when its own generation is still current
     /// (guard failure, engine start failure/timeout/supersede, stale commit).
     /// A failed start leaves the machine idle — the pre-hardening contract.
-    @discardableResult
-    private func startRecording(triggerMode: PTTStateMachine.TriggerMode) async -> Bool {
-        let started = await performStartRecording(triggerMode: triggerMode)
-        if !started {
-            pttState.rollbackPending()
-        }
-        return started
-    }
 
     private func performStartRecording(triggerMode: PTTStateMachine.TriggerMode) async -> Bool {
         guard !isRecording else { return false }
@@ -1345,11 +1344,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // gate as the lifecycle machine advance below).
         startMicStallWatchdog(isHoldMode: triggerMode == .hold)
 
+        // Bluetooth HFP protection: opening the SCO mic flips the whole
+        // Bluetooth route (A2DP music -> HFP call). Any output touch during
+        // that flip — chime at full volume, duck/mute volume set, ring
+        // reconfig (skipped in prepare) — risks the HAL overload stall seen
+        // live (617ms first buffer, then tap starvation to shortfall). The
+        // indicator pill is the start cue on Bluetooth; audio stays untouched
+        // until the stream settles. Mic-first order is unchanged.
+        let isBluetoothStart = self.audio.lastSessionTiming.transportTag == "bluetooth"
         // Play chime (so user hears it at full volume)
-        let chimeDuration = playRecordingChime()
+        let chimeDuration: TimeInterval
+        if isBluetoothStart {
+            chimeDuration = 0
+            logger.info("Bluetooth start: chime suppressed to protect HFP setup")
+        } else {
+            chimeDuration = playRecordingChime()
+        }
 
         // Then duck system volume if enabled (slight delay so the chime is audible)
-        if UserDefaults.standard.bool(forKey: "duckEnabled") {
+        if UserDefaults.standard.bool(forKey: "duckEnabled"), !isBluetoothStart {
             duckingStartWorkItem?.cancel()
             let workItem = DispatchWorkItem { [weak self] in
                 Task { @MainActor [weak self] in
@@ -1672,7 +1685,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             
             // Trim with hysteresis/hangover/padding + conservative fallback
             // K-51: fused endpointing + peak normalization (one pass).
-            let trimmed = SilenceTrimmer.trimAndNormalize(samples: samples, sampleRate: 16_000)
+            // Bluetooth SCO ramps: the first ~0.5-1s arrives attenuated
+            // while the codec/AGC settles, so speech there sits below the
+            // start threshold and the 300ms pad can't reach it back. Give
+            // Bluetooth a 1000ms pad (both edges; the trailing cost is ~30ms
+            // of ASR) so immediate speech survives the ramp.
+            let isBluetoothCapture = self.audio.lastSessionTiming.transportTag == "bluetooth"
+            let trimmed = SilenceTrimmer.trimAndNormalize(
+                samples: samples, sampleRate: 16_000,
+                padMs: isBluetoothCapture ? 1000 : 300)
             // Pipeline telemetry (counts/timings only, never content): correlates
             // the SilenceTrimmer-category trim decision with this session so
             // user-provided logs can distinguish "trimmer cut speech" (low
@@ -1681,7 +1702,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let trimmedMs = Int(Double(trimmed.count) / 16_000.0 * 1000)
             let keepPct = samples.isEmpty ? 0 : Int(Double(trimmed.count) / Double(samples.count) * 100)
             if KalamDiagnosticFlags.verboseAudio {
-                self.logger.debug("Trim summary originalMs=\(originalMs, privacy: .public) trimmedMs=\(trimmedMs, privacy: .public) keepPct=\(keepPct, privacy: .public) holdMs=\(segmentEstimateMs, privacy: .public)")
+                self.logger.debug("Trim summary originalMs=\(originalMs, privacy: .public) trimmedMs=\(trimmedMs, privacy: .public) keepPct=\(keepPct, privacy: .public) holdMs=\(segmentEstimateMs, privacy: .public) padMs=\(isBluetoothCapture ? 1000 : 300, privacy: .public)")
             }
             stageMark("trim")
             guard !trimmed.isEmpty else {

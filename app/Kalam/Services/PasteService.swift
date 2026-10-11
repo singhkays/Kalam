@@ -562,18 +562,37 @@ final class PasteService {
             return false
         }
 
-        guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
-              let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
-        else {
-            Self.logger.warning("Failed to create CGEvent unicode events")
-            return false
+        // Chromium-host hardening (Vivaldi denies AX, so Tier-1 verification
+        // never runs and a dropped burst logs a false `inserted`): one giant
+        // keyDown/keyUp pair carrying 100+ units is unlike real typing and is
+        // intermittently swallowed by the browser pipeline. Post ≤64-unit
+        // bursts mimicking keystrokes, with a 4ms gap so the runloop drains.
+        // Total main-block stays under ~15ms; the paste path already sleeps
+        // 50-80ms around this call.
+        let chunkSize = 64
+        let gapMicros: useconds_t = 4_000
+        var offset = 0
+        var chunks = 0
+        while offset < utf16Array.count {
+            let end = min(offset + chunkSize, utf16Array.count)
+            let chunk = Array(utf16Array[offset..<end])
+            guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+                  let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
+            else {
+                Self.logger.warning("Failed to create CGEvent unicode events")
+                return false
+            }
+            keyDown.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: chunk)
+            keyUp.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: chunk)
+            keyDown.post(tap: .cghidEventTap)
+            keyUp.post(tap: .cghidEventTap)
+            chunks += 1
+            offset = end
+            if offset < utf16Array.count {
+                usleep(gapMicros)
+            }
         }
-
-        keyDown.keyboardSetUnicodeString(stringLength: utf16Array.count, unicodeString: utf16Array)
-        keyUp.keyboardSetUnicodeString(stringLength: utf16Array.count, unicodeString: utf16Array)
-
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
+        if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("CGEvent unicode posted chunks=\(chunks, privacy: .public) length=\(utf16Array.count, privacy: .public)") }
         return true
     }
 
