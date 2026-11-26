@@ -10,6 +10,8 @@ enum PasteServiceError: LocalizedError {
     case secureInputActive
     case pidMismatch
     case frontmostChanged
+    case destinationUnavailable
+    case deliveryUnconfirmed
 
     var errorDescription: String? {
         switch self {
@@ -24,7 +26,11 @@ enum PasteServiceError: LocalizedError {
         case .pidMismatch:
             return "Focused element PID mismatch — hold."
         case .frontmostChanged:
-            return "Frontmost app changed during AX window — hold."
+            return "The destination is no longer focused."
+        case .destinationUnavailable:
+            return "The original destination is unavailable."
+        case .deliveryUnconfirmed:
+            return "The editor may have received the transcript."
         }
     }
 }
@@ -39,24 +45,24 @@ final class PasteService {
     @MainActor
     struct PasteStrategies {
         var isProcessTrusted: () -> Bool = { AXIsProcessTrusted() }
-        var postUnicodeText: (String) -> Bool = { PasteService.postUnicodeTextIfPossible($0) }
+        var postUnicodeText: ((String) -> Bool)?
         var postCmdV: () -> Bool = { PasteService.postCmdV() }
         /// K-50 experiment: deliver the Cmd+V chord directly to a PID instead
         /// of posting globally. Some apps drop unfocused injected events —
         /// gated behind `internal.latency.pidPasteEnabled` (default OFF) with
         /// automatic fallback to the global post.
         var postCmdVToPid: (pid_t) -> Bool = { PasteService.postCmdVToPid($0) }
-        var insertTextViaAccessibility: (String) -> String? = { PasteService.insertTextViaAccessibility($0) }
-        /// record-time paste target capture: insert into a specific captured element (record-time paste target).
-        var insertTextIntoElement: (AXUIElement, String) -> String? = { PasteService.insertTextViaAccessibility(into: $0, text: $1) }
         var pasteboard: NSPasteboard = .general
         /// Grace delay before restoring the user's clipboard after a Cmd+V
         /// paste, giving the target app time to read the pasteboard. Only the
         /// Cmd+V path uses this; AX/failure paths restore immediately (pasteboard exposure minimization).
         var restoreDelay: TimeInterval = 0.15
+        var afterClipboardWrite: (() async -> Void)?
 
         // MARK: Task 5 additions — Tier-1 hardening
-        var getElementRole: (AXUIElement) -> String? = { PasteService.getElementRole($0) }
+        var getElementRole: (AXUIElement) -> String? = { PasteService.stringAttribute(kAXRoleAttribute, of: $0) }
+        var getElementSubrole: (AXUIElement) -> String? = { PasteService.stringAttribute(kAXSubroleAttribute, of: $0) }
+        var getSelection: (AXUIElement) -> NSRange? = { PasteService.selectedRange($0) }
         var getElementValue: (AXUIElement) -> String? = { PasteService.getElementValue($0) }
         var axSetSelectedText: (AXUIElement, String) -> AXError = { PasteService.axSetSelectedText($0, $1) }
         var axGetPid: (AXUIElement) -> pid_t? = { PasteService.axGetPid($0) }
@@ -96,13 +102,14 @@ final class PasteService {
 
         func restore(to pasteboard: NSPasteboard) {
             pasteboard.clearContents()
-            for itemDict in items {
+            let objects = items.map { itemDict in
                 let item = NSPasteboardItem()
                 for (type, data) in itemDict {
                     item.setData(data, forType: NSPasteboard.PasteboardType(rawValue: type))
                 }
-                pasteboard.writeObjects([item])
+                return item
             }
+            if !objects.isEmpty { pasteboard.writeObjects(objects) }
         }
     }
 
@@ -115,228 +122,197 @@ final class PasteService {
         case failed            // every strategy failed — nothing consumed it
     }
 
-    /// Paste-leg telemetry: always-on, content-free (leg name + text length +
-    /// outcome + target bundle). Purpose: attribute a target-app-specific
-    /// rendering bug (e.g. a transcript arriving word-by-word) to the delivery
-    /// strategy that served it — AX verified insert, AX fallback, unicode
-    /// CGEvent, or Cmd+V — without logging any transcript content.
-    private enum PasteLeg {
-        static let axVerified = "ax-verified"
-        static let axFallback = "ax-fallback"
-        static let axCapturedElement = "ax-captured-element"
-        static let unicodeCGEvent = "unicode-cgevent"
-        static let cmdV = "cmd-v"
-        static let cmdVPid = "cmd-v-pid"
+    @MainActor
+    struct Destination {
+        let pid: pid_t
+        let name: String
+        let isAlive: () -> Bool
+
+        init(_ app: NSRunningApplication) {
+            self.init(pid: app.processIdentifier, name: app.localizedName ?? "the original app",
+                      isAlive: { !app.isTerminated })
+        }
+
+        init(pid: pid_t, name: String, isAlive: @escaping () -> Bool) {
+            self.pid = pid
+            self.name = name
+            self.isAlive = isAlive
+        }
     }
 
-    private func logLeg(_ leg: String, text: String, outcome: String, bundle: String? = nil) {
-        Self.logger.info("Paste leg=\(leg, privacy: .public) length=\(text.count, privacy: .public) outcome=\(outcome, privacy: .public) bundle=\(bundle ?? "nil", privacy: .public)")
+    @MainActor
+    struct HeldTranscript {
+        let session: SessionID
+        let text: String
+        let destination: Destination?
+        var deliveryUnconfirmed = false
+
+        func deliver(
+            using service: PasteService,
+            bringToFront: (Destination) async -> Bool,
+            stillOwned: @escaping () -> Bool = { true }
+        ) async throws {
+            guard let destination else { throw PasteServiceError.destinationUnavailable }
+            let guarded = Destination(pid: destination.pid, name: destination.name) {
+                stillOwned() && destination.isAlive()
+            }
+            try await service.pasteAfterActivation(text, destination: guarded, bringToFront: bringToFront)
+        }
+    }
+
+    func pasteAfterActivation(
+        _ text: String,
+        destination: Destination,
+        expectedElement: AXUIElement? = nil,
+        bringToFront: (Destination) async -> Bool
+    ) async throws {
+        try Task.checkCancellation()
+        guard destination.isAlive() else { throw PasteServiceError.destinationUnavailable }
+        if strategies.frontmostPID() != destination.pid {
+            guard await bringToFront(destination) else {
+                try Task.checkCancellation()
+                throw PasteServiceError.destinationUnavailable
+            }
+        }
+        try await paste(text, preferPid: destination.pid, pidPostingEnabled: false,
+                        targetIsAlive: destination.isAlive, expectedElement: expectedElement)
     }
 
     func paste(_ text: String) async throws {
         try await paste(text, preferPid: nil, pidPostingEnabled: false)
     }
 
-    /// - Parameters:
-    ///   - preferPid: record-time target PID for the PID-posted Cmd+V
-    ///     experiment. Only consulted on the Cmd+V leg (short dictations
-    ///     still take the unicode path untouched).
-    ///   - pidPostingEnabled: defaults-gated kill switch (default false).
-    func paste(_ text: String, preferPid: pid_t?, pidPostingEnabled: Bool) async throws {
-        // Check Accessibility without prompting in the hot path.
-        guard strategies.isProcessTrusted() else {
-            Self.logger.warning("Accessibility not trusted; aborting paste")
-            throw PasteServiceError.accessibilityNotTrusted
+    func paste(
+        _ text: String,
+        preferPid: pid_t?,
+        pidPostingEnabled: Bool,
+        targetIsAlive: () -> Bool = { true },
+        expectedElement: AXUIElement? = nil
+    ) async throws {
+        guard strategies.isProcessTrusted() else { throw PasteServiceError.accessibilityNotTrusted }
+        let expectedPID = preferPid ?? strategies.frontmostPID()
+
+        func validateFrontmost() throws {
+            try validateSecureInput()
+            guard targetIsAlive() else { throw PasteServiceError.destinationUnavailable }
+            guard strategies.frontmostPID() == expectedPID else { throw PasteServiceError.frontmostChanged }
         }
 
-        // Secure-input global check BEFORE any pasteboard exposure (Task 5).
-        // If secure input is active globally, never place transcript on clipboard.
-        if strategies.isSecureEventInputEnabled() {
-            Self.logger.warning("Secure input active (IsSecureEventInputEnabled) — refusing pasteboard exposure")
-            throw PasteServiceError.secureInputActive
-        }
-        if let owner = strategies.secureInputOwnerPID(), owner != 0 {
-            Self.logger.warning("Secure input owned by pid=\(owner, privacy: .public) — refusing")
-            throw PasteServiceError.secureInputActive
-        }
-
-        // Resolve Tier-1 AX element for verification, unless AppQuirks says forcePaste.
-        var tier1Element: AXUIElement?
-        let frontmostApp = NSWorkspace.shared.frontmostApplication
-        let frontmostBundleID = strategies.frontmostBundleID()
-        let shouldForcePaste: Bool = {
-            if AppQuirks.shouldForcePaste(bundleID: frontmostBundleID) { return true }
-            if let preferPid, AppQuirks.shouldForcePaste(pid: preferPid) { return true }
-            if let preferPid, let bundle = strategies.bundleIDForPID(preferPid), AppQuirks.shouldForcePaste(bundleID: bundle) { return true }
-            return false
-        }()
-        if shouldForcePaste {
-            if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AppQuirks forcePaste skip Tier-1 bundleID=\(frontmostBundleID ?? "nil", privacy: .public)") }
-        } else if let app = frontmostApp {
-            switch strategies.resolveFocusedElement(app) {
-            case .success(let res):
-                tier1Element = res.element
-            case .failure(let err):
-                if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Tier-1 resolve failed: \(err.reason, privacy: .public) — will try global legs") }
-                tier1Element = nil
-            }
-        }
-
-        // Attempt Tier-1 verified AX insert if we have an element.
-        if let element = tier1Element {
-            // PID double-check per attempt (Task 5).
-            if let preferPid, let elementPid = strategies.axGetPid(element), elementPid != preferPid {
-                Self.logger.warning("PID mismatch elementPid=\(elementPid, privacy: .public) preferPid=\(preferPid, privacy: .public) → hold")
-                throw PasteServiceError.pidMismatch
-            }
-            // Secure-field refusal BEFORE pasteboard exposure.
-            if let role = strategies.getElementRole(element), role == "AXSecureTextField" {
-                Self.logger.warning("Secure field role AXSecureTextField → refusing")
-                throw PasteServiceError.secureField
-            }
-            // Re-check secure input at insert time (zero call sites before Task 5).
-            if strategies.isSecureEventInputEnabled() {
-                Self.logger.warning("Secure input active at insert time → refusing")
-                throw PasteServiceError.secureInputActive
-            }
-            if let owner = strategies.secureInputOwnerPID(), owner != 0 {
-                Self.logger.warning("Secure input owner at insert time pid=\(owner, privacy: .public) → refusing")
-                throw PasteServiceError.secureInputActive
-            }
-            // Optional per-reference timeout override (Task 5 experiment, default OFF).
-            // Legal per AX law: non-system-wide set does NOT propagate.
-            let overrideMs = UserDefaults.standard.integer(forKey: "internal.paste.setVerifyTimeoutOverrideMs")
-            if overrideMs > 0 {
-                let sec = Float(overrideMs) / 1000.0
-                strategies.setMessagingTimeout(element, sec)
-                if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Per-element verify timeout override ms=\(overrideMs, privacy: .public)") }
-            }
-            let verified = await performVerifiedAXInsert(element: element, text: text)
-            if verified {
-                if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via Accessibility (verified)") }
-                logLeg(PasteLeg.axVerified, text: text, outcome: "inserted", bundle: frontmostBundleID)
-                return
-            } else {
-                logLeg(PasteLeg.axVerified, text: text, outcome: "unverified-falling-through", bundle: frontmostBundleID)
-                if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AX verification failed (Electron lie / timeout) → fall through to global legs after frontmost re-check") }
-            }
-        }
-
-        // Frontmost re-check before global legs after ~350ms AX attempt window (Task 5, Jot G1).
-        // The AX verification above consumed ~120ms (3×40ms) plus SET time; we now verify
-        // frontmost still matches captured target before posting globally.
-        if let preferPid {
-            let current = strategies.frontmostPID()
-            if let cur = current, cur != preferPid {
-                Self.logger.warning("Frontmost changed during AX window preferPid=\(preferPid, privacy: .public) current=\(cur, privacy: .public) → hold")
+        func resolveAndValidateFocus() throws -> AXUIElement? {
+            try validateFrontmost()
+            let element = focusedElement()
+            if let element { try validateElement(element, expectedPID: expectedPID) }
+            if let expectedElement, element.map({ CFEqual(expectedElement, $0) }) != true {
                 throw PasteServiceError.frontmostChanged
             }
+            try validateFrontmost()
+            return element
         }
 
-        // Global legs: CGEvent unicode → pasteboard+CmdV
-        if strategies.postUnicodeText(text) {
-            if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via CGEvent unicode") }
-            logLeg(PasteLeg.unicodeCGEvent, text: text, outcome: "inserted", bundle: frontmostBundleID)
+        let element = try resolveAndValidateFocus()
+        let forcePaste = AppQuirks.shouldForcePaste(bundleID: strategies.frontmostBundleID()) ||
+            AppQuirks.shouldForcePaste(bundleID: preferPid.flatMap(strategies.bundleIDForPID))
+        if let element, !forcePaste,
+           try await insertAndVerify(into: element, text: text, validate: validateFrontmost) {
+            logLeg("ax", count: text.count)
             return
         }
-        logLeg(PasteLeg.unicodeCGEvent, text: text, outcome: "post-failed", bundle: frontmostBundleID)
+
+        _ = try resolveAndValidateFocus()
+        let unicodePosted: Bool
+        if let postUnicodeText = strategies.postUnicodeText {
+            unicodePosted = postUnicodeText(text)
+        } else {
+            unicodePosted = try Self.postUnicodeTextIfPossible(text, validate: validateFrontmost)
+        }
+        if unicodePosted {
+            logLeg("unicode", count: text.count)
+            return
+        }
 
         let pasteboard = strategies.pasteboard
+        let snapshotChangeCount = pasteboard.changeCount
         let snapshot = PasteboardSnapshot(pasteboard: pasteboard)
-        let insertedPasteboardState = writeAndTrackPasteboardState(pasteboard: pasteboard, text: text)
-        _ = await waitForPasteboardCommit(pasteboard: pasteboard, targetChangeCount: insertedPasteboardState.changeCount)
-
-        // clipboard restore on failed paste: the transcript now sits on the user's pasteboard. Restoring the
-        // original clipboard content is unconditional from this point — every
-        // exit path (Cmd+V success, AX insert success, any failure, or
-        // cancellation) schedules the restore. The defer must be registered
-        // before the cancellation check so a canceled paste still restores.
+        _ = try resolveAndValidateFocus()
+        guard pasteboard.changeCount == snapshotChangeCount else {
+            throw PasteServiceError.pasteExecutionFailed(reason: "The clipboard changed before the write.")
+        }
+        let inserted = writeAndTrackPasteboardState(pasteboard: pasteboard, text: text)
         var outcome = PasteOutcome.failed
-        defer { restoreClipboardIfNeeded(snapshot, insertedState: insertedPasteboardState, outcome: outcome) }
-
-        // cooperative pasteboard polling/stale-recording paste guard: the wait is cooperative, so a canceled transcription task
-        // (new recording started) reaches this point — abort the paste; the
-        // defer above still restores the clipboard.
-        try Task.checkCancellation()
-
+        defer { restoreClipboardIfNeeded(snapshot, insertedState: inserted, outcome: outcome) }
+        await strategies.afterClipboardWrite?()
+        let committed = await waitForPasteboardCommit(pasteboard: pasteboard, targetChangeCount: inserted.changeCount)
+        let currentElement = try resolveAndValidateFocus()
+        guard committed, pasteboardMatches(inserted) else {
+            throw PasteServiceError.pasteExecutionFailed(reason: "The clipboard changed before posting.")
+        }
+        try validateFrontmost()
         if pidPostingEnabled, let preferPid, strategies.postCmdVToPid(preferPid) {
-            if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via PID-posted Cmd+V pid=\(preferPid, privacy: .public)") }
-            logLeg(PasteLeg.cmdVPid, text: text, outcome: "posted", bundle: frontmostBundleID)
             outcome = .cmdV
+            logLeg("cmd-v-pid", count: text.count)
             return
-        } else if pidPostingEnabled, preferPid != nil {
-            Self.logger.warning("PID-posted Cmd+V refused; falling back to global post")
+        }
+        try validateFrontmost()
+        guard pasteboardMatches(inserted) else {
+            throw PasteServiceError.pasteExecutionFailed(reason: "The clipboard changed before posting.")
         }
         if strategies.postCmdV() {
-            if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via Cmd+V") }
-            logLeg(PasteLeg.cmdV, text: text, outcome: "posted", bundle: frontmostBundleID)
             outcome = .cmdV
+            logLeg("cmd-v", count: text.count)
             return
         }
-        logLeg(PasteLeg.cmdV, text: text, outcome: "post-failed", bundle: frontmostBundleID)
 
-        // Final fallback: legacy AX without verification (for apps where verification is unavailable).
-        // This is reached only after global legs failed; keeps previous behavior for coverage.
-        if let error = strategies.insertTextViaAccessibility(text) {
-            Self.logger.warning("Paste failed after AX fallback: \(error, privacy: .public)")
-            logLeg(PasteLeg.axFallback, text: text, outcome: "failed", bundle: frontmostBundleID)
-            throw PasteServiceError.pasteExecutionFailed(reason: error)
+        // Try AX here if focus became resolvable or the app prefers key events.
+        if let currentElement, forcePaste || element.map({ CFEqual($0, currentElement) }) != true {
+            if try await insertAndVerify(into: currentElement, text: text, validate: validateFrontmost) {
+                outcome = .accessibility
+                logLeg("ax-fallback", count: text.count)
+                return
+            }
         }
-
-        if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via Accessibility (fallback)") }
-        logLeg(PasteLeg.axFallback, text: text, outcome: "inserted", bundle: frontmostBundleID)
-        outcome = .accessibility
+        throw PasteServiceError.pasteExecutionFailed(reason: "The insertion methods declined the request.")
     }
 
-    /// record-time paste target capture: insert into a specific captured element (the record-time paste target) instead
-    /// of the frontmost app. Used when the frontmost app changed during transcription —
-    /// bypasses the pasteboard entirely, so the transcript never sits on the clipboard.
-    func paste(into element: AXUIElement, text: String) async throws {
-        guard strategies.isProcessTrusted() else {
-            Self.logger.warning("Accessibility not trusted; aborting captured-element paste")
-            throw PasteServiceError.accessibilityNotTrusted
+    func paste(into element: AXUIElement, text: String, destination: Destination? = nil) async throws {
+        guard strategies.isProcessTrusted() else { throw PasteServiceError.accessibilityNotTrusted }
+        func validate() throws {
+            try validateSecureInput()
+            if let destination, !destination.isAlive() { throw PasteServiceError.destinationUnavailable }
+            try validateElement(element, expectedPID: destination?.pid)
         }
-        // Secure-field refusal BEFORE any pasteboard exposure (Task 5).
-        if let role = strategies.getElementRole(element), role == "AXSecureTextField" {
-            Self.logger.warning("Captured-element secure field refusal")
+        try validate()
+        let pid = destination?.pid ?? strategies.axGetPid(element)
+        guard !AppQuirks.shouldForcePaste(bundleID: pid.flatMap(strategies.bundleIDForPID)),
+              try await insertAndVerify(into: element, text: text, validate: validate) else {
+            throw PasteServiceError.pasteExecutionFailed(reason: "The captured field declined insertion.")
+        }
+        logLeg("ax-captured", count: text.count)
+    }
+
+    private func focusedElement() -> AXUIElement? {
+        try? strategies.resolveFocusedElement(NSWorkspace.shared.frontmostApplication).get().element
+    }
+
+    private func validateElement(_ element: AXUIElement, expectedPID: pid_t?) throws {
+        if let expectedPID, strategies.axGetPid(element) != expectedPID {
+            throw PasteServiceError.pidMismatch
+        }
+        if strategies.getElementSubrole(element) == kAXSecureTextFieldSubrole ||
+            strategies.getElementRole(element) == kAXSecureTextFieldSubrole {
             throw PasteServiceError.secureField
         }
-        if strategies.isSecureEventInputEnabled() {
-            Self.logger.warning("Secure input active — captured-element refusal")
+    }
+
+    private func validateSecureInput() throws {
+        try Task.checkCancellation()
+        if strategies.isSecureEventInputEnabled() || (strategies.secureInputOwnerPID() ?? 0) != 0 {
             throw PasteServiceError.secureInputActive
         }
-        if let owner = strategies.secureInputOwnerPID(), owner != 0 {
-            Self.logger.warning("Secure input owner pid=\(owner, privacy: .public) — captured-element refusal")
-            throw PasteServiceError.secureInputActive
-        }
-        // AppQuirks check for captured element's PID
-        if let pid = strategies.axGetPid(element), AppQuirks.shouldForcePaste(pid: pid) {
-            if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AppQuirks forcePaste for captured element pid=\(pid, privacy: .public) — refusing Tier-1, caller should fallback") }
-            throw PasteServiceError.pasteExecutionFailed(reason: "AppQuirks forcePaste — Tier-1 skipped for captured element")
-        }
-        if let bundle = strategies.frontmostBundleID(), AppQuirks.shouldForcePaste(bundleID: bundle) {
-            if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AppQuirks forcePaste for frontmost bundle \(bundle, privacy: .public)") }
-            throw PasteServiceError.pasteExecutionFailed(reason: "AppQuirks forcePaste")
-        }
-        // Per-element timeout override for captured path as well.
-        let overrideMs = UserDefaults.standard.integer(forKey: "internal.paste.setVerifyTimeoutOverrideMs")
-        if overrideMs > 0 {
-            let sec = Float(overrideMs) / 1000.0
-            strategies.setMessagingTimeout(element, sec)
-        }
-        let verified = await performVerifiedAXInsert(element: element, text: text)
-        if verified {
-            if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via captured-element Accessibility insert (verified)") }
-            logLeg(PasteLeg.axCapturedElement, text: text, outcome: "inserted", bundle: strategies.bundleIDForPID(strategies.axGetPid(element) ?? 0))
-            return
-        }
-        logLeg(PasteLeg.axCapturedElement, text: text, outcome: "unverified-legacy-fallback", bundle: strategies.bundleIDForPID(strategies.axGetPid(element) ?? 0))
-        // Fallback to legacy insert for compatibility (still verified via same element)
-        if let error = strategies.insertTextIntoElement(element, text) {
-            Self.logger.warning("Captured-element paste failed: \(error, privacy: .public)")
-            throw PasteServiceError.pasteExecutionFailed(reason: error)
-        }
-        if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Paste succeeded via captured-element Accessibility insert (fallback)") }
+        try Task.checkCancellation()
+    }
+
+    private func logLeg(_ leg: String, count: Int) {
+        Self.logger.info("Paste leg=\(leg, privacy: .public) length=\(count, privacy: .public)")
     }
 
     /// Where a transcript should be pasted (record-time paste target capture).
@@ -353,8 +329,7 @@ final class PasteService {
     /// Pure decision for the paste target (headless-testable).
     enum PasteRouting {
         static func target(capturedPID: pid_t?, capturedElement: AXUIElement?, frontmostPID: pid_t?) -> PasteTarget {
-            guard let capturedPID, let frontmostPID,
-                  capturedPID != frontmostPID else {
+            guard let capturedPID, capturedPID != frontmostPID else {
                 return .frontmost
             }
             if let capturedElement {
@@ -400,9 +375,7 @@ final class PasteService {
 
         func attemptRestore(attempt: Int) {
             let pasteboard = self.strategies.pasteboard
-            guard pasteboard.changeCount == insertedState.changeCount,
-                  pasteboard.string(forType: .string) == insertedState.text
-            else {
+            guard self.pasteboardMatches(insertedState) else {
                 guard attempt < maxAttempts else {
                     if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("Clipboard restore skipped: pasteboard no longer matches Kalam's write") }
                     return
@@ -425,13 +398,15 @@ final class PasteService {
         }
     }
 
+    private func pasteboardMatches(_ inserted: InsertedPasteboardState) -> Bool {
+        strategies.pasteboard.changeCount == inserted.changeCount &&
+            strategies.pasteboard.string(forType: .string) == inserted.text
+    }
+
     func writeAndTrackPasteboardState(pasteboard: NSPasteboard, text: String) -> InsertedPasteboardState {
-        let before = pasteboard.changeCount
-        pasteboard.clearContents()
+        let changeCount = pasteboard.prepareForNewContents(with: .currentHostOnly)
         pasteboard.setString(text, forType: .string)
-        let after = pasteboard.changeCount
-        let effectiveChangeCount = after == before ? after + 1 : after
-        return InsertedPasteboardState(text: text, changeCount: effectiveChangeCount)
+        return InsertedPasteboardState(text: text, changeCount: changeCount)
     }
 
     func waitForPasteboardCommit(
@@ -457,50 +432,43 @@ final class PasteService {
         return false
     }
 
-    // MARK: Task 5 — Verified AX insert
-
-    /// Performs AX set + read-back verification (Jot AXInserter:78–89 pattern).
-    /// Captures `before` value, SETs `kAXSelectedTextAttribute`, then re-polls
-    /// `value` up to 3×40ms. Verified when `after == text`. Unreadable
-    /// elements (nil value) are treated as success (trust SET) to keep
-    /// existing tests and non-standard fields working. Never double-posts.
-    private func performVerifiedAXInsert(element: AXUIElement, text: String) async -> Bool {
+    /// A successful SET with uncertain readback or a messaging failure
+    /// may already have inserted. Only definitive refusals can fall through.
+    private func insertAndVerify(
+        into element: AXUIElement,
+        text: String,
+        validate: () throws -> Void
+    ) async throws -> Bool {
+        let overrideMs = UserDefaults.standard.integer(forKey: "internal.paste.setVerifyTimeoutOverrideMs")
+        if overrideMs > 0 { strategies.setMessagingTimeout(element, Float(overrideMs) / 1000) }
         let before = strategies.getElementValue(element)
-        let setResult = strategies.axSetSelectedText(element, text)
-        guard setResult == .success else {
-            if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AX SET failed with \(setResult.debugName, privacy: .public)") }
-            return false
+        let selected = strategies.getSelection(element)
+        let expected: String? = if let before, let selected, let range = Range(selected, in: before) {
+            before.replacingCharacters(in: range, with: text)
+        } else {
+            nil
         }
-        // Poll for verification.
-        for i in 0..<3 {
-            try? await Task.sleep(nanoseconds: 40_000_000) // 40 ms
-            if Task.isCancelled { return false }
-            if let after = strategies.getElementValue(element) {
-                if after == text {
-                    if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AX verification succeeded poll=\(i, privacy: .public)") }
-                    return true
-                }
-                if after != before {
-                    // Value changed but not to expected — keep polling; some apps update async.
-                    // Continue to next poll unless it's the last.
-                    if after.contains(text) {
-                        if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AX verification contains text poll=\(i, privacy: .public)") }
-                        return true
-                    }
-                } else {
-                    if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AX verification unchanged poll=\(i, privacy: .public) before=\(before ?? "nil", privacy: .public)") }
-                }
-            } else {
-                // Unreadable — trust SET succeeded (graceful for non-standard fields)
-                if KalamDiagnosticFlags.verboseAudio { Self.logger.debug("AX verification unreadable poll=\(i, privacy: .public) — trusting SET") }
-                return true
+        try validate()
+        switch strategies.axSetSelectedText(element, text) {
+        case .success:
+            break
+        case .attributeUnsupported, .noValue, .illegalArgument, .invalidUIElement, .notImplemented:
+            return false
+        default:
+            throw PasteServiceError.deliveryUnconfirmed
+        }
+        for _ in 0..<3 {
+            do {
+                try await Task.sleep(for: .milliseconds(40))
+            } catch {
+                throw PasteServiceError.deliveryUnconfirmed
+            }
+            if let after = strategies.getElementValue(element), after != before {
+                if let expected, after == expected { return true }
+                if expected == nil, before != nil, after == text { return true }
             }
         }
-        // Final check after polls
-        if let after = strategies.getElementValue(element) {
-            return after == text || after.contains(text)
-        }
-        return true
+        throw PasteServiceError.deliveryUnconfirmed
     }
 
     private static func postCmdV() -> Bool {
@@ -552,7 +520,7 @@ final class PasteService {
         return true
     }
 
-    private static func postUnicodeTextIfPossible(_ text: String) -> Bool {
+    private static func postUnicodeTextIfPossible(_ text: String, validate: () throws -> Void) throws -> Bool {
         let utf16Array = Array(text.utf16)
         if utf16Array.isEmpty {
             return false
@@ -580,10 +548,17 @@ final class PasteService {
                   let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
             else {
                 Self.logger.warning("Failed to create CGEvent unicode events")
+                if chunks > 0 { throw PasteServiceError.deliveryUnconfirmed }
                 return false
             }
             keyDown.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: chunk)
             keyUp.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: chunk)
+            do {
+                try validate()
+            } catch {
+                if chunks > 0 { throw PasteServiceError.deliveryUnconfirmed }
+                throw error
+            }
             keyDown.post(tap: .cghidEventTap)
             keyUp.post(tap: .cghidEventTap)
             chunks += 1
@@ -596,79 +571,28 @@ final class PasteService {
         return true
     }
 
-    private static func insertTextViaAccessibility(_ text: String) -> String? {
-        guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
-            return "No frontmost application found"
-        }
-
-        let resolution: AccessibilityFocusedElementResolution
-        switch AccessibilityFocusResolver.resolveFocusedElement(frontmostApp: frontmostApp) {
-        case .success(let focusedElementResolution):
-            resolution = focusedElementResolution
-        case .failure(let error):
-            return error.reason
-        }
-
-        if let error = insertTextViaAccessibility(into: resolution.element, text: text) {
-            return "Resolved focused element in \(resolution.appName) via \(resolution.strategy), but \(error)"
-        }
-        return nil
-    }
-
-    /// record-time paste target capture: insert into a specific captured element (the record-time paste target) instead
-    /// of the frontmost app's focused element. Used when the frontmost app changed during
-    /// transcription; bypasses the pasteboard entirely.
-    private static func insertTextViaAccessibility(into element: AXUIElement, text: String) -> String? {
-        let insertResult = AXUIElementSetAttributeValue(
-            element,
-            kAXSelectedTextAttribute as CFString,
-            text as CFTypeRef
-        )
-        if insertResult == .success {
-            return nil
-        }
-
-        let valueResult = AXUIElementSetAttributeValue(
-            element,
-            kAXValueAttribute as CFString,
-            text as CFTypeRef
-        )
-        if valueResult == .success {
-            return nil
-        }
-
-        return "kAXSelectedTextAttribute failed with \(insertResult.debugName) and "
-            + "kAXValueAttribute failed with \(valueResult.debugName)."
-    }
-
-    // MARK: Task 5 helpers (real AX)
-
-    private static func getElementRole(_ element: AXUIElement) -> String? {
+    private static func stringAttribute(_ attribute: String, of element: AXUIElement) -> String? {
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &value) == .success else { return nil }
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
         return value as? String
     }
 
     private static func getElementValue(_ element: AXUIElement) -> String? {
+        stringAttribute(kAXValueAttribute, of: element)
+    }
+
+    private static func selectedRange(_ element: AXUIElement) -> NSRange? {
         var value: CFTypeRef?
-        // Prefer kAXValueAttribute (full field value), fallback to selected text
-        if AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value) == .success,
-           let str = value as? String {
-            return str
-        }
-        value = nil
-        if AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &value) == .success,
-           let str = value as? String {
-            return str
-        }
-        return nil
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &value) == .success,
+              let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        var range = CFRange()
+        guard AXValueGetValue(value as! AXValue, .cfRange, &range),
+              range.location >= 0, range.length >= 0, range.location < Int.max - range.length else { return nil }
+        return NSRange(location: range.location, length: range.length)
     }
 
     private static func axSetSelectedText(_ element: AXUIElement, _ text: String) -> AXError {
-        let r1 = AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFTypeRef)
-        if r1 == .success { return .success }
-        let r2 = AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, text as CFTypeRef)
-        return r2
+        AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFTypeRef)
     }
 
     private static func axGetPid(_ element: AXUIElement) -> pid_t? {

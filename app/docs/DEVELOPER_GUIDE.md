@@ -25,7 +25,7 @@ Kalam is a macOS menu bar dictation app that records audio with push-to-talk, ru
   - Punctuation/spacing cleanup
 - Cleanup configuration persisted in UserDefaults
 - System audio ducking while recording (optional; runtime-verified because sandboxed/CoreAudio behavior can vary)
-- CGEvent unicode paste with guarded clipboard snapshot/restore and AX fallback
+- Destination-checked AX and keyboard insertion with guarded clipboard snapshot and restore
 - Recording indicator with premium translucent design and noise texture (Top center or Bottom center placement)
 
 ## Usage Benefits
@@ -42,8 +42,8 @@ Kalam is a macOS menu bar dictation app that records audio with push-to-talk, ru
   - Corrects recurring domain terms, names, and product language consistently.
 - ITN normalization (`NemoTextProcessing`)
   - Converts spoken forms into written forms (numbers, currency, emails), reducing manual edits.
-- CGEvent unicode → Cmd+V (clipboard) → AX fallback
-  - Pastes into the focused app while preserving prior clipboard contents on successful paste.
+- Selected-text AX insertion → CGEvent Unicode → Cmd+V via the clipboard.
+  A final AX attempt can serve a newly resolved field or an app that prefers key events.
 - System audio ducking while recording
   - Makes start/stop cues and speech monitoring easier to hear in noisy output environments.
 
@@ -127,7 +127,7 @@ Core files:
    - ASR transcription
    - Text cleanup
    - Dictionary replacements
-   - Paste to frontmost app
+   - Deliver to the recording’s destination or hold the transcript for explicit retry
    - Clipboard restore (if unchanged externally)
 
 Current ordering in code:
@@ -191,25 +191,22 @@ kill-switch OFF sets `postRollMode=fixed` + `roomSNR=0.0`. Per-key retune via
 `internal.latency.snrTrustDb` / `snrAbsoluteCapMs` / `snrQuietToStopMs` / `snrRelativeCap` /
 `snrFloorMarginDb` (restart required).
 
-**Route-conditional paste settle.** Only the `.frontmost` CGEvent route pays the settle wait
-(50/80 ms defaults, `internal.latency.pasteDelayShortMs`/`LongMs`); captured-element routes
-paste focus-independently via AX set-value and captured-app does its own activate+settle
-poll, so their wait is skipped. Consequence of deciding the route pre-wait (~50-80 ms
-earlier): a user switching apps during the former wait now resolves like any other
-post-transcription switch. A PID-posted Cmd+V experiment ships dark behind
-`internal.latency.pidPasteEnabled` (default OFF) with automatic fallback to the global
-Cmd+V post on refusal or nil PID.
+**Destination-safe delivery.** At key-up, the session retains the app captured when
+recording began and its AX element when available. The frontmost route settles for
+50 or 80 ms by default. If the app changes, Kalam can write directly to the captured
+element or reactivate the original process and wait for it to become frontmost.
+Kalam rechecks the destination before posting events, including after the clipboard wait.
+The optional PID-posted Cmd+V path can fall back to a global post after a refusal.
 
-**Tier-1 insertion hardening (K-56).** `PasteService` Tier-1 verified AX (`kAXSelectedTextAttribute` SET
-+ 3×40 ms read-back via `kAXValueAttribute`; unchanged → fall through to Cmd+V, never double-post;
-Electron lie-success killed). Before any pasteboard exposure: `AXSecureTextField` role or
-`IsSecureEventInputEnabled()` / `IORegistry IOConsoleUsers` secure-input probe → hold; `AXUIElementGetPid`
-mismatch vs `dictationTargetPID` → hold (`.focusElsewhere` chip, K-23); `AppQuirks.forcePaste` bundle-ID
-table (empty, governance) skips Tier-1; `AccessibilityWaker.wakeIfNeeded` prefetches AX while user
-still speaking (`KalamApp.startRecording`); after ~350 ms AX window, frontmost re-check before
-global `postUnicodeText`/`postCmdV` legs (mismatch → hold). Optional per-reference timeout override
-`internal.paste.setVerifyTimeoutOverrideMs` (0 unset, default OFF) raises only the SET+verify element
-toward 1.2–1.5 s (global stays 0.75 s; legal per `AXUIElement.h:387–397`).
+**AX verification and recovery.** Kalam sets `kAXSelectedTextAttribute` and compares the
+document readback to the expected edit when the selection range is available. A
+definitive refusal can fall through to the next insertion method. A successful write
+with uncertain readback, including cancellation during verification, stops automatic
+delivery. The held transcript prompts the user to check the original editor before
+retrying. An explicit retry stays bound to the recorded app and retains the transcript
+if the app has quit or delivery fails. A secure text-field subrole or either global
+secure-input check blocks insertion. The per-element AX timeout can be set through
+`internal.paste.setVerifyTimeoutOverrideMs`.
 
 **Crash recovery (K-57) — REMOVED 2026-10-02 (owner: no audio persistence, even
 across crashes).** Audio lives in memory only: capture buffers are `secureZero()`'d
@@ -436,7 +433,6 @@ UserDefaults keys include:
 - `internal.latency.postRollMaxMs` (`Int`, default `150`)
 - `internal.latency.pasteDelayShortMs` (`Int`, default `50`)
 - `internal.latency.pasteDelayLongMs` (`Int`, default `80`)
-- `internal.latency.pasteFallbackTotalMs` (`Int`, default `120`)
 - `internal.latency.snrAwareEnabled` (`Bool`, default `true`) — kill-switch for K-54
 - `internal.latency.snrTrustDb` (`Float`, default `12`)
 - `internal.latency.snrAbsoluteCapMs` (`Int`, default `1500`)
@@ -750,7 +746,7 @@ After changing an indicator surface, update `app/docs/plans/kalam-indicator-v1/i
 
 ## Current Notes
 
-- App currently relies on CGEvent unicode, then Cmd+V paste, then Accessibility insertion, so target-app behavior can vary.
+- Accessibility support and synthesized event handling vary by target app.
 - Clipboard restore is guarded by pasteboard text and change count so user or target-app clipboard changes are left untouched.
 - Audio ducking requires output devices with settable scalar volume and is runtime-verified under sandbox.
 - Grammar/cleanup unit tests run headlessly via `./scripts/test-engine.sh` (`Packages/KalamTextEngine/Tests/`); the remaining app integration tests run via the `KalamTests` target.

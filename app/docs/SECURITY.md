@@ -11,7 +11,7 @@ Kalam treats App Sandbox as the intended security posture. The checked-in entitl
 Runtime behavior still depends on macOS permission grants and target-app support:
 
 - **Global Hotkey Detection** uses the sandbox-compatible Carbon HotKey path where possible.
-- **Text Injection** attempts CGEvent unicode insertion, then a pasteboard + Cmd+V path, then Accessibility insertion. Accessibility permission and target-app behavior must be verified at runtime.
+- **Text Injection** attempts selected-text Accessibility insertion, CGEvent Unicode, then a clipboard-backed Cmd+V. A definitive refusal can allow a fallback. An uncertain write stops automatic delivery and holds the transcript for explicit retry to the original app. Secure fields and global secure input block insertion.
 - **System Audio Ducking** uses manual CoreAudio output-volume changes. The app now inspects runtime entitlements and logs capability status because sandboxed/manual CoreAudio behavior can vary by OS and output device. If ducking cannot be performed safely, recording continues without ducking.
 - **Models** are user-provisioned from a local folder selected by the user. The app does not download models itself in the sandboxed runtime.
 
@@ -24,12 +24,12 @@ Runtime behavior still depends on macOS permission grants and target-app support
 
 ### Transcription Data
 - Transcribed text is processed entirely locally
-- Text may be temporarily placed on the system pasteboard for injection
+- Clipboard-backed injection writes text temporarily with `.currentHostOnly`
 - Original pasteboard contents are restored only if the pasteboard still contains Kalam's inserted text and the pasteboard change count has not advanced
 
 ### Logging
 - The app logs timing and performance metrics for debugging
-- Transcription content is NOT logged (only character counts and processing times)
+- Paste diagnostics record delivery stages, counts, and timings. Transcript text, document contents, and destination identities are excluded.
 
 ## Security Measures
 

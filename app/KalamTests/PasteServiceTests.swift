@@ -25,11 +25,9 @@ final class PasteServiceTests: XCTestCase {
         strategies.isProcessTrusted = { true }
         strategies.postUnicodeText = { _ in false }
         strategies.postCmdV = { false }                                   // Cmd+V fails
-        strategies.insertTextViaAccessibility = { _ in "forced failure" } // AX insert fails
         strategies.pasteboard = pasteboard
         strategies.restoreDelay = 0.05
-        // Task 5: force Tier-1 to be skipped so the failure goes through the
-        // global pasteboard+CmdV path where the mocked insertTextViaAccessibility is the final fallback.
+        // Force the clipboard path so failed posting exercises restoration.
         strategies.resolveFocusedElement = { _ in .failure(AccessibilityFocusResolutionError(reason: "test force fallback")) }
         strategies.isSecureEventInputEnabled = { false }
         strategies.secureInputOwnerPID = { nil }
@@ -135,6 +133,10 @@ final class PasteServiceTests: XCTestCase {
         strategies.postCmdV = { true }                                     // Cmd+V succeeds
         strategies.pasteboard = pasteboard
         strategies.restoreDelay = 0.3
+        strategies.resolveFocusedElement = { _ in .failure(AccessibilityFocusResolutionError(reason: "no field")) }
+        strategies.frontmostPID = { nil }
+        strategies.isSecureEventInputEnabled = { false }
+        strategies.secureInputOwnerPID = { nil }
         let service = PasteService(strategies: strategies)
 
         try await service.paste("transcript-\(UUID().uuidString)")
@@ -170,7 +172,6 @@ final class PasteServiceTests: XCTestCase {
         strategies.isProcessTrusted = { true }
         strategies.postUnicodeText = { _ in false }
         strategies.postCmdV = { false }                                    // Cmd+V fails
-        strategies.insertTextViaAccessibility = { _ in nil }               // AX succeeds (fallback)
         strategies.pasteboard = pasteboard
         strategies.restoreDelay = 0.3                                      // long grace — must NOT apply here
         // Task 5: Tier-1 verified path is now primary; mock it to succeed directly.
@@ -181,7 +182,7 @@ final class PasteServiceTests: XCTestCase {
         strategies.frontmostPID = { nil }
         strategies.axGetPid = { _ in nil }
         strategies.getElementRole = { _ in "AXTextField" }
-        var verifiedValue: String? = nil
+        var verifiedValue = ""
         strategies.axSetSelectedText = { _, text in
             verifiedValue = text
             return .success
@@ -288,76 +289,95 @@ final class PasteServiceTests: XCTestCase {
             "cooperative pasteboard polling: cancellation must abort the wait promptly, not run the full timeout")
     }
 
-    /// stale-recording paste guard × clipboard restore on failed paste × pasteboard exposure minimization × cooperative pasteboard polling interplay: canceling the surrounding task
-    /// aborts the paste before it dispatches (no Cmd+V, no AX) AND the defer
-    /// restore still returns the clipboard to its original content. (A
-    /// mid-wait cancel can't be staged headlessly through paste() on this
-    /// host — named-pasteboard commits land synchronously, so the commit wait
-    /// early-returns; wait-level cancellation is covered by
-    /// testWaitForPasteboardCommitRespondsToCancellation.)
-    func testPasteAbortsWhenCanceledAndRestoresClipboard() throws {
-        let pasteboard = makeIsolatedPasteboard()
+    func testPasteAbortsWhenCanceledAndRestoresClipboard() async throws {
+        var strategies = makeFailingUnicodeStrategies()
+        let pasteboard = strategies.pasteboard
         pasteboard.clearContents()
-        let original = "original-\(UUID().uuidString)"
-        pasteboard.setString(original, forType: .string)
+        pasteboard.setString("original", forType: .string)
+        strategies.postCmdV = { XCTFail("Canceled paste posted Cmd+V"); return true }
+        strategies.afterClipboardWrite = {
+            XCTAssertEqual(pasteboard.string(forType: .string), "transcript")
+            withUnsafeCurrentTask { $0?.cancel() }
+        }
+        let service = PasteService(strategies: strategies)
+        let task = Task { try await service.paste("transcript") }
+        do {
+            try await task.value
+            XCTFail("Cancel after write must abort posting")
+        } catch is CancellationError {}
+        XCTAssertEqual(pasteboard.string(forType: .string), "original")
+    }
 
-        var strategies = PasteService.PasteStrategies()
-        strategies.isProcessTrusted = { true }
-        strategies.postUnicodeText = { _ in false }
-        strategies.postCmdV = {
-            XCTFail("Cmd+V must not be posted after cancellation")
+    func testTargetSwitchDuringClipboardWaitAbortsAndRestores() async throws {
+        var strategies = makeFailingUnicodeStrategies()
+        let pasteboard = strategies.pasteboard
+        pasteboard.clearContents()
+        pasteboard.setString("original", forType: .string)
+        var frontmost: pid_t = 99
+        var posts = 0
+        strategies.frontmostPID = { frontmost }
+        strategies.afterClipboardWrite = {
+            XCTAssertEqual(pasteboard.string(forType: .string), "private")
+            frontmost = 100
+        }
+        strategies.postCmdV = { posts += 1; return true }
+        strategies.postCmdVToPid = { _ in posts += 1; return true }
+        let service = PasteService(strategies: strategies)
+        do {
+            try await service.paste("private", preferPid: 99, pidPostingEnabled: true)
+            XCTFail("Focus change should abort before a post")
+        } catch PasteServiceError.frontmostChanged {}
+        XCTAssertEqual(posts, 0)
+        XCTAssertEqual(pasteboard.string(forType: .string), "original")
+    }
+
+    func testHeldTargetQuitsBeforeRetry() async throws {
+        var strategies = makeFailingUnicodeStrategies()
+        var posts = 0
+        var activations = 0
+        strategies.postCmdV = { posts += 1; return true }
+        let destination = PasteService.Destination(pid: 42, name: "Editor", isAlive: { false })
+        let held = PasteService.HeldTranscript(session: UUID(), text: "retained", destination: destination)
+        do {
+            try await held.deliver(using: PasteService(strategies: strategies)) { _ in
+                activations += 1
+                return true
+            }
+            XCTFail("A terminated destination must never receive a paste")
+        } catch PasteServiceError.destinationUnavailable {}
+        XCTAssertEqual(activations, 0)
+        XCTAssertEqual(posts, 0)
+        XCTAssertEqual(held.destination?.pid, 42)
+        XCTAssertEqual(held.text, "retained")
+    }
+
+    func testFailedHeldRetryRetainsOwnerTextAndDestination() async throws {
+        var strategies = makeFailingUnicodeStrategies()
+        var frontmost: pid_t = 99
+        var postedTo: [pid_t] = []
+        var attempts: [pid_t] = []
+        strategies.frontmostPID = { frontmost }
+        strategies.postCmdV = { postedTo.append(frontmost); return postedTo.count == 2 }
+        let destination = PasteService.Destination(pid: 42, name: "Editor", isAlive: { true })
+        let owner = UUID()
+        let held = PasteService.HeldTranscript(session: owner, text: "retained", destination: destination)
+        let service = PasteService(strategies: strategies)
+        func activate(_ target: PasteService.Destination) async -> Bool {
+            attempts.append(target.pid)
+            frontmost = target.pid
             return true
         }
-        strategies.insertTextViaAccessibility = { _ in
-            XCTFail("AX insert must not run after cancellation")
-            return nil
-        }
-        strategies.pasteboard = pasteboard
-        strategies.restoreDelay = 0.3
-        // Task 5: Tier-1 is now before pasteboard; ensure it is skipped so the
-        // cancel is reached before any AX/CmdV dispatch.
-        strategies.resolveFocusedElement = { _ in .failure(AccessibilityFocusResolutionError(reason: "test: skip Tier-1 for cancel")) }
-        strategies.isSecureEventInputEnabled = { false }
-        strategies.secureInputOwnerPID = { nil }
-        strategies.frontmostPID = { nil }
-        strategies.axSetSelectedText = { _, _ in
-            XCTFail("AX verified insert must not run after cancellation")
-            return .cannotComplete
-        }
-        strategies.getElementValue = { _ in nil }
-        strategies.getElementRole = { _ in nil }
-        strategies.axGetPid = { _ in nil }
-        let service = PasteService(strategies: strategies)
-
-        let errorBox = TestBox<Error>()
-        let task = Task {
-            do {
-                try await service.paste("transcript-\(UUID().uuidString)")
-            } catch {
-                errorBox.value = error
-            }
-        }
-        // Cancel before the paste task starts dispatching: every path leads
-        // to Task.checkCancellation() → CancellationError, and the defer
-        // restore still runs.
-        task.cancel()
-
-        let deadline = Date().addingTimeInterval(2.0)
-        while Date() < deadline && errorBox.value == nil {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
-        }
-        XCTAssertTrue(errorBox.value is CancellationError,
-            "paste must throw CancellationError when canceled")
-
-        // The defer restore runs synchronously in the throw path (delay 0);
-        // pump briefly in case the retry path is exercised.
-        let restoreDeadline = Date().addingTimeInterval(1.0)
-        while Date() < restoreDeadline {
-            if pasteboard.string(forType: .string) == original { break }
-            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
-        }
-        XCTAssertEqual(pasteboard.string(forType: .string), original,
-            "clipboard restore on failed paste: the defer restore must still fire after cancellation")
+        do {
+            try await held.deliver(using: service, bringToFront: activate)
+            XCTFail("First post was refused")
+        } catch PasteServiceError.pasteExecutionFailed {}
+        XCTAssertEqual(held.session, owner)
+        XCTAssertEqual(held.text, "retained")
+        XCTAssertEqual(held.destination?.pid, 42)
+        frontmost = 99
+        try await held.deliver(using: service, bringToFront: activate)
+        XCTAssertEqual(attempts, [42, 42])
+        XCTAssertEqual(postedTo, [42, 42])
     }
 
     // MARK: - record-time paste target capture (captured-element paste + routing)
@@ -371,9 +391,14 @@ final class PasteServiceTests: XCTestCase {
         let insertedElement = TestBox<AXUIElement>()
         var strategies = PasteService.PasteStrategies()
         strategies.isProcessTrusted = { true }
-        strategies.insertTextIntoElement = { target, _ in
+        var document = ""
+        strategies.isSecureEventInputEnabled = { false }
+        strategies.secureInputOwnerPID = { nil }
+        strategies.getElementValue = { _ in document }
+        strategies.axSetSelectedText = { target, text in
             insertedElement.value = target
-            return nil
+            document = text
+            return .success
         }
         strategies.pasteboard = pasteboard
         let service = PasteService(strategies: strategies)
@@ -392,14 +417,15 @@ final class PasteServiceTests: XCTestCase {
     func testPasteIntoCapturedElementThrowsOnInsertFailure() async {
         var strategies = PasteService.PasteStrategies()
         strategies.isProcessTrusted = { true }
-        strategies.insertTextIntoElement = { _, _ in "element is gone" }
+        strategies.isSecureEventInputEnabled = { false }
+        strategies.secureInputOwnerPID = { nil }
+        strategies.axSetSelectedText = { _, _ in .invalidUIElement }
         let service = PasteService(strategies: strategies)
 
         do {
             try await service.paste(into: AXUIElementCreateSystemWide(), text: "transcript")
             XCTFail("captured-element paste must throw when the insert fails")
-        } catch PasteServiceError.pasteExecutionFailed(let reason) {
-            XCTAssertEqual(reason, "element is gone")
+        } catch PasteServiceError.pasteExecutionFailed {
         } catch {
             XCTFail("unexpected error: \(error)")
         }
@@ -409,9 +435,9 @@ final class PasteServiceTests: XCTestCase {
         var insertCalled = false
         var strategies = PasteService.PasteStrategies()
         strategies.isProcessTrusted = { false }
-        strategies.insertTextIntoElement = { _, _ in
+        strategies.axSetSelectedText = { _, _ in
             insertCalled = true
-            return nil
+            return .success
         }
         let service = PasteService(strategies: strategies)
 
@@ -483,7 +509,7 @@ final class PasteServiceTests: XCTestCase {
         strategies.resolveFocusedElement = { _ in .failure(AccessibilityFocusResolutionError(reason: "test: force global path")) }
         strategies.isSecureEventInputEnabled = { false }
         strategies.secureInputOwnerPID = { nil }
-        strategies.frontmostPID = { nil }
+        strategies.frontmostPID = { 99 }
         strategies.axGetPid = { _ in nil }
         strategies.getElementRole = { _ in nil }
         strategies.getElementValue = { _ in nil }

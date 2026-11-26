@@ -13,46 +13,102 @@ final class PasteServiceTier1Tests: XCTestCase {
         NSPasteboard(name: NSPasteboard.Name("Tier1Tests.\(UUID().uuidString)"))
     }
 
-    // Electron lie-success: AX SET returns success but value unchanged → fall through to Cmd+V, exactly one.
-    func testElectronLieFallsThroughToCmdVExactlyOnce() async throws {
+    func testSuccessfulSetWithUnchangedPrefilledValueDoesNotFallThrough() async throws {
         let pasteboard = isolatedPasteboard()
         pasteboard.clearContents()
         pasteboard.setString("original", forType: .string)
         let originalChangeCount = pasteboard.changeCount
+        let element = AXUIElementCreateSystemWide()
+        var setCalls = 0
+        var posts = 0
+        var strategies = axStrategies(element: element, pasteboard: pasteboard)
+        strategies.axSetSelectedText = { _, _ in setCalls += 1; return .success }
+        strategies.getElementValue = { _ in "hello verified was already here" }
+        strategies.postUnicodeText = { _ in posts += 1; return false }
+        strategies.postCmdV = { posts += 1; return true }
+        let service = PasteService(strategies: strategies)
+        do {
+            try await service.paste("hello verified", preferPid: 42, pidPostingEnabled: false)
+            XCTFail("An unchanged prefilled value cannot confirm delivery")
+        } catch PasteServiceError.deliveryUnconfirmed {}
+        XCTAssertEqual(setCalls, 1)
+        XCTAssertEqual(posts, 0)
+        XCTAssertEqual(pasteboard.changeCount, originalChangeCount)
+    }
 
-        let fakeElement = AXUIElementCreateSystemWide()
-        var axSetCalls = 0
-        var axValueCalls = 0
-        var cmdVCalls = 0
-        var unicodeCalls = 0
+    func testInsertPreservesPrefilledValueAroundSelection() async throws {
+        let element = AXUIElementCreateSystemWide()
+        var strategies = axStrategies(element: element, pasteboard: isolatedPasteboard())
+        var document = "Before replace after"
+        var setCalls = 0
+        strategies.getElementValue = { _ in document }
+        strategies.getSelection = { _ in NSRange(location: 7, length: 7) }
+        strategies.axSetSelectedText = { target, text in
+            XCTAssertTrue(target === element)
+            setCalls += 1
+            document = "Before \(text) after"
+            return .success
+        }
+        try await PasteService(strategies: strategies).paste("dictation", preferPid: 42, pidPostingEnabled: false)
+        XCTAssertEqual(document, "Before dictation after")
+        XCTAssertEqual(setCalls, 1)
+    }
 
+    func testCancellationAfterSuccessfulAXWriteSuppressesFallback() async throws {
+        let pasteboard = isolatedPasteboard()
+        pasteboard.clearContents()
+        pasteboard.setString("original", forType: .string)
+        let element = AXUIElementCreateSystemWide()
+        var strategies = axStrategies(element: element, pasteboard: pasteboard)
+        var written: [String] = []
+        strategies.axSetSelectedText = { target, text in
+            XCTAssertTrue(target === element)
+            written.append(text)
+            withUnsafeCurrentTask { $0?.cancel() }
+            return .success
+        }
+        let service = PasteService(strategies: strategies)
+        let task = Task { try await service.paste("dictation", preferPid: 42, pidPostingEnabled: false) }
+        do {
+            try await task.value
+            XCTFail("Canceled readback leaves delivery unconfirmed")
+        } catch PasteServiceError.deliveryUnconfirmed {}
+        XCTAssertEqual(written, ["dictation"])
+        XCTAssertEqual(pasteboard.string(forType: .string), "original")
+    }
+
+    func testDefinitiveAXRefusalAllowsOneCmdV() async throws {
+        let element = AXUIElementCreateSystemWide()
+        var strategies = axStrategies(element: element, pasteboard: isolatedPasteboard())
+        var sets = 0
+        var posts = 0
+        strategies.axSetSelectedText = { _, _ in sets += 1; return .attributeUnsupported }
+        strategies.postUnicodeText = { _ in false }
+        strategies.postCmdV = { posts += 1; return true }
+        try await PasteService(strategies: strategies).paste("dictation", preferPid: 42, pidPostingEnabled: false)
+        XCTAssertEqual(sets, 1)
+        XCTAssertEqual(posts, 1)
+    }
+
+    private func axStrategies(element: AXUIElement, pasteboard: NSPasteboard) -> PasteService.PasteStrategies {
         var strategies = PasteService.PasteStrategies()
         strategies.isProcessTrusted = { true }
-        strategies.postUnicodeText = { _ in unicodeCalls += 1; return false }
-        strategies.postCmdV = { cmdVCalls += 1; return true }
-        strategies.pasteboard = pasteboard
-        strategies.restoreDelay = 0
-        strategies.resolveFocusedElement = { _ in .success(AccessibilityFocusedElementResolution(element: fakeElement, appName: "ElectronApp", strategy: "test")) }
         strategies.isSecureEventInputEnabled = { false }
         strategies.secureInputOwnerPID = { nil }
-        strategies.frontmostPID = { nil }
-        strategies.axGetPid = { _ in nil }
+        strategies.frontmostPID = { 42 }
+        strategies.axGetPid = { _ in 42 }
         strategies.getElementRole = { _ in "AXTextField" }
-        // Lie: SET succeeds but value stays old
-        strategies.axSetSelectedText = { _, _ in axSetCalls += 1; return .success }
-        strategies.getElementValue = { _ in axValueCalls += 1; return "old value" }
-        strategies.setMessagingTimeout = { _, _ in }
-
-        let service = PasteService(strategies: strategies)
-        try await service.paste("hello verified", preferPid: nil, pidPostingEnabled: false)
-
-        XCTAssertEqual(axSetCalls, 1, "Tier-1 SET must be attempted once")
-        XCTAssertGreaterThanOrEqual(axValueCalls, 1, "verification must poll")
-        XCTAssertEqual(cmdVCalls, 1, "fallback Cmd+V must be called exactly once")
-        XCTAssertEqual(unicodeCalls, 1, "unicode attempted once before pasteboard (fails)")
-        // Exactly one insertion: Cmd+V (AX lied, so not counted as insertion)
-        // Pasteboard should have been used for Cmd+V, then restored immediately (AX fallback was not pasteboard)
-        // The test doesn't check double-insert directly, but the call counts prove it.
+        strategies.getElementSubrole = { _ in nil }
+        strategies.getSelection = { _ in nil }
+        strategies.getElementValue = { _ in "before" }
+        strategies.resolveFocusedElement = { _ in
+            .success(AccessibilityFocusedElementResolution(element: element, appName: "Editor", strategy: "test"))
+        }
+        strategies.postUnicodeText = { _ in XCTFail("Unexpected global unicode post"); return false }
+        strategies.postCmdV = { XCTFail("Unexpected Cmd+V"); return false }
+        strategies.pasteboard = pasteboard
+        strategies.restoreDelay = 0
+        return strategies
     }
 
     // Secure field refusal BEFORE pasteboard exposure — no clipboard write, hold.
@@ -69,7 +125,8 @@ final class PasteServiceTier1Tests: XCTestCase {
         strategies.postCmdV = { XCTFail("CmdV must not be posted on secure field"); return false }
         strategies.pasteboard = pasteboard
         strategies.resolveFocusedElement = { _ in .success(AccessibilityFocusedElementResolution(element: fakeElement, appName: "SecureApp", strategy: "test")) }
-        strategies.getElementRole = { _ in "AXSecureTextField" }
+        strategies.getElementRole = { _ in "AXTextField" }
+        strategies.getElementSubrole = { _ in "AXSecureTextField" }
         strategies.isSecureEventInputEnabled = { false }
         strategies.secureInputOwnerPID = { nil }
         strategies.axGetPid = { _ in nil }
@@ -242,7 +299,7 @@ final class PasteServiceTier1Tests: XCTestCase {
         strategies.pasteboard = isolatedPasteboard()
         strategies.resolveFocusedElement = { _ in .success(AccessibilityFocusedElementResolution(element: fakeElement, appName: "TextEdit", strategy: "test")) }
         strategies.axSetSelectedText = { _, _ in axSetCalls += 1; return .success }
-        strategies.getElementValue = { _ in "hello" }
+        strategies.getElementValue = { _ in axSetCalls == 0 ? "" : "hello" }
         strategies.isSecureEventInputEnabled = { false }
         strategies.secureInputOwnerPID = { nil }
         strategies.frontmostPID = { nil }
@@ -261,7 +318,8 @@ final class PasteServiceTier1Tests: XCTestCase {
         let fakeElement = AXUIElementCreateSystemWide()
         var strategies = PasteService.PasteStrategies()
         strategies.isProcessTrusted = { true }
-        strategies.getElementRole = { _ in "AXSecureTextField" }
+        strategies.getElementRole = { _ in "AXTextField" }
+        strategies.getElementSubrole = { _ in "AXSecureTextField" }
         strategies.isSecureEventInputEnabled = { false }
         strategies.secureInputOwnerPID = { nil }
         let service = PasteService(strategies: strategies)
@@ -282,7 +340,7 @@ final class PasteServiceTier1Tests: XCTestCase {
         strategies.isSecureEventInputEnabled = { false }
         strategies.secureInputOwnerPID = { nil }
         strategies.axSetSelectedText = { _, _ in setCalls += 1; return .success }
-        strategies.getElementValue = { _ in "captured hello" }
+        strategies.getElementValue = { _ in setCalls == 0 ? "" : "captured hello" }
         strategies.setMessagingTimeout = { _, _ in }
         let service = PasteService(strategies: strategies)
         try await service.paste(into: fakeElement, text: "captured hello")

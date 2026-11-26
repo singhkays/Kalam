@@ -51,7 +51,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         static let postRollMaxMsKey = "internal.latency.postRollMaxMs"
         static let pasteDelayShortMsKey = "internal.latency.pasteDelayShortMs"
         static let pasteDelayLongMsKey = "internal.latency.pasteDelayLongMs"
-        static let pasteFallbackTotalMsKey = "internal.latency.pasteFallbackTotalMs"
         /// K-50 experiment kill switch (default OFF — ships dark).
         static let pidPasteEnabledKey = "internal.latency.pidPasteEnabled"
         static let enableStageTimingKey = "internal.latency.enableStageTiming"
@@ -71,7 +70,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         static let defaultPostRollMaxMs = 150
         static let defaultPasteDelayShortMs = 50
         static let defaultPasteDelayLongMs = 80
-        static let defaultPasteFallbackTotalMs = 120
         static let defaultEnableStageTiming = true
         static let defaultSnrAwareEnabled = true
         static let defaultSnrTrustDb: Float = 12
@@ -154,10 +152,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem!
     private var setupMenuItem: NSMenuItem!
-    /// Dedup for the partial-AX capture failure (Sublime etc.): expected on every
-    /// press, so log once per pid per launch and only when verbose.
-    private static nonisolated(unsafe) var loggedPartialAXPIDs = Set<pid_t>()
-    private static let loggedPartialAXPIDsLock = NSLock()
     private let asr = ASRService()
     private let audio = AudioRecorder()
     private let warmPool = WarmEnginePool()
@@ -166,20 +160,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let paster = PasteService()
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "DictationRuntime")
 
-    // record-time paste target capture: record-time paste target (app PID + focused element), and a held transcript
-    // awaiting an explicit "Paste" action when the captured target is gone.
-    private var dictationTargetPID: pid_t?
+    private var dictationDestination: PasteService.Destination?
     private var dictationTargetElement: AXUIElement?
-    private var heldTranscript: String?
-    /// partial-AX target capture no-op: the app the hold capsule promised (pid), so the Paste button
-    /// delivers THERE instead of whatever is frontmost when clicked.
-    private var heldTranscriptTargetPID: pid_t?
-    /// K-52: which session the hold slot belongs to. Cleanup is scoped by
-    /// OWNERSHIP — a session's success path may only clear its own slot, so a
-    /// preserved transcript from a superseded session survives (the wipe found
-    /// in manual round 2: B's `heldTranscript = nil` destroyed A's preserved
-    /// text because the slot was shared and the cleanup unconditional).
-    private var heldTranscriptSession: SessionID?
+    private var heldTranscript: PasteService.HeldTranscript?
+    private var heldDeliveryTask: Task<Void, Never>?
 
     // K-52: pure lifecycle decision state (DictationStateMachine). Mutated
     // only through dispatchLifecycle, which realizes the machine's ordered
@@ -193,7 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private struct CommittedTranscript {
         let session: SessionID
         let text: String
-        let targetPID: pid_t?
+        let destination: PasteService.Destination?
     }
     private var committedTranscript: CommittedTranscript?
     /// A preserved transcript's hold chip is deferred while a newer session
@@ -299,7 +283,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             LatencyTuningOptions.postRollMaxMsKey: LatencyTuningOptions.defaultPostRollMaxMs,
             LatencyTuningOptions.pasteDelayShortMsKey: LatencyTuningOptions.defaultPasteDelayShortMs,
             LatencyTuningOptions.pasteDelayLongMsKey: LatencyTuningOptions.defaultPasteDelayLongMs,
-            LatencyTuningOptions.pasteFallbackTotalMsKey: LatencyTuningOptions.defaultPasteFallbackTotalMs,
             LatencyTuningOptions.enableStageTimingKey: LatencyTuningOptions.defaultEnableStageTiming,
             LatencyTuningOptions.startStageTimingKey: true,
             LatencyTuningOptions.pasteSetVerifyTimeoutOverrideMsKey: 0,
@@ -1111,7 +1094,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             transcriptionTask?.cancel()
             transcriptionTask = nil
             cancelMicStallWatchdog()
-            dictationTargetPID = nil
+            dictationDestination = nil
             dictationTargetElement = nil
             // K-52: heldTranscript survives — same never-destroyed policy as
             // cancelRecording (a parked transcript is a settled session's).
@@ -1236,7 +1219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // re-record window (P0 #1). The machine's keyDown effect runs only if
         // the start below actually commits (dispatch after startCollecting).
         // failed-start hardening: never leave a previous session's paste target alive
-        dictationTargetPID = nil
+        dictationDestination = nil
         dictationTargetElement = nil
         let onboardingSnapshot = currentOnboardingSnapshot()
         guard !onboardingSnapshot.hasIncompleteRequirements else {
@@ -1380,36 +1363,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // (AccessibilityFocusResolver bounds the system-wide query AND every
         // element it returns, so attribute reads cannot inherit the 6 s default).
         if let frontmost = NSWorkspace.shared.frontmostApplication {
-            switch AccessibilityFocusResolver.resolveFocusedElement(frontmostApp: frontmost) {
-            case .success(let resolution):
-                dictationTargetPID = frontmost.processIdentifier
-                dictationTargetElement = resolution.element
-                if KalamDiagnosticFlags.verboseAudio {
-                    logger.debug("Dictation target captured appName=\(resolution.appName, privacy: .public) strategy=\(resolution.strategy, privacy: .public) pid=\(frontmost.processIdentifier, privacy: .public)")
-                }
+            dictationDestination = PasteService.Destination(frontmost)
+            let resolution = try? AccessibilityFocusResolver.resolveFocusedElement(frontmostApp: frontmost).get()
+            dictationTargetElement = resolution?.element
+            if let resolution {
                 overlay.refinePlacementIfMoved(focusHint: resolution.element)
-            case .failure(let error):
-                // partial-AX target capture no-op: partial-AX apps (e.g. Sublime Text) answer none of the AX
-                // queries, but the pid alone still identifies the record-time target —
-                // keep it so paste-time routing can reactivate this app instead of
-                // degrading to frontmost-at-paste-time.
-                dictationTargetPID = frontmost.processIdentifier
-                dictationTargetElement = nil
-                // Partial-AX apps answer none of the AX queries on every press —
-                // expected, not a warning. Gated + deduped per pid per launch.
-                if KalamDiagnosticFlags.verboseAudio,
-                   Self.claimFirstPartialAXLog(pid: frontmost.processIdentifier) {
-                    logger.debug("Dictation target element capture FAILED reason=\(error.reason, privacy: .public) pidKept=\(frontmost.processIdentifier, privacy: .public)")
-                }
             }
         } else {
-            dictationTargetPID = nil
+            dictationDestination = nil
             dictationTargetElement = nil
-            logger.warning("Dictation target capture SKIPPED: no frontmost application")
         }
         // Task 5 (K-56): AX wake prefetch while the user is still speaking (not after transcript lands).
         // Lightweight, best-effort — warms the AX connection for the later Tier-1 SET.
-        if let pid = dictationTargetPID {
+        if let pid = dictationDestination?.pid {
             let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
             // Fire and forget; no await, no log of transcript.
             _ = AccessibilityWaker.wakeIfNeeded(bundleID: bundleID, pid: pid)
@@ -1417,18 +1383,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    /// Sync (non-async) dedupe claim for the per-launch partial-AX log, so the
-    /// NSLock calls stay legal under Swift concurrency: `startRecording` became
-    /// async with the bounded-start hardening, and locking directly from an
-    /// async context is unavailable.
-    private static func claimFirstPartialAXLog(pid: Int32) -> Bool {
-        loggedPartialAXPIDsLock.lock()
-        defer { loggedPartialAXPIDsLock.unlock() }
-        let seen = loggedPartialAXPIDs.contains(pid)
-        if !seen { loggedPartialAXPIDs.insert(pid) }
-        return !seen
-    }
-    
     /// Returns true when a pending bounded start was active and has been
     /// abandoned. Rolls the machine's pending state back (a pending start IS
     /// machine decision state since the freeze hardening) and abandons the
@@ -1551,7 +1505,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // K-52 (manual-gate finding): snapshot THIS session's paste target
         // now — a re-record re-captures the target before the interrupted
         // ASR returns, and the preserved text must promise the ORIGINAL app.
-        let pasteTargetPID = self.dictationTargetPID
+        let destination = self.dictationDestination
+        let targetElement = self.dictationTargetElement
 
         // Audio teardown lives in its own task: the transcription task is
         // cancelled by the next session's start (stale-recording paste guard) and must NOT own the
@@ -1581,7 +1536,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Run as an actor-inherited task instead of Task.detached so Swift 6 does not
         // send MainActor app state into an unisolated closure. Add post-roll to preserve trailing phonemes.
-        transcriptionTask = Task(priority: .userInitiated) { [weak self, pttDown, pttUp, generation, stopTask, stopSessionID, pasteTargetPID] in
+        transcriptionTask = Task(priority: .userInitiated) { [weak self, pttDown, pttUp, generation, stopTask, stopSessionID, destination, targetElement] in
             guard let self = self else { return }
             guard !Task.isCancelled else { return }
             let defaults = UserDefaults.standard
@@ -1777,9 +1732,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // destruction this machine exists to prevent. Cancellation
                 // now only stops the paste leg, never the record of text.
                 await MainActor.run {
-                    self.committedTranscript = CommittedTranscript(session: stopSessionID, text: text, targetPID: pasteTargetPID)
+                    self.committedTranscript = CommittedTranscript(session: stopSessionID, text: text, destination: destination)
                     self.dispatchLifecycle(.asrFinished(session: stopSessionID, result: .text(text)), context: "asr-done")
                     self.fulfillPendingPreservation(session: stopSessionID)
+                }
+                defer {
+                    if self.committedTranscript?.session == stopSessionID {
+                        self.committedTranscript = nil
+                    }
                 }
                 // K-52 (round-3 finding): the PASTE leg dies here, never the
                 // record of text. Esc cancels the task (guard below stops
@@ -1829,183 +1789,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.logger.debug("Transcription completed outputLength=\(post.text.count, privacy: .public) asrMs=\(asrMs, privacy: .public) asrInputMs=\(asrInputMs, privacy: .public) cleanupEdits=\(post.stats.totalEdits, privacy: .public) cleanupMs=\(Int(post.stats.durationMs), privacy: .public) grammarEdits=\(post.stats.grammarEdits, privacy: .public) grammarAttempted=\(post.stats.grammarAttempted, privacy: .public) grammarTimedOut=\(post.stats.grammarTimedOut, privacy: .public) grammarSkippedForLength=\(post.stats.grammarSkippedForLength, privacy: .public) itnSpansMasked=\(post.itnSpansMasked, privacy: .public) itnEnabled=\(post.itnEnabled, privacy: .public) itnAvailable=\(post.itnAvailable, privacy: .public) itnChanged=\(post.itnChanged, privacy: .public) itnMs=\(post.itnMs, privacy: .public) replacements=\(post.replacements, privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public) gateFallback=\(post.gateRawFallback, privacy: .public)")
                 }
 
-                // K-50: route decided BEFORE the settle wait so only the
-                // frontmost route pays it. One frontmost read feeds decision
-                // AND logs (T14 invariant). Behavioral note (accepted): the
-                // routing/frontmost read now happens ~50–80 ms earlier than
-                // before; record-time capture semantics are unchanged.
-                let frontmostPIDAtDecision = NSWorkspace.shared.frontmostApplication?.processIdentifier
                 let route = PasteService.PasteRouting.target(
-                    capturedPID: self.dictationTargetPID,
-                    capturedElement: self.dictationTargetElement,
-                    frontmostPID: frontmostPIDAtDecision
+                    capturedPID: destination?.pid,
+                    capturedElement: targetElement,
+                    frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier
                 )
                 let pidPostingEnabled = defaults.bool(forKey: LatencyTuningOptions.pidPasteEnabledKey)
+                let delayMs = PasteService.requiresFrontmostSettle(route)
+                    ? max(20, min(300, defaults.integer(forKey: segmentEstimateMs < 5000
+                        ? LatencyTuningOptions.pasteDelayShortMsKey : LatencyTuningOptions.pasteDelayLongMsKey)))
+                    : 0
 
-                // Adaptive paste delay for routes that depend on the frontmost
-                // app having settled: 50ms for short segments (<5s) or 80ms
-                // otherwise. Captured routes skip it entirely.
-                // Fallback on error: Retry after additional delay to approx. total 120ms.
-                let pasteDelayShortMs = max(20, min(300, defaults.integer(forKey: LatencyTuningOptions.pasteDelayShortMsKey)))
-                let pasteDelayLongMs = max(20, min(300, defaults.integer(forKey: LatencyTuningOptions.pasteDelayLongMsKey)))
-                let pasteDelayMs: Double
-                if PasteService.requiresFrontmostSettle(route) {
-                    pasteDelayMs = Double(segmentEstimateMs) < 5000 ? Double(pasteDelayShortMs) : Double(pasteDelayLongMs)
-                } else {
-                    pasteDelayMs = 0
-                    if KalamDiagnosticFlags.verboseAudio {
-                        self.logger.debug("Paste settle skipped for captured route")
-                    }
-                }
-                let fallbackTotalMs = max(pasteDelayMs, Double(max(20, min(500, defaults.integer(forKey: LatencyTuningOptions.pasteFallbackTotalMsKey)))))
-                let pasteDelay = pasteDelayMs / 1000.0
-                let fallbackAdditionalDelay = (fallbackTotalMs - pasteDelayMs) / 1000.0
-
-                if pasteDelay > 0 {
-                    try await Task.sleep(nanoseconds: UInt64(pasteDelay * 1_000_000_000))
-                }
-                guard !Task.isCancelled else { return }
-                guard self.recordingSessions.isCurrent(generation) else {
-                    if KalamDiagnosticFlags.verboseAudio {
-                        self.logger.debug("Paste suppressed: recording superseded by a newer session")
-                    }
-                    return
-                }
+                if delayMs > 0 { try await Task.sleep(for: .milliseconds(delayMs)) }
+                try Task.checkCancellation()
+                guard self.recordingSessions.isCurrent(generation) else { return }
                 stageMark("paste-wait")
 
                 do {
+                    guard let destination, destination.isAlive() else {
+                        throw PasteServiceError.destinationUnavailable
+                    }
                     switch route {
                     case .frontmost:
-                        if KalamDiagnosticFlags.verboseAudio {
-                            self.logger.debug("Paste route=frontmost capturedPID=\(self.dictationTargetPID.map { String($0) } ?? "nil", privacy: .public) frontmostPIDAtDecision=\(frontmostPIDAtDecision.map { String($0) } ?? "nil", privacy: .public)")
-                        }
-                        try await self.paster.paste(post.text, preferPid: self.dictationTargetPID, pidPostingEnabled: pidPostingEnabled)
+                        try await self.paster.paste(post.text, preferPid: destination.pid,
+                                                   pidPostingEnabled: pidPostingEnabled,
+                                                   targetIsAlive: destination.isAlive, expectedElement: targetElement)
                     case .capturedElement(let element):
-                        // record-time paste target capture: the user switched apps while transcribing — insert into the
-                        // record-time target (bypasses the pasteboard entirely).
-                        if KalamDiagnosticFlags.verboseAudio {
-                            self.logger.debug("Paste route=capturedElement capturedPID=\(self.dictationTargetPID.map { String($0) } ?? "nil", privacy: .public) frontmostPIDAtDecision=\(frontmostPIDAtDecision.map { String($0) } ?? "nil", privacy: .public)")
-                        }
                         do {
-                            try await self.paster.paste(into: element, text: post.text)
-                        } catch {
-                            // The captured target is gone (app quit / field closed): hold the
-                            // transcript with a notice instead of pasting into the wrong app.
-                            self.heldTranscript = post.text
-                            self.heldTranscriptTargetPID = self.dictationTargetPID
-                            self.heldTranscriptSession = stopSessionID
-                            self.dictationTargetElement = nil
-                            self.dictationTargetPID = nil
-                            let promisedName = NSRunningApplication(processIdentifier: self.heldTranscriptTargetPID ?? 0)?.localizedName ?? NSWorkspace.shared.frontmostApplication?.localizedName ?? "the frontmost app"
-                            await MainActor.run {
-                                self.overlay.showHeldTranscript(message: "Transcript ready. Paste into \(promisedName)?")
-                            }
-                            // The captured target is gone: hold the transcript with a
-                            // user-visible notice. Rare + user-visible: info.
-                            self.logger.info("Captured-target paste failed; transcript held errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
-                            self.dispatchLifecycle(.insertSucceeded(session: stopSessionID, outcome: .held), context: "captured-element-held")
-                            return
+                            try await self.paster.paste(into: element, text: post.text, destination: destination)
+                        } catch PasteServiceError.pasteExecutionFailed {
+                            try await self.paster.pasteAfterActivation(post.text, destination: destination,
+                                                                       expectedElement: element, bringToFront: self.bringDestinationToFront)
                         }
-                    case .capturedApp(let capturedPid):
-                        // partial-AX target capture no-op Option A: the record-time app has partial AX support (no
-                        // element), so bring it back to front and paste via the normal
-                        // path. If it cannot be reactivated or won't settle as frontmost,
-                        // hold the transcript for the promised app (the Paste button will
-                        // retry activation there).
-                        if KalamDiagnosticFlags.verboseAudio {
-                            self.logger.debug("Paste route=capturedApp capturedPID=\(capturedPid, privacy: .public) frontmostPIDAtDecision=\(frontmostPIDAtDecision.map { String($0) } ?? "nil", privacy: .public)")
-                        }
-                        guard await self.activateCapturedApp(capturedPid) != nil,
-                              await self.waitForFrontmost(pid: capturedPid) else {
-                            self.heldTranscript = post.text
-                            self.heldTranscriptTargetPID = capturedPid
-                            self.heldTranscriptSession = stopSessionID
-                            let appName = NSRunningApplication(processIdentifier: capturedPid)?.localizedName ?? "the original app"
-                            await MainActor.run {
-                                self.overlay.showHeldTranscript(message: "Transcript ready. Paste into \(appName)?")
-                            }
-                            self.logger.warning("Captured-app activation failed; transcript held pid=\(capturedPid, privacy: .public)")
-                            self.dispatchLifecycle(.insertSucceeded(session: stopSessionID, outcome: .held), context: "captured-app-held")
-                            return
-                        }
-                        try await self.paster.paste(post.text)
+                    case .capturedApp:
+                        try await self.paster.pasteAfterActivation(post.text, destination: destination,
+                                                                   bringToFront: self.bringDestinationToFront)
                     }
-                    if self.heldTranscriptSession == stopSessionID {
-                        // Ownership-scoped cleanup: clear only THIS session's
-                        // hold slot. A preserved transcript from a superseded
-                        // session (different tag) survives — never-destroyed.
-                        self.heldTranscript = nil
-                        self.heldTranscriptTargetPID = nil
-                        self.heldTranscriptSession = nil
-                    }
+                    if self.heldTranscript?.session == stopSessionID { self.heldTranscript = nil }
+                    guard self.recordingSessions.isCurrentSession(stopSessionID), !Task.isCancelled else { return }
                     self.dictationTargetElement = nil
-                    self.dictationTargetPID = nil
-                    self.overlay.hide() // Silent success (D-1): pasted text in the target app IS the confirmation
+                    self.dictationDestination = nil
+                    self.overlay.hide()
                     self.dispatchLifecycle(.insertSucceeded(session: stopSessionID, outcome: .pasted), context: "paste-ok")
                     stageMark("paste-dispatch")
-                    if stageTimingEnabled {
-                        let totalMs = (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000.0
-                        self.logger.debug("Latency summary pasteDispatchMs=\(Int(totalMs), privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public) postRollMs=\(postRollMs, privacy: .public) pasteDelayMs=\(Int(pasteDelayMs), privacy: .public)")
-                    }
-                    if KalamDiagnosticFlags.verboseAudio {
-                        self.logger.debug("Paste dispatched via initial path delayMs=\(Int(pasteDelay * 1000), privacy: .public)")
-                    }
+                } catch is CancellationError {
+                    return
                 } catch {
-                    // Task 5 (K-56): Tier-1 hard refusals never blind-paste or fallback — hold.
-                    if let pasteError = error as? PasteServiceError {
-                        switch pasteError {
-                        case .secureField, .secureInputActive, .pidMismatch, .frontmostChanged:
-                            self.heldTranscript = post.text
-                            self.heldTranscriptTargetPID = self.dictationTargetPID
-                            self.heldTranscriptSession = stopSessionID
-                            self.dictationTargetElement = nil
-                            self.dictationTargetPID = nil
-                            let reason: String
-                            switch pasteError {
-                            case .secureField: reason = "Secure field"
-                            case .secureInputActive: reason = "Secure input active"
-                            case .pidMismatch: reason = "PID mismatch"
-                            case .frontmostChanged: reason = "Frontmost changed"
-                            default: reason = "Hold"
-                            }
-                            let promisedName = NSRunningApplication(processIdentifier: self.heldTranscriptTargetPID ?? 0)?.localizedName ?? NSWorkspace.shared.frontmostApplication?.localizedName ?? "the frontmost app"
-                            await MainActor.run {
-                                self.overlay.showHeldTranscript(message: "\(reason) — transcript ready. Paste into \(promisedName)?")
-                            }
-                            self.logger.warning("Tier-1 hard refusal hold reason=\(reason, privacy: .public) errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
-                            self.dispatchLifecycle(.insertSucceeded(session: stopSessionID, outcome: .held), context: "tier1-hold")
-                            return
-                        default: break
-                        }
+                    let unconfirmed: Bool
+                    if case PasteServiceError.deliveryUnconfirmed = error {
+                        unconfirmed = true
+                    } else {
+                        unconfirmed = false
                     }
-                    self.logger.warning("Initial paste failed delayMs=\(Int(pasteDelay * 1000), privacy: .public) errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
-                    try await Task.sleep(nanoseconds: UInt64(max(0, fallbackAdditionalDelay) * 1_000_000_000))
-                    guard !Task.isCancelled else { return }
-                    stageMark("paste-fallback-wait")
-
-                    do {
-                        try await self.paster.paste(post.text)
-                        self.overlay.hide() // Silent success (D-1): pasted text in the target app IS the confirmation
-                        self.dispatchLifecycle(.insertSucceeded(session: stopSessionID, outcome: .pasted), context: "paste-fallback-ok")
-                        stageMark("paste-fallback-dispatch")
-                        if stageTimingEnabled {
-                            let totalMs = (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000.0
-                            self.logger.debug("Latency summary pasteFallbackDispatchMs=\(Int(totalMs), privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public) postRollMs=\(postRollMs, privacy: .public) fallbackTotalMs=\(Int(fallbackTotalMs), privacy: .public)")
-                        }
-                        if KalamDiagnosticFlags.verboseAudio {
-                            self.logger.debug("Fallback paste dispatched totalDelayMs=\(Int((pasteDelay + fallbackAdditionalDelay) * 1000), privacy: .public)")
-                        }
-                    } catch {
-                        self.logger.warning("Fallback paste failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
-                        await MainActor.run {
-                            self.overlay.showError("Enable Accessibility to paste", action: .openAccessibilitySettings, autoHideAfter: 4.0)
-                            AccessibilityHelper.explainAccessibilityIfNeeded()
-                        }
-                        // K-52: paste failed — park the committed transcript via
-                        // the machine (inserting → done(.held), notice .never:
-                        // the accessibility surface owns the user's attention).
-                        dispatchLifecycle(.insertFailed(session: stopSessionID), context: "paste-fallback-fail")
+                    let held = PasteService.HeldTranscript(
+                        session: stopSessionID, text: post.text, destination: destination,
+                        deliveryUnconfirmed: unconfirmed)
+                    if self.recordingSessions.isCurrentSession(stopSessionID), !Task.isCancelled {
+                        self.heldTranscript = held
+                        self.dictationTargetElement = nil
+                        self.dictationDestination = nil
+                        self.dispatchLifecycle(.insertSucceeded(session: stopSessionID, outcome: .held), context: "paste-held")
+                        self.showHeldTranscript(held)
+                    } else if self.heldTranscript?.session == stopSessionID {
+                        // Supersession may already have parked the raw text.
+                        self.heldTranscript = held
+                        if self.lifecycle.phase == nil { self.showHeldTranscript(held) }
                     }
+                    self.logger.info("Transcript delivery held")
                 }
             } catch is CancellationError {
                 return
@@ -2035,7 +1885,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // K-52: heldTranscript is deliberately NOT cleared here — a preserved
         // transcript from a superseded session must survive a later cancel
         // (the machine's never-destroyed policy).
-        dictationTargetPID = nil
+        dictationDestination = nil
         dictationTargetElement = nil
 
         if UserDefaults.standard.bool(forKey: "duckEnabled") {
@@ -2095,34 +1945,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Defense-in-depth for the empty-transcript phantom: whitespace-only
                 // commits are never materialized and never arm a notice.
                 if let committed = committedTranscript, committed.session == session {
-                    if committed.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        if heldTranscriptSession == session {
-                            heldTranscript = nil
-                            heldTranscriptTargetPID = nil
-                            heldTranscriptSession = nil
-                        }
-                        if pendingPreserveSession == session {
-                            pendingPreserveSession = nil
-                        }
-                    } else {
-                        heldTranscript = committed.text
-                        heldTranscriptTargetPID = committed.targetPID
-                        heldTranscriptSession = session
-                        switch notice {
-                        case .now, .deferredUntilSettled:
-                            pendingHeldNotice = true
-                        case .never:
-                            break
-                        }
+                    self.committedTranscript = nil
+                    if !committed.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        heldTranscript = PasteService.HeldTranscript(
+                            session: session, text: committed.text, destination: committed.destination)
+                        if notice != .never { pendingHeldNotice = true }
                     }
                 } else {
                     pendingPreserveSession = session
-                    switch notice {
-                    case .now, .deferredUntilSettled:
-                        pendingHeldNotice = true
-                    case .never:
-                        break
-                    }
+                    if notice != .never { pendingHeldNotice = true }
                 }
             case .cancelWork:
                 transcriptionTask?.cancel()
@@ -2145,115 +1976,75 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func fulfillPendingPreservation(session: SessionID) {
         guard pendingPreserveSession == session,
               let committed = committedTranscript, committed.session == session else { return }
-        // Empty commits (whitespace-only) never become a hold — clear the intent.
-        guard !committed.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            pendingPreserveSession = nil
-            return
-        }
         pendingPreserveSession = nil
-        heldTranscript = committed.text
-        heldTranscriptTargetPID = committed.targetPID
-        heldTranscriptSession = session
-        // Rare + user-visible (a held chip follows): info, not gated.
-        logger.info("Lifecycle deferred preserve fulfilled session=\(String(session.uuidString.prefix(8)), privacy: .public)")
-        // Surface the chip now if the machine is at rest; otherwise defer to
-        // the next settle (a newer session may still own the overlay — its
-        // settle pass picks the notice up once it rests).
-        if lifecycle.phase == nil {
-            let promisedName = NSRunningApplication(processIdentifier: heldTranscriptTargetPID ?? 0)?.localizedName
-                ?? NSWorkspace.shared.frontmostApplication?.localizedName
-                ?? "the frontmost app"
-            overlay.showHeldTranscript(message: "Earlier transcript ready. Paste into \(promisedName)?")
-        } else {
-            pendingHeldNotice = true
-        }
+        committedTranscript = nil
+        guard !committed.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        heldTranscript = PasteService.HeldTranscript(
+            session: session, text: committed.text, destination: committed.destination)
+        pendingHeldNotice = true
+        settlePendingHeldNotice()
     }
 
-    /// Surfaces a deferred hold chip the moment the machine rests.
     private func settlePendingHeldNotice() {
         guard pendingHeldNotice, lifecycle.phase == nil else { return }
         pendingHeldNotice = false
-        guard let held = heldTranscript,
-              !held.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            // Drop phantom holds (empty/whitespace) instead of surfacing a chip.
-            if heldTranscript != nil {
-                heldTranscript = nil
-                heldTranscriptTargetPID = nil
-                heldTranscriptSession = nil
+        if let heldTranscript { showHeldTranscript(heldTranscript) }
+    }
+
+    private func showHeldTranscript(_ held: PasteService.HeldTranscript) {
+        let name = held.destination?.name ?? "the original app"
+        let message: String
+        if held.destination?.isAlive() != true {
+            message = "Transcript held. The original app is unavailable."
+        } else if held.deliveryUnconfirmed {
+            message = "Check \(name) for the transcript before retrying."
+        } else {
+            message = "Transcript ready. Paste into \(name)?"
+        }
+        overlay.showHeldTranscript(message: message)
+    }
+
+    private func bringDestinationToFront(_ destination: PasteService.Destination) async -> Bool {
+        guard !Task.isCancelled, destination.isAlive(),
+              let app = NSRunningApplication(processIdentifier: destination.pid) else { return false }
+        if !app.activate() {
+            guard let url = app.bundleURL, destination.isAlive() else { return false }
+            do {
+                let opened = try await NSWorkspace.shared.openApplication(at: url, configuration: .init())
+                guard opened.processIdentifier == destination.pid else { return false }
+            } catch {
+                return false
             }
-            return
         }
-        let promisedName = NSRunningApplication(processIdentifier: heldTranscriptTargetPID ?? 0)?.localizedName
-            ?? NSWorkspace.shared.frontmostApplication?.localizedName
-            ?? "the frontmost app"
-        overlay.showHeldTranscript(message: "Earlier transcript ready. Paste into \(promisedName)?")
-    }
-
-    /// partial-AX target capture no-op: activate another app from a background/menu-bar context. Plain
-    /// `NSRunningApplication.activate()` is routinely refused by TCC for
-    /// non-frontmost apps (observed live 2026-08-24: "activation refused");
-    /// the LaunchServices route carries the user-intent semantics needed here.
-    @MainActor
-    private func activateCapturedApp(_ pid: pid_t) async -> NSRunningApplication? {
-        guard let app = NSRunningApplication(processIdentifier: pid) else { return nil }
-        if app.activate() { return app }
-        if KalamDiagnosticFlags.verboseAudio {
-            logger.debug("Plain activate refused; trying LaunchServices openApplication pid=\(pid, privacy: .public)")
-        }
-        do {
-            let configuration = NSWorkspace.OpenConfiguration()
-            try await NSWorkspace.shared.openApplication(at: app.bundleURL ?? URL(fileURLWithPath: "/"), configuration: configuration)
-            return app
-        } catch {
-            logger.warning("LaunchServices activation failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
-            return nil
-        }
-    }
-
-    /// Polls until `pid` is actually frontmost (≤1 s); false if it never settles.
-    @MainActor
-    private func waitForFrontmost(pid: pid_t) async -> Bool {
         for _ in 0..<20 {
-            if NSWorkspace.shared.frontmostApplication?.processIdentifier == pid { return true }
-            try? await Task.sleep(nanoseconds: 50_000_000)
+            guard !Task.isCancelled, destination.isAlive() else { return false }
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == destination.pid { return true }
+            try? await Task.sleep(for: .milliseconds(50))
         }
         return false
     }
 
-    /// record-time paste target capture/partial-AX target capture no-op: explicit "Paste" action for a held transcript. The capsule named an
-    /// app, so deliver THERE: reactivate the promised app if it drifted to background,
-    /// wait until it is genuinely frontmost, then paste via the normal path. Only if
-    /// the promised app quit entirely does the paste go to the current frontmost —
-    /// the user's click is then the conscious choice of destination.
     private func pasteHeldTranscript() {
-        guard let text = heldTranscript,
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        let promisedPID = heldTranscriptTargetPID
-        let ownerSession = heldTranscriptSession
-        heldTranscript = nil
-        heldTranscriptTargetPID = nil
-        heldTranscriptSession = nil
-        Task { @MainActor [weak self] in
+        guard let held = heldTranscript, heldDeliveryTask == nil else { return }
+        heldDeliveryTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            if let promisedPID, NSRunningApplication(processIdentifier: promisedPID) != nil {
-                guard await self.activateCapturedApp(promisedPID) != nil,
-                      await self.waitForFrontmost(pid: promisedPID) else {
-                    let appName = NSRunningApplication(processIdentifier: promisedPID)?.localizedName ?? "the app"
-                    self.logger.warning("Held-transcript reactivation failed pid=\(promisedPID, privacy: .public)")
-                    self.overlay.showError("Could not bring \(appName) to front", action: nil, autoHideAfter: 4.0)
-                    // Never-destroyed: restore the slot so Paste can be retried.
-                    self.heldTranscript = text
-                    self.heldTranscriptTargetPID = promisedPID
-                    self.heldTranscriptSession = ownerSession
-                    return
-                }
-            }
+            defer { self.heldDeliveryTask = nil }
             do {
-                try await self.paster.paste(text)
-                self.overlay.hide() // Silent success (D-1): pasted text in the target app IS the confirmation
+                try await held.deliver(using: self.paster, bringToFront: self.bringDestinationToFront) {
+                    self.heldTranscript?.session == held.session
+                }
+                if self.heldTranscript?.session == held.session {
+                    self.heldTranscript = nil
+                    if self.lifecycle.phase == nil { self.overlay.hide() }
+                }
             } catch {
-                self.logger.warning("Held-transcript paste failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
-                self.overlay.showError("Paste failed", action: nil, autoHideAfter: 4.0)
+                guard self.heldTranscript?.session == held.session else { return }
+                if case PasteServiceError.deliveryUnconfirmed = error {
+                    self.heldTranscript?.deliveryUnconfirmed = true
+                }
+                if let current = self.heldTranscript, self.lifecycle.phase == nil {
+                    self.showHeldTranscript(current)
+                }
             }
         }
     }
@@ -2285,8 +2076,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// trace, consistent with the zero-retention posture for discarded text.
     private func discardHeldTranscript() {
         heldTranscript = nil
-        heldTranscriptTargetPID = nil
-        heldTranscriptSession = nil
+        heldDeliveryTask?.cancel()
         pendingPreserveSession = nil
         pendingHeldNotice = false
     }
