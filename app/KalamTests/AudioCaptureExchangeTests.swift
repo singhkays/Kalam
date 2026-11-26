@@ -18,6 +18,34 @@ import AVFoundation
 /// waits) is pinned deterministically by `testPublishIsNonBlockingWhileConsumerHoldsLock`.
 final class AudioCaptureExchangeTests: XCTestCase {
 
+    func testStreamingDurationAndContinuity() {
+        for rate in [16_000.0, 44_100.0, 48_000.0] {
+            let exchange = AudioCaptureExchange()
+            exchange.resetForNewSession()
+            for index in 0..<48 {
+                let buffer = makeSyntheticBuffer(sampleRate: rate, frames: 1024)
+                let channel = buffer.floatChannelData![0]
+                for frame in 0..<1024 {
+                    channel[frame] = Float(index + 1) / 64
+                }
+                XCTAssertTrue(exchange.publish(buffer))
+            }
+            let output = exchange.stopCapture() + exchange.drainConverterRemainder()
+            let framesPerBuffer = 1024 * 16_000 / rate
+            let expected = Int((48 * framesPerBuffer).rounded())
+            // Allow one frame for fractional rounding at 44.1 kHz and a
+            // 64-frame margin around transitions for the resampling filter.
+            XCTAssertEqual(output.count, expected, accuracy: rate == 44_100 ? 1 : 0, "rate \(rate)")
+            for index in 0..<48 {
+                let start = Int(Double(index) * framesPerBuffer) + 64
+                let end = Int(Double(index + 1) * framesPerBuffer) - 64
+                guard end <= output.count else { break }
+                XCTAssertTrue(output[start..<end].allSatisfy { abs($0 - Float(index + 1) / 64) < 0.006 },
+                              "discontinuity at buffer \(index), rate \(rate)")
+            }
+        }
+    }
+
     func testProducerDoesNotStallWhileStopRuns() async throws {
         let recorder = AudioRecorder()
         // Activate capture state without the audio engine: the test host has no
