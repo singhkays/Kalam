@@ -226,7 +226,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Audio teardown for the current stop/cancel (post-roll + drain + engine stop).
     /// New recordings await its completion before collecting, so sessions never
     /// overlap in the audio layer even when the transcription task is cancelled.
-    private var recordingStopTask: Task<[Float], Never>?
+    private var recordingStopTask: Task<CapturedPCM, Never>?
     private var runtimePrepTask: Task<Void, Never>?
     /// Bounded-start pending state (engine-start freeze hardening): a press
     /// whose engine start is still in flight off-main. Between key-down and
@@ -1066,8 +1066,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // touch engine state concurrently. The invalidated flag makes the
         // next press rebuild the graph from fresh topology.
         if audio.isStartInFlight {
-            audio.abandonPendingStart()
-            audio.invalidatePreparedState()
+            cancelPendingStartIfActive(reason: "deviceChange")
             warmPool.invalidate(reason: "deviceChangeDuringStart")
             logger.info("Audio refresh deferred: engine start in flight; graph rebuilds on next press")
             invalidateOnboardingSnapshot()
@@ -1115,14 +1114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dictationTargetElement = nil
             // K-52: heldTranscript survives — same never-destroyed policy as
             // cancelRecording (a parked transcript is a settled session's).
-            let audio = self.audio
-            // Pin the teardown to the session being torn down on wake.
-            let audioGeneration = audio.captureGeneration
-            let stopTask = Task(priority: .userInitiated) { [audio, audioGeneration] in
-                let samples = audio.finishStop(expectedGeneration: audioGeneration)
-                return samples
-            }
-            recordingStopTask = stopTask
+            discardRecordingAudio()
             overlay.hide()
         }
         // K-52: out-of-band reset — system wake tore the session down with no
@@ -1166,18 +1158,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // pending-window second presses to .stop, so this supersede
                 // branch is belt-and-braces for any .start that slips through.
                 if pendingStartTask != nil {
-                    audio.abandonPendingStart()
                     pendingStartTask?.cancel()
                     pendingStartTask = nil
                     pendingStartGeneration &+= 1
                 }
                 pendingStartGeneration &+= 1
                 let pendingGeneration = pendingStartGeneration
+                let frontmost = NSWorkspace.shared.frontmostApplication
                 pendingStartTask = Task { @MainActor [weak self] in
                     // Generation-guarded rollback: a superseded task that
                     // resumes after a newer press committed must not wipe the
                     // live session (unconditional rollback vaporized it).
-                    let started = await self?.performStartRecording(triggerMode: triggerMode) ?? false
+                    let started = await self?.performStartRecording(pendingGeneration: pendingGeneration, frontmost: frontmost) ?? false
                     if !started, self?.pendingStartGeneration == pendingGeneration {
                         self?.pttState.rollbackPending()
                     }
@@ -1228,16 +1220,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// (guard failure, engine start failure/timeout/supersede, stale commit).
     /// A failed start leaves the machine idle — the pre-hardening contract.
 
-    private func performStartRecording(triggerMode: PTTStateMachine.TriggerMode) async -> Bool {
-        guard !isRecording else { return false }
-        // K-52: superseding an in-flight transcription/paste is decided by the
-        // lifecycle machine, not by an unconditional cancel here — the old
-        // unconditional cancel vaporized a COMPLETED transcript in the rapid
-        // re-record window (P0 #1). The machine's keyDown effect runs only if
-        // the start below actually commits (dispatch after startCollecting).
-        // failed-start hardening: never leave a previous session's paste target alive
-        dictationTargetPID = nil
-        dictationTargetElement = nil
+    private func performStartRecording(pendingGeneration: Int, frontmost: NSRunningApplication?) async -> Bool {
+        guard !isRecording, pendingStartGeneration == pendingGeneration, !Task.isCancelled else { return false }
         let onboardingSnapshot = currentOnboardingSnapshot()
         guard !onboardingSnapshot.hasIncompleteRequirements else {
             showOnboardingWindow(mode: .repair)
@@ -1261,12 +1245,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         startLatencyProbe?.mark(.guardsCompleted)
 
-        // Recording gate for the warm pool: claim BEFORE press-time prepare so
-        // the take's debounced refill defers instead of constructing a second
-        // engine on the live device mid-hold (builtin HAL overload → stall).
-        // Every `return false` below releases it; success releases after the
-        // stop teardown finishes (engine stopped).
+        let deadline = ContinuousClock.now + .milliseconds(AudioStartPolicy.timeoutMs)
+        // Finish the previous capture before preparing a new graph. Its PCM
+        // and destination remain available to the previous transcription.
+        if let stopTask = recordingStopTask {
+            stopTask.cancel()
+            _ = await stopTask.value
+        }
+        let slotAvailable = await audio.waitForStartSlot(until: deadline)
+        guard pendingStartGeneration == pendingGeneration, !Task.isCancelled else { return false }
+        guard slotAvailable else {
+            warmPool.setRecordingActive(false)
+            overlay.showError("Microphone unavailable", action: .openMicrophoneSettings, autoHideAfter: 4.0)
+            return false
+        }
+
         warmPool.setRecordingActive(true)
+        defer {
+            if pendingStartGeneration == pendingGeneration, !isRecording {
+                warmPool.setRecordingActive(false)
+            }
+        }
 
         do {
             let pickedUID = try prepareAudioForRecording()
@@ -1276,54 +1275,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             logger.warning("Audio input setup failed before recording errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             overlay.showError("Microphone setup failed", action: .openMicrophoneSettings, autoHideAfter: 4.0)
-            warmPool.setRecordingActive(false)
             return false
         }
 
-        // microphone recovery after sleep or device change: the state sync happens only after startCollecting succeeds —
-        // a failed start must leave the PTT machine idle (PTT state machine test coverage invariant).
-        _ = recordingSessions.beginNewRecording()
-        // K-52: identity for every lifecycle event of this session; minted
-        // before the async legs so stale completions name their session.
-        let sessionID = recordingSessions.currentSessionID ?? UUID()
-
-        do {
-            // Bounded start: the engine start runs off-main under a hard
-            // deadline — a HAL wedged mid-start (USB device churn) can no
-            // longer freeze the app. Timeout and abandonment behave exactly
-            // like a thrown failure: mic error + PTT machine left idle +
-            // immediate retry available on the next press.
-            let startOutcome = await audio.startCollectingBounded()
-            guard startOutcome == .started else {
-                logger.warning("Audio collection start did not commit outcome=\(String(describing: startOutcome), privacy: .public)")
-                // Superseded (key-up/Esc/supersede/device-change during the
-                // window) is a silent no-op by design — the user canceled the
-                // press; only genuine failures surface the mic error.
-                if startOutcome != .superseded {
-                    overlay.showError("Microphone unavailable", action: .openMicrophoneSettings, autoHideAfter: 4.0)
-                }
-                warmPool.setRecordingActive(false)
-                return false
+        let startOutcome = await audio.startCollectingBounded(deadline: deadline) {
+            pendingStartGeneration == pendingGeneration && pttState.commitPending()
+        }
+        guard startOutcome == .started else {
+            if startOutcome != .superseded, pendingStartGeneration == pendingGeneration {
+                overlay.showError("Microphone unavailable", action: .openMicrophoneSettings, autoHideAfter: 4.0)
             }
-        } catch {
-            logger.warning("Audio collection start failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
-            overlay.showError("Microphone unavailable", action: .openMicrophoneSettings, autoHideAfter: 4.0)
-            warmPool.setRecordingActive(false)
             return false
         }
+
         startLatencyProbe?.mark(.engineStarted)
-        // Commit the machine's pending start. Latches the trigger mode the
-        // pending window decided (holdOrToggle quick-tap converts hold→toggle
-        // mid-flight). A false return means the pending start was rolled back
-        // while the engine was starting (stop/Esc/wake/quit during the
-        // window): the engine is live but the session is unwanted — tear it
-        // down and drop everything silently.
-        guard pttState.commitPending() else {
-            audio.stopEngineFromStaleCommit()
-            logger.debug("Stale recording commit dropped: pending start rolled back during engine start")
-            warmPool.setRecordingActive(false)
-            return false
-        }
+        recordingSessions.beginNewRecording()
+        let sessionID = recordingSessions.currentSessionID!
+        let triggerMode = pttState.recordingTriggerMode ?? .hold
         overlay.showRecording(isHoldMode: triggerMode == .hold)
         // K-52: the start committed — advance the machine (this is where a
         // superseded session's transcript gets preserved / its tasks killed).
@@ -1379,7 +1347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the indicator is up. Every AX reference involved is timeout-bounded
         // (AccessibilityFocusResolver bounds the system-wide query AND every
         // element it returns, so attribute reads cannot inherit the 6 s default).
-        if let frontmost = NSWorkspace.shared.frontmostApplication {
+        if let frontmost {
             switch AccessibilityFocusResolver.resolveFocusedElement(frontmostApp: frontmost) {
             case .success(let resolution):
                 dictationTargetPID = frontmost.processIdentifier
@@ -1439,10 +1407,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func cancelPendingStartIfActive(reason: String) -> Bool {
         guard pendingStartTask != nil || pttState.isPending else { return false }
         pttState.rollbackPending()
-        audio.abandonPendingStart()
         pendingStartTask?.cancel()
         pendingStartTask = nil
         pendingStartGeneration &+= 1
+        warmPool.setRecordingActive(false)
         logger.debug("Pending engine start abandoned reason=\(reason, privacy: .public)")
         return true
     }
@@ -1558,7 +1526,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // engine-stop/drain step, or a rapid re-record would skip it and leave
         // the engine running under the next session.
         let stopTask = Task(priority: .userInitiated) { [weak self, audioGeneration] in
-            guard let self else { return [Float]() }
+            guard let self else { return CapturedPCM([]) }
+            defer {
+                self.recordingStopTask = nil
+                if !self.isRecording && self.pendingStartTask == nil {
+                    self.warmPool.setRecordingActive(false)
+                }
+            }
             let postRollMs = Self.postRollForSegment(
                 pttDown: pttDown,
                 pttUp: pttUp,
@@ -1571,11 +1545,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // path; the SNR-aware policy (Task 3) extends it per room SNR.
             let segmentEstimateMs = Int((pttUp - pttDown) * 1000)
             let config = LatencyTuningOptions.postRollConfig(postRollMs: postRollMs, defaults: .standard)
-            return await self.audio.stopWithEarlyExit(
+            return CapturedPCM(await self.audio.stopWithEarlyExit(
                 pinnedGeneration: audioGeneration,
                 config: config,
                 segmentEstimateMs: segmentEstimateMs
-            )
+            ))
         }
         recordingStopTask = stopTask
         
@@ -1599,14 +1573,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             
             let keyUpToStopStart = CFAbsoluteTimeGetCurrent()
-            let samples = await stopTask.value
-            // Engine stopped: release the warm-pool recording gate so the
-            // deferred refill rebuilds idle. Guarded on !isRecording so a rapid
-            // re-record's teardown never clears the new session's ownership
-            // (the pool's fire-time guard re-defers if a press wins the race).
-            if !self.isRecording {
-                self.warmPool.setRecordingActive(false)
-            }
+            var samples = await stopTask.value.take()
+            defer { samples.secureZero() }
             guard !Task.isCancelled else { return }
             // A stale stop (superseded by a rapid re-record) returns no audio;
             // the newer session's overlay state owns the indicator from here.
@@ -1691,7 +1659,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Bluetooth a 1000ms pad (both edges; the trailing cost is ~30ms
             // of ASR) so immediate speech survives the ramp.
             let isBluetoothCapture = self.audio.lastSessionTiming.transportTag == "bluetooth"
-            let trimmed = SilenceTrimmer.trimAndNormalize(
+            var trimmed = SilenceTrimmer.trimAndNormalize(
                 samples: samples, sampleRate: 16_000,
                 padMs: isBluetoothCapture ? 1000 : 300)
             // Pipeline telemetry (counts/timings only, never content): correlates
@@ -1704,6 +1672,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if KalamDiagnosticFlags.verboseAudio {
                 self.logger.debug("Trim summary originalMs=\(originalMs, privacy: .public) trimmedMs=\(trimmedMs, privacy: .public) keepPct=\(keepPct, privacy: .public) holdMs=\(segmentEstimateMs, privacy: .public) padMs=\(isBluetoothCapture ? 1000 : 300, privacy: .public)")
             }
+            samples.secureZero()
+            samples.removeAll(keepingCapacity: false)
+            defer { trimmed.secureZero() }
             stageMark("trim")
             guard !trimmed.isEmpty else {
                 // User-visible no-paste outcome: one info line with the reason.
@@ -1743,14 +1714,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Normalize before ASR without spawning an extra child task; this keeps the
                 // transcription flow inside one actor-inherited task for Swift 6 safety.
                 let asrStart = CFAbsoluteTimeGetCurrent()
-                var normalized = trimmed   // already peak-normalized by the fused trim stage
+                var normalized: [Float] = []
+                swap(&normalized, &trimmed)
                 
                 // Ensure audio is at least 300ms (4800 samples at 16kHz) to avoid FluidAudio short-utterance rejection
                 if normalized.count < 4800 {
                     normalized.append(contentsOf: [Float](repeating: 0.0, count: 4800 - normalized.count))
                 }
                 
-                let text = try await self.asr.transcribe(samples: normalized)
+                let asrInputMs = Int(Double(normalized.count) / 16_000.0 * 1000)
+                let text = try await self.asr.transcribe(samples: consume normalized)
                 let asrEnd = CFAbsoluteTimeGetCurrent()
                 let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 // Empty/whitespace-only ASR output is NOT committed: committing it
@@ -1824,7 +1797,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.logger.debug("ValidationGate verdict=\(gateReason, privacy: .public) fallback=\(post.gateRawFallback, privacy: .public) lengthRatio=\(String(format: "%.2f", post.gateMetrics.lengthRatio), privacy: .public) containment=\(String(format: "%.2f", post.gateMetrics.tokenContainment), privacy: .public) trigram=\(post.gateMetrics.trigramOverlap.map { String(format: "%.2f", $0) } ?? "nil", privacy: .public) rawLen=\(trimmedText.count, privacy: .public) cleanedLen=\(post.text.count, privacy: .public)")
                 }
                 let asrMs = Int((asrEnd - asrStart) * 1000)
-                let asrInputMs = Int(Double(normalized.count) / 16_000.0 * 1000)
                 if KalamDiagnosticFlags.verboseAudio {
                     self.logger.debug("Transcription completed outputLength=\(post.text.count, privacy: .public) asrMs=\(asrMs, privacy: .public) asrInputMs=\(asrInputMs, privacy: .public) cleanupEdits=\(post.stats.totalEdits, privacy: .public) cleanupMs=\(Int(post.stats.durationMs), privacy: .public) grammarEdits=\(post.stats.grammarEdits, privacy: .public) grammarAttempted=\(post.stats.grammarAttempted, privacy: .public) grammarTimedOut=\(post.stats.grammarTimedOut, privacy: .public) grammarSkippedForLength=\(post.stats.grammarSkippedForLength, privacy: .public) itnSpansMasked=\(post.itnSpansMasked, privacy: .public) itnEnabled=\(post.itnEnabled, privacy: .public) itnAvailable=\(post.itnAvailable, privacy: .public) itnChanged=\(post.itnChanged, privacy: .public) itnMs=\(post.itnMs, privacy: .public) replacements=\(post.replacements, privacy: .public) segmentEstimateMs=\(segmentEstimateMs, privacy: .public) gateFallback=\(post.gateRawFallback, privacy: .public)")
                 }
@@ -2047,25 +2019,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         playRecordingChime()
 
         transcriptionTask?.cancel()
-        let audio = self.audio
-        // Pin the teardown to THIS session before any suspension — a stale
-        // cancel must never kill a newer session that started in between.
-        let audioGeneration = audio.captureGeneration
-        let stopTask = Task(priority: .userInitiated) { [audio, audioGeneration] in
-            let samples = audio.finishStop(expectedGeneration: audioGeneration)
-            return samples
-        }
-        recordingStopTask = stopTask
-        transcriptionTask = Task(priority: .userInitiated) { [weak self, stopTask] in
-            guard let self else { return }
-            _ = await stopTask.value
-            if !self.isRecording {
-                self.warmPool.setRecordingActive(false)
-            }
-            await MainActor.run {
-                self.overlay.showInfoAndAutoHide("Recording canceled")
-            }
-        }
+        discardRecordingAudio()
+        overlay.showInfoAndAutoHide("Recording canceled")
+    }
+
+    private func discardRecordingAudio() {
+        var samples = audio.finishStop(expectedGeneration: audio.captureGeneration)
+        samples.secureZero()
+        warmPool.setRecordingActive(false)
     }
 
     // MARK: - K-52 lifecycle plumbing

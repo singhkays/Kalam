@@ -30,7 +30,7 @@ enum SilenceTrimmer {
     ) -> [Float] {
         guard !samples.isEmpty else { return samples }
 
-        let maxAmplitude = samples.map { abs($0) }.max() ?? 0
+        let maxAmplitude = samples.lazy.map { abs($0) }.max() ?? 0
         if KalamDiagnosticFlags.verboseAudio { logger.debug("Trimming audio maxAmplitude=\(maxAmplitude, privacy: .public)") }
 
         if maxAmplitude < 0.00001 {
@@ -207,7 +207,7 @@ enum SilenceTrimmer {
     ) -> [Float] {
         guard !samples.isEmpty else { return samples }
 
-        let maxAmplitude = samples.map { abs($0) }.max() ?? 0
+        let maxAmplitude = samples.lazy.map { abs($0) }.max() ?? 0
         if KalamDiagnosticFlags.verboseAudio { logger.debug("Trimming audio maxAmplitude=\(maxAmplitude, privacy: .public)") }
 
         if maxAmplitude < 0.00001 {
@@ -222,7 +222,7 @@ enum SilenceTrimmer {
             fallbackMinSeconds: fallbackMinSeconds, fallbackMinKeepRatio: fallbackMinKeepRatio
         ) else { return [] }
 
-        var out = plan.fellBack ? samples : {
+        var out = plan.fellBack ? samples.withUnsafeBufferPointer { Array($0) } : {
             var assembled: [Float] = []
             assembled.reserveCapacity(plan.ranges.reduce(0) { $0 + $1.count })
             for r in plan.ranges { assembled.append(contentsOf: samples[r]) }

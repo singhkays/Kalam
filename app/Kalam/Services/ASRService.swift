@@ -251,7 +251,9 @@ actor ASRService {
         }
     }
 
-    func transcribe(samples: [Float]) async throws -> String {
+    func transcribe(samples: consuming [Float]) async throws -> String {
+        var pcm = consume samples
+        defer { pcm.secureZero() }
         let config = ModelsConfiguration.load()
         let targetPath = config.modelDirectoryURL(for: config.asrVersion)?.standardizedFileURL.path
         if !initialized || currentModelVersion != config.asrVersion || currentModelDirectoryPath != targetPath {
@@ -263,7 +265,7 @@ actor ASRService {
         }
         // Parakeet TDT expects 16kHz mono Float32
         var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
-        let result = try await asrManager.transcribe(samples, decoderState: &decoderState)
+        let result = try await asrManager.transcribe(pcm, decoderState: &decoderState)
         return result.text
     }
 }

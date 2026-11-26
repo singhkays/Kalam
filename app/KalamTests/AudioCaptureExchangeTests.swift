@@ -216,6 +216,28 @@ final class AudioCaptureExchangeTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(drained.count, 1024, "new session samples must survive a stale stop")
     }
 
+    func testDiscardFromOldGenerationLeavesCurrentPCMIntact() {
+        let exchange = AudioCaptureExchange()
+        exchange.resetForNewSession()
+        let old = exchange.currentGeneration()
+        exchange.resetForNewSession()
+        let current = exchange.currentGeneration()
+        XCTAssertTrue(exchange.publish(makeSyntheticBuffer(sampleRate: 16_000, frames: 1024)))
+        exchange.discardCapture(expectedGeneration: old)
+        XCTAssertTrue(exchange.publish(makeSyntheticBuffer(sampleRate: 16_000, frames: 1024)))
+        XCTAssertEqual(exchange.stopCapture(expectedGeneration: current).count, 2048)
+    }
+
+    @MainActor
+    func testStoppedPCMTransfersOnce() {
+        let result = CapturedPCM([0.5, -0.5])
+        var owned = result.take()
+        XCTAssertEqual(owned, [0.5, -0.5])
+        XCTAssertTrue(result.take().isEmpty)
+        owned.secureZero()
+        XCTAssertEqual(owned, [0, 0])
+    }
+
     func testUnconditionalStopStillWorks() {
         let exchange = AudioCaptureExchange()
         exchange.resetForNewSession()
