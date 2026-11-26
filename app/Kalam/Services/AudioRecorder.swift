@@ -626,6 +626,7 @@ final class AudioRecorder: @unchecked Sendable {
         let start: @Sendable () throws -> Void
         let discard: @Sendable () -> Void
         let scheduleDeadline: @Sendable (@escaping @Sendable () -> Void) -> Void
+        var now: @Sendable () -> ContinuousClock.Instant = { .now }
     }
 
     /// The engine queue retains ownership after a timeout or cancellation.
@@ -671,7 +672,7 @@ final class AudioRecorder: @unchecked Sendable {
                     } catch {
                         didThrow = true
                     }
-                    let proposed: AudioStartPolicy.Outcome = .now >= deadline ? .timedOut : (didThrow ? .failed : .started)
+                    let proposed: AudioStartPolicy.Outcome = operations.now() >= deadline ? .timedOut : (didThrow ? .failed : .started)
                     if attempt.resolve(proposed) != .started {
                         operations.discard()
                         releaseStart(attempt)

@@ -103,6 +103,23 @@ final class AudioStartPolicyTests: XCTestCase {
     }
 
     @MainActor
+    func testHardwareReturningAfterElapsedDeadlineIsDiscardedBeforeTimerRuns() async {
+        let recorder = AudioRecorder()
+        let start = ControlledAudioStart(released: true)
+        let deadline = ContinuousClock.now + .seconds(10)
+        var operations = start.operations
+        operations.now = { deadline + .milliseconds(1) }
+        let outcome = await recorder.startCollectingBounded(deadline: deadline, operations: operations) {
+            XCTFail("Hardware success after the deadline cannot commit")
+            return true
+        }
+        XCTAssertEqual(outcome, .timedOut)
+        let slotAvailable = await recorder.waitForStartSlot(until: .now + .seconds(2))
+        XCTAssertTrue(slotAvailable)
+        XCTAssertEqual(start.discards, 1)
+    }
+
+    @MainActor
     func testUnacceptedHardwareStartIsDiscarded() async {
         let recorder = AudioRecorder()
         let start = ControlledAudioStart(released: true)
