@@ -187,6 +187,10 @@ Run the engine tests without Xcode:
 ./scripts/test-engine.sh
 ```
 
+Run `./build.sh` to package a local installer at `build/Kalam.dmg`. It uses
+ad-hoc signing by default and accepts `SIGNING_IDENTITY` for local signing.
+The GitHub release workflow publishes tag builds.
+
 ## Contributing
 
 Issues and pull requests are welcome. Before changing the dictation pipeline, read [`AGENTS.md`](AGENTS.md). It documents the invariants: no network code, no logging of transcript or audio content, and clipboard-restore semantics.

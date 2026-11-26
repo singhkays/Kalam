@@ -3,21 +3,17 @@
 # Exit on error
 set -e
 
-PROJECT_ROOT=$(pwd)
+PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 APP_DIR="$PROJECT_ROOT/app"
 BUILD_DIR="$PROJECT_ROOT/build"
 ASSETS_DIR="$PROJECT_ROOT/assets"
 ARCHIVE_PATH="$BUILD_DIR/Kalam.xcarchive"
 APP_NAME="Kalam"
-BUNDLE_ID="singhkays.Kalam"
 DMG_NAME="Kalam.dmg"
 DMG_VOL_NAME="Kalam Installer"
 BACKGROUND_FILE="$ASSETS_DIR/dmg_background.png"
 
 echo "🚀 Starting build process for $APP_NAME..."
-
-# Create build directory
-mkdir -p "$BUILD_DIR"
 
 # Clean previous builds
 echo "🧹 Cleaning previous builds..."
@@ -80,6 +76,7 @@ hdiutil create -volname "$DMG_VOL_NAME" -srcfolder "$DMG_TEMP_DIR" -ov -format U
 echo "🔌 Mounting intermediate DMG..."
 # -noautoopen prevents Finder from popping up locally
 DEVICE=$(hdiutil attach -readwrite -noverify -noautoopen "$MASTER_DMG" | egrep '^/dev/' | sed 1q | awk '{print $1}')
+trap 'if [[ -n "$DEVICE" ]]; then hdiutil detach "$DEVICE" >/dev/null; fi' EXIT
 sleep 10 # More time for CI to register the disk
 
 # Apply AppleScript for layout
@@ -145,6 +142,7 @@ echo "$APPLESCRIPT" | osascript
 echo "🧹 Unmounting and converting to final DMG..."
 sync
 hdiutil detach "$DEVICE"
+DEVICE=
 sleep 5
 
 DMG_PATH="$BUILD_DIR/$DMG_NAME"
@@ -156,31 +154,3 @@ echo "✅ Stylized DMG created: $DMG_PATH"
 
 # Cleanup temp dir
 rm -rf "$DMG_TEMP_DIR"
-
-# Create GitHub Release
-if [ "$CI" = "true" ]; then
-    echo "🤖 CI detected. Skipping internal 'gh release' call. Workflow will handle artifact upload."
-    exit 0
-fi
-
-if command -v gh &> /dev/null; then
-    echo "🚀 Creating GitHub Release..."
-    VERSION=$(grep -m 1 "MARKETING_VERSION =" "$APP_DIR/Kalam.xcodeproj/project.pbxproj" | cut -d'=' -f2 | tr -d ' ;' | head -n 1)
-    if [ -z "$VERSION" ]; then VERSION="1.0.0"; fi
-    
-    TAG="v$VERSION"
-    
-    if gh release view "$TAG" &> /dev/null; then
-        echo "🗑️ Deleting existing release $TAG..."
-        gh release delete "$TAG" --yes
-    fi
-    
-    if git rev-parse "$TAG" >/dev/null 2>&1; then
-        git tag -d "$TAG"
-    fi
-
-    gh release create "$TAG" "$DMG_PATH" --title "Release $TAG" --notes "Kalam macOS Release. Open the DMG and drag Kalam to the Applications folder to install. This release features a stylized installer aligned with our brand aesthetic."
-    echo "🎉 Release created successfully!"
-else
-    echo "⚠️ GitHub CLI (gh) not found. Skipping release creation."
-fi
