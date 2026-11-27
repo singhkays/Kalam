@@ -130,7 +130,7 @@ enum CaptureHealthGuard {
     /// Fraction of samples above 1e-4 required on a long capture.
     static let minNonZeroRatio: Float = 0.02
 
-    static func assess(stats: CaptureStats, holdMs: Int) -> Assessment {
+    static func assess(stats: CaptureStats, holdMs: Int, allowInterruptedCapture: Bool = false) -> Assessment {
         let capturedMs = stats.durationMs
         let nonZeroRatio: Float = stats.sampleCount > 0
             ? Float(stats.nonZeroCount) / Float(stats.sampleCount)
@@ -139,7 +139,7 @@ enum CaptureHealthGuard {
             healthy: true, reason: nil,
             capturedMs: capturedMs, holdMs: holdMs, nonZeroRatio: nonZeroRatio)
         guard holdMs >= minHoldMsForAssessment else { return base }
-        if Double(capturedMs) < Double(holdMs) * minKeepRatio {
+        if !allowInterruptedCapture, Double(capturedMs) < Double(holdMs) * minKeepRatio {
             var out = base
             out.healthy = false
             out.reason = .shortfall

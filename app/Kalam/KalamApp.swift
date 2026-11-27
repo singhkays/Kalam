@@ -236,6 +236,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var localKeyDownMonitor: Any?
     private var globalKeyDownMonitor: Any?
     private var audioMonitor: AudioDeviceMonitor?
+    private var inputRefreshPending = false
+    private var interruptedDrainGeneration: Int?
     private var selectedInputUID: String?
     private var duckingStartWorkItem: DispatchWorkItem?
     private let recordingChime = NSSound(named: NSSound.Name("Breeze"))
@@ -524,6 +526,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Deliberately no engine.stop() here: the audio stack is the one thing
         // that can hang, and process death reclaims the mic indicator anyway.
         cancelPendingStartIfActive(reason: "terminate")
+        stopRecordingDucking()
         transcriptionTask?.cancel()
         cancelMicStallWatchdog()
         if let hotkeyObserver {
@@ -987,7 +990,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func performRuntimePreparation() async {
         let microphoneAuthorization = AVCaptureDevice.authorizationStatus(for: .audio)
-        if microphoneAuthorization == .authorized {
+        if microphoneAuthorization != .authorized {
+            isAudioReady = false
+        } else if !isRecording, !audio.isStartInFlight, recordingStopTask == nil {
             do {
                 // Same candidate walk as press time so preparedInputDeviceID already
                 // matches the device the first press will request (early-return path).
@@ -999,8 +1004,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 isAudioReady = false
                 logger.warning("Audio prepare failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             }
-        } else {
-            isAudioReady = false
         }
 
         let config = ModelsConfiguration.load()
@@ -1033,39 +1036,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         asrRecordingBlockMessage = status.recordingBlockMessage
     }
 
-    /// microphone recovery after sleep or device change: CoreAudio device changed (plug/unplug, default-input switch,
-    /// device death, dock reconnect) — rebuild the audio graph against the
-    /// fresh topology and re-select the priority-ordered microphone.
     private func refreshAudioInputAfterDeviceChange() {
-        // Settings "Being heard" mic list live-refresh: the pane renders a cached
-        // one-shot enumeration, so a device that connects while settings is open
-        // (AirPods' input side registers seconds after Control Center says
-        // "connected") would stay OFFLINE until the window was closed and
-        // reopened. handleSystemWake delegates here, so wake is covered too.
         NotificationCenter.default.post(name: .audioDevicesDidChange, object: nil)
-        // Bounded-start guard: if an off-main engine start is in flight —
-        // exactly the device-churn scenario that wedged the HAL — abandon it
-        // (it self-cleans) and DEFER the graph rebuild: prepare() must never
-        // touch engine state concurrently. The invalidated flag makes the
-        // next press rebuild the graph from fresh topology.
-        if audio.isStartInFlight {
-            cancelPendingStartIfActive(reason: "deviceChange")
-            warmPool.invalidate(reason: "deviceChangeDuringStart")
-            logger.info("Audio refresh deferred: engine start in flight; graph rebuilds on next press")
-            invalidateOnboardingSnapshot()
-            refreshOnboardingState(reopenIfNeeded: false)
-            return
-        }
         invalidateOnboardingSnapshot()
-        // Normalize persisted priority list here (infrequent path) instead of on
-        // every press — normalize itself enumerates CoreAudio.
+        inputRefreshPending = true
+        warmPool.invalidate(reason: "deviceChange")
+
+        let action = AudioInputTopologyAction.afterChange(
+            starting: audio.isStartInFlight || pttState.isPending,
+            recording: isRecording,
+            draining: recordingStopTask != nil,
+            streamIsLive: audio.captureEngineIsRunning && audioMonitor?.recordingDeviceIsAlive != false
+        )
+        switch action {
+        case .rebuildGraph:
+            refreshDeferredInputWhenIdle()
+        case .abandonPendingStart:
+            cancelPendingStartIfActive(reason: "deviceChange")
+        case .deferRebuild:
+            break
+        case .finishCapture:
+            pttUpTime = CFAbsoluteTimeGetCurrent()
+            stopRecordingAndTranscribe(interruptedByDeviceChange: true)
+        case .finishDrain:
+            // An interrupted post-roll still owns the captured PCM. Cancel
+            // its wait so its existing teardown hands the audio to ASR.
+            interruptedDrainGeneration = audio.captureGeneration
+            recordingStopTask?.cancel()
+        }
+        refreshOnboardingState(reopenIfNeeded: false)
+    }
+
+    private func refreshDeferredInputWhenIdle() {
+        guard inputRefreshPending, !isRecording, !pttState.isPending,
+              !audio.isStartInFlight, recordingStopTask == nil else { return }
         let loaded = MicrophonePriorityConfiguration.load()
         let normalized = MicrophoneDeviceService.normalize(config: loaded)
-        if normalized != loaded {
-            normalized.save()
-        }
-        audio.invalidatePreparedState()
-        warmPool.invalidate(reason: "deviceChange")
+        if normalized != loaded { normalized.save() }
+
         do {
             _ = try prepareAudioForRecording()
             isAudioReady = true
@@ -1073,7 +1081,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             isAudioReady = false
             logger.warning("Audio refresh after device change failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
         }
-        refreshOnboardingState(reopenIfNeeded: false)
+        invalidateOnboardingSnapshot()
     }
 
     /// microphone recovery after sleep or device change: system woke. Two failure modes to clear:
@@ -1089,6 +1097,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A bounded start in flight across sleep cannot be trusted to commit:
         // abandon it (self-cleans) so the first post-wake press starts fresh.
         cancelPendingStartIfActive(reason: "wake")
+        stopRecordingDucking()
         if isRecording {
             transcriptionTask?.cancel()
             transcriptionTask = nil
@@ -1177,6 +1186,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func prepareAudioForRecording() throws -> String? {
+        if inputRefreshPending {
+            audio.invalidatePreparedState()
+            inputRefreshPending = false
+        }
         let candidates = resolvePriorityOrderedMicrophones()
         for candidate in candidates {
             do {
@@ -1275,6 +1288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         recordingSessions.beginNewRecording()
         let sessionID = recordingSessions.currentSessionID!
         let triggerMode = pttState.recordingTriggerMode ?? .hold
+        audioMonitor?.trackRecordingDevice(audio.captureInputDeviceID)
         overlay.showRecording(isHoldMode: triggerMode == .hold)
         // K-52: the start committed — advance the machine (this is where a
         // superseded session's transcript gets preserved / its tasks killed).
@@ -1317,7 +1331,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             duckingStartWorkItem?.cancel()
             let workItem = DispatchWorkItem { [weak self] in
                 Task { @MainActor [weak self] in
-                    guard let self, self.isRecording else { return }
+                    guard let self, self.isRecording, self.recordingSessions.isCurrentSession(sessionID) else { return }
                     SystemAudioDucker.shared.startDucking()
                 }
             }
@@ -1429,28 +1443,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         micStallWatchdogTask = nil
     }
 
-    private func stopRecordingAndTranscribe() {
-        // A stop that lands in the bounded-start pending window aborts the
-        // attempt: no engine session ever committed, so there is nothing to
-        // transcribe — and per the silent-cancellation ruling, no toast. The
-        // machine routes this press here precisely so it cannot be eaten by
-        // a stale idle read (the holdOrToggle double-press regression).
-        if pttState.isPending || pendingStartTask != nil {
+    private func stopRecordingAndTranscribe(interruptedByDeviceChange: Bool = false) {
+        if pttState.isPending {
             cancelPendingStartIfActive(reason: "stopDuringPending")
             return
         }
         guard isRecording else { return }
         pttState.recordingDidStop()
         cancelMicStallWatchdog()
-        
-        if UserDefaults.standard.bool(forKey: "duckEnabled") {
-            duckingStartWorkItem?.cancel()
-            duckingStartWorkItem = nil
-            SystemAudioDucker.shared.stopDucking()
-        }
+        stopRecordingDucking()
 
-        playRecordingChime()
-        
+        if !interruptedByDeviceChange { playRecordingChime() }
+
         overlay.showTranscribing()
         
         // Capture PTT times on MainActor before detaching
@@ -1464,6 +1468,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // any suspension. A rapid re-record bumps this id; the stale stop will
         // then no-op instead of draining the new session.
         let audioGeneration = audio.captureGeneration
+        let captureTransport = audio.lastSessionTiming.transportTag
 
         // K-52: the unconditional cancels that lived here (and in
         // startRecording) are replaced by machine policy — a superseded
@@ -1484,9 +1489,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return CapturedPCM([]) }
             defer {
                 self.recordingStopTask = nil
+                self.audioMonitor?.trackRecordingDevice(nil)
                 if !self.isRecording && self.pendingStartTask == nil {
                     self.warmPool.setRecordingActive(false)
                 }
+                Task { @MainActor [weak self] in self?.refreshDeferredInputWhenIdle() }
+            }
+            if interruptedByDeviceChange {
+                return CapturedPCM(self.audio.finishStop(expectedGeneration: audioGeneration))
             }
             let postRollMs = Self.postRollForSegment(
                 pttDown: pttDown,
@@ -1530,10 +1540,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let keyUpToStopStart = CFAbsoluteTimeGetCurrent()
             var samples = await stopTask.value.take()
             defer { samples.secureZero() }
+            let interruptedDuringDrain = self.interruptedDrainGeneration == audioGeneration
+            if interruptedDuringDrain { self.interruptedDrainGeneration = nil }
+            let captureWasInterrupted = interruptedByDeviceChange || interruptedDuringDrain
             guard !Task.isCancelled else { return }
             // A stale stop (superseded by a rapid re-record) returns no audio;
             // the newer session's overlay state owns the indicator from here.
             guard !samples.isEmpty else {
+                if captureWasInterrupted, self.recordingSessions.isCurrentSession(stopSessionID) {
+                    self.dispatchLifecycle(.captureEnded(session: stopSessionID, result: .noSpeech), context: "device-change-empty")
+                    self.overlay.showError("Microphone disconnected before it captured audio", action: .openMicrophoneSettings, autoHideAfter: 5.0)
+                }
                 if KalamDiagnosticFlags.verboseAudio {
                     self.logger.debug("Stop superseded by a newer recording; skipping transcription")
                 }
@@ -1595,7 +1612,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Conservative by design: short holds always pass; downstream
             // stages still own quiet-but-real speech.
             let captureAssessment = CaptureHealthGuard.assess(
-                stats: self.audio.lastCaptureStats, holdMs: segmentEstimateMs)
+                stats: self.audio.lastCaptureStats, holdMs: segmentEstimateMs,
+                allowInterruptedCapture: captureWasInterrupted)
             guard captureAssessment.healthy else {
                 // User-visible no-paste outcome: one info line with the reason.
                 self.logger.info("Capture pathological reason=\(captureAssessment.reason?.logName ?? "unknown", privacy: .public) capturedMs=\(captureAssessment.capturedMs, privacy: .public) holdMs=\(captureAssessment.holdMs, privacy: .public) nonZeroPct=\(Int(captureAssessment.nonZeroRatio * 100), privacy: .public)")
@@ -1613,7 +1631,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // start threshold and the 300ms pad can't reach it back. Give
             // Bluetooth a 1000ms pad (both edges; the trailing cost is ~30ms
             // of ASR) so immediate speech survives the ramp.
-            let isBluetoothCapture = self.audio.lastSessionTiming.transportTag == "bluetooth"
+            let isBluetoothCapture = captureTransport == "bluetooth"
             var trimmed = SilenceTrimmer.trimAndNormalize(
                 samples: samples, sampleRate: 16_000,
                 padMs: isBluetoothCapture ? 1000 : 300)
@@ -1860,11 +1878,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dictationDestination = nil
         dictationTargetElement = nil
 
-        if UserDefaults.standard.bool(forKey: "duckEnabled") {
-            duckingStartWorkItem?.cancel()
-            duckingStartWorkItem = nil
-            SystemAudioDucker.shared.stopDucking()
-        }
+        stopRecordingDucking()
 
         playRecordingChime()
 
@@ -1873,10 +1887,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.showInfoAndAutoHide("Recording canceled")
     }
 
+    private func stopRecordingDucking() {
+        duckingStartWorkItem?.cancel()
+        duckingStartWorkItem = nil
+        SystemAudioDucker.shared.stopDucking()
+    }
+
     private func discardRecordingAudio() {
         var samples = audio.finishStop(expectedGeneration: audio.captureGeneration)
         samples.secureZero()
+        audioMonitor?.trackRecordingDevice(nil)
         warmPool.setRecordingActive(false)
+        refreshDeferredInputWhenIdle()
     }
 
     // MARK: - K-52 lifecycle plumbing

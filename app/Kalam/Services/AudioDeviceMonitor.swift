@@ -3,6 +3,23 @@ import CoreAudio
 import Foundation
 import OSLog
 
+enum AudioInputTopologyAction: Equatable {
+    case rebuildGraph
+    case abandonPendingStart
+    case deferRebuild
+    case finishCapture
+    case finishDrain
+
+    static func afterChange(
+        starting: Bool, recording: Bool, draining: Bool, streamIsLive: @autoclosure () -> Bool
+    ) -> Self {
+        if starting { return .abandonPendingStart }
+        if recording { return streamIsLive() ? .deferRebuild : .finishCapture }
+        if draining { return streamIsLive() ? .deferRebuild : .finishDrain }
+        return .rebuildGraph
+    }
+}
+
 /// Watches for audio input topology changes (device plug/unplug, default-input
 /// switches, device death) and system wake events. Kalam uses it to re-prepare
 /// the AVAudioEngine input graph after sleep/wake and dock reconnects — without
@@ -20,11 +37,38 @@ final class AudioDeviceMonitor {
     private var registeredListeners: [(object: AudioObjectID, address: AudioObjectPropertyAddress, block: AudioObjectPropertyListenerBlock)] = []
     private var aliveListener: (object: AudioObjectID, address: AudioObjectPropertyAddress, block: AudioObjectPropertyListenerBlock)?
 
-    init(debounceInterval: TimeInterval = 0.5) {
+    struct PropertyIO {
+        var add: (AudioObjectID, AudioObjectPropertyAddress, @escaping AudioObjectPropertyListenerBlock) -> OSStatus = { object, address, block in
+            var address = address
+            return AudioObjectAddPropertyListenerBlock(object, &address, DispatchQueue.main, block)
+        }
+        var remove: (AudioObjectID, AudioObjectPropertyAddress, @escaping AudioObjectPropertyListenerBlock) -> Void = { object, address, block in
+            var address = address
+            AudioObjectRemovePropertyListenerBlock(object, &address, DispatchQueue.main, block)
+        }
+        var defaultInput: @MainActor () -> AudioDeviceID = AudioDeviceMonitor.defaultInputDeviceID
+        var isAlive: @MainActor (AudioDeviceID) -> Bool? = AudioDeviceMonitor.deviceIsAlive
+    }
+
+    private let properties: PropertyIO
+    private var recordingDevice: AudioDeviceID?
+
+    var recordingDeviceIsAlive: Bool? {
+        recordingDevice.flatMap(properties.isAlive)
+    }
+
+    func trackRecordingDevice(_ id: AudioDeviceID?) {
+        recordingDevice = id
+        updateAliveListener()
+    }
+
+    init(debounceInterval: TimeInterval = 0.5, properties: PropertyIO = PropertyIO()) {
         self.debounceInterval = debounceInterval
+        self.properties = properties
     }
 
     func start(onDeviceChange: @escaping () -> Void, onWake: @escaping () -> Void) {
+        stop()
         self.onDeviceChange = onDeviceChange
         self.onWake = onWake
         registerHardwareListeners()
@@ -33,14 +77,15 @@ final class AudioDeviceMonitor {
     }
 
     func stop() {
+        onDeviceChange = nil
+        onWake = nil
+        recordingDevice = nil
         for listener in registeredListeners {
-            var address = listener.address
-            AudioObjectRemovePropertyListenerBlock(listener.object, &address, DispatchQueue.main, listener.block)
+            properties.remove(listener.object, listener.address, listener.block)
         }
         registeredListeners.removeAll()
         if let aliveListener {
-            var address = aliveListener.address
-            AudioObjectRemovePropertyListenerBlock(aliveListener.object, &address, DispatchQueue.main, aliveListener.block)
+            properties.remove(aliveListener.object, aliveListener.address, aliveListener.block)
             self.aliveListener = nil
         }
         if let wakeObserver {
@@ -64,6 +109,7 @@ final class AudioDeviceMonitor {
     // MARK: - Events
 
     private func scheduleRefresh() {
+        guard onDeviceChange != nil else { return }
         debounceWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
             Task { @MainActor [weak self] in
@@ -87,16 +133,12 @@ final class AudioDeviceMonitor {
 
     private func registerHardwareListeners() {
         let systemObject = AudioObjectID(kAudioObjectSystemObject)
-        // The *Changed notification selectors are not exposed to Swift in
-        // current SDKs — use the four-char codes directly:
-        //   'dfch' = kAudioHardwarePropertyDefaultInputDeviceChanged
-        //   'devc' = kAudioHardwarePropertyDevicesChanged
         let selectors: [AudioObjectPropertySelector] = [
-            AudioObjectPropertySelector(0x64666368),
-            AudioObjectPropertySelector(0x64657663)
+            kAudioHardwarePropertyDefaultInputDevice,
+            kAudioHardwarePropertyDevices
         ]
         for selector in selectors {
-            var address = AudioObjectPropertyAddress(
+            let address = AudioObjectPropertyAddress(
                 mSelector: selector,
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain
@@ -106,7 +148,7 @@ final class AudioDeviceMonitor {
                     self?.scheduleRefresh()
                 }
             }
-            let status = AudioObjectAddPropertyListenerBlock(systemObject, &address, DispatchQueue.main, block)
+            let status = properties.add(systemObject, address, block)
             if status == noErr {
                 registeredListeners.append((systemObject, address, block))
             } else {
@@ -127,24 +169,21 @@ final class AudioDeviceMonitor {
         }
     }
 
-    /// Re-arms the device-alive listener on the current default input device
-    /// (the one Kalam would record from when no explicit mic is chosen).
+    /// Watch the device bound to the live graph, including a preferred
+    /// microphone that differs from the system default.
     private func updateAliveListener() {
-        let deviceID = Self.defaultInputDeviceID()
+        guard onDeviceChange != nil else { return }
+        let deviceID = recordingDevice ?? properties.defaultInput()
         if let aliveListener, aliveListener.object == deviceID {
             return
         }
         if let aliveListener {
-            var address = aliveListener.address
-            AudioObjectRemovePropertyListenerBlock(aliveListener.object, &address, DispatchQueue.main, aliveListener.block)
+            properties.remove(aliveListener.object, aliveListener.address, aliveListener.block)
             self.aliveListener = nil
         }
         guard deviceID != kAudioObjectUnknown else { return }
-        // kAudioDevicePropertyDeviceIsAliveChanged ('alvc') is not exposed to
-        // Swift in current SDKs — use the four-char code directly.
-        let aliveChangedSelector = AudioObjectPropertySelector(0x616C7663)
-        var address = AudioObjectPropertyAddress(
-            mSelector: aliveChangedSelector,
+        let address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsAlive,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
@@ -153,12 +192,25 @@ final class AudioDeviceMonitor {
                 self?.scheduleRefresh()
             }
         }
-        let status = AudioObjectAddPropertyListenerBlock(deviceID, &address, DispatchQueue.main, block)
+        let status = properties.add(deviceID, address, block)
         if status == noErr {
             aliveListener = (deviceID, address, block)
         } else {
             logger.warning("Failed to register device-alive listener status=\(status, privacy: .public)")
         }
+    }
+
+    private static func deviceIsAlive(_ deviceID: AudioDeviceID) -> Bool? {
+        var alive: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsAlive,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &alive)
+        if status == kAudioHardwareBadObjectError { return false }
+        return status == noErr ? alive != 0 : nil
     }
 
     private static func defaultInputDeviceID() -> AudioDeviceID {
