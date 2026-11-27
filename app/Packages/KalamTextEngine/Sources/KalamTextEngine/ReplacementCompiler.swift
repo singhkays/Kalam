@@ -109,7 +109,8 @@ public enum ReplacementCompiler {
         var seen = Set<String>()
         var deduped: [DictionaryEntry] = []
         for e in cleaned.reversed() {
-            let k = "\(e.trigger.lowercased())|\(e.caseInsensitive)|\(e.preserveCase)|\(e.isPhrase)"
+            let trigger = e.caseInsensitive ? e.trigger.lowercased() : e.trigger
+            let k = "\(trigger)|\(e.caseInsensitive)|\(e.preserveCase)|\(e.isPhrase)"
             if !seen.contains(k) {
                 deduped.append(e)
                 seen.insert(k)
@@ -158,8 +159,9 @@ public enum ReplacementCompiler {
         let trigger = NSRegularExpression.escapedPattern(for: e.trigger)
         let baseGroupIndex = 1
 
-        let pattern = "\\b(" + trigger + ")" + "(" + "'s|’s|s'|es|s" + ")?\\b"
-        let suffixIndex = 2
+        let suffix = e.isLiteral ? "" : "('s|’s|s'|es|s)?"
+        let pattern = "\\b(" + trigger + ")" + suffix + "\\b"
+        let suffixIndex = e.isLiteral ? nil : 2
 
         var opts: NSRegularExpression.Options = [.useUnicodeWordBoundaries]
         if e.caseInsensitive { opts.insert(.caseInsensitive) }

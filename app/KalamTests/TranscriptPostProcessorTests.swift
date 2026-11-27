@@ -27,6 +27,15 @@ final class TranscriptPostProcessorTests: XCTestCase {
         XCTAssertGreaterThan(out.stats.punctuationEdits, 0)
     }
 
+    func testShortDictationReachesDictionaryAfterFillerRemoval() {
+        let entry = DictionaryEntry(trigger: "sam", replacement: "Sam Rivera", caseInsensitive: false, preserveCase: false)
+        XCTAssertEqual(makeProcessor().process("um call sam").text, "call sam")
+        let out = makeProcessor(entries: [entry]).process("um call sam")
+        XCTAssertEqual(out.text, "call Sam Rivera")
+        XCTAssertEqual(out.replacements, 1)
+        XCTAssertFalse(out.gateRawFallback)
+    }
+
     func testAppliesDictionaryReplacementsFromSnapshot() {
         let entry = DictionaryEntry(trigger: "open ai", replacement: "OpenAI")
         let out = makeProcessor(entries: [entry]).process("i use open ai daily")
