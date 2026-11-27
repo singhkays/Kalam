@@ -142,13 +142,14 @@ public struct ValidationGate: Sendable {
 
     // MARK: - Tokenization helpers
 
+    private static let tokenRegex = try? NSRegularExpression(pattern: "[A-Za-z0-9]+")
+
     // Alphanumeric tokens, lowercased, matching engine's NaturalLanguage-adjacent style
     // (TextCleanupEngine uses NLTokenizer word level; this is the headless equivalent).
     static func tokenize(_ s: String) -> [String] {
         // Use regex [A-Za-z0-9]+ to capture alphanumeric tokens, lowercased.
         // This keeps numbers and words distinct but strips punctuation.
-        let pattern = "[A-Za-z0-9]+"
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        guard let regex = tokenRegex else { return [] }
         let ns = s as NSString
         let matches = regex.matches(in: s, range: NSRange(location: 0, length: ns.length))
         return matches.map { ns.substring(with: $0.range).lowercased() }
