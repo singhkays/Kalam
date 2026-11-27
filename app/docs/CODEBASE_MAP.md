@@ -123,7 +123,7 @@ no tabbed settings UI anymore; `SettingsUI.swift` was deleted in the settings re
 | `Destination.swift` | 103 | Six destinations (beingHeard/trigger/cleanup/dictionary/engine/updates); journey vs maintenance split. |
 | `MapView.swift` 172 / `DiveView.swift` 86 / `ContentsNav.swift` 94 / `SettingsScrollView.swift` 91 | | Navigation chrome. |
 | `Panes/` | | One dive pane per destination: `TriggerPane` 148, `BeingHeardPane` 477 (behavior + indicator rows + mic priority), `CleanupPane` 208, `DictionaryPane` 495 (editor phase machine + Covers preview), `EnginePane` 77 + `EngineGetTheModelCard` 1050 (Setup wizard) + `EngineActiveCard` 485 (model selector), `UpdatesPane` 231 (release + diagnostics export). |
-| `Controls/` (`HotkeyControl` 302, `KeyCapture` 205, `MapCard` 118, `PaperSegment` 70, `PaperToggle` 38, `PrivacyPill` 20) | | Shared controls incl. chord capture. |
+| `Controls/` (`HotkeyControl`, `KeyChordFormatter`, `MapCard` 118, `PaperSegment` 70, `PaperToggle` 38, `PrivacyPill` 20) | | Shared controls incl. chord capture. |
 | `SettingsTokens.swift` | 545 | Typography (`SettingsFont`: Instrument Serif display-only, New York book with opsz pinned to point size, SF Pro/SF Mono body) + color/radius tokens + `nsWeight` anchor-piecewise CSS→AppKit mapping. Fonts lazy-registered once per process. |
 
 The authoritative visual values live in `SettingsTokens.swift` (typography,

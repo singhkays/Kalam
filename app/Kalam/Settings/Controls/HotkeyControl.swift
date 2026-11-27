@@ -118,6 +118,7 @@ struct HotkeyControl: View {
     @State private var capturing = false
     @State private var rejectFlash = false
     @State private var monitor: Any?
+    @State private var capture = ShortcutCapture()
     /// Seventh QA round (2026-08-22): the closed chip read as a value badge,
     /// not a press target — hover raise gives the plate a living affordance.
     @State private var hovering = false
@@ -262,16 +263,14 @@ struct HotkeyControl: View {
         capturing = true
         rejectFlash = false
         removeMonitor()
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if event.keyCode == 53 { // Escape
-                Task { @MainActor in stopCapture(commit: nil) }
-                return nil
+        capture = ShortcutCapture()
+        monitor = NSEvent.addLocalMonitorForEvents(matching: ShortcutCapture.eventMask) { event in
+            switch capture.handle(event) {
+            case .waiting: break
+            case .cancel: stopCapture(commit: nil)
+            case .commit(let chord): stopCapture(commit: chord)
+            case .reject: flashReject()
             }
-            if let chord = KeyChordFormatter.chord(from: event) {
-                Task { @MainActor in stopCapture(commit: chord) }
-                return nil
-            }
-            Task { @MainActor in flashReject() }
             return nil
         }
     }
