@@ -25,13 +25,10 @@ enum AccessibilityWaker {
         _ = AXUIElementSetMessagingTimeout(appElement, wakeTimeoutSeconds)
         var value: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &value)
-        if result == .success {
-            if KalamDiagnosticFlags.verboseAudio { logger.debug("AccessibilityWaker: warmed pid=\(pid, privacy: .public) bundleID=\(bundleID ?? "nil", privacy: .public) result=success") }
-            return true
-        } else {
-            if KalamDiagnosticFlags.verboseAudio { logger.debug("AccessibilityWaker: warm attempt pid=\(pid, privacy: .public) result=\(result.rawValue, privacy: .public)") }
-            return false
+        if KalamDiagnosticFlags.verboseAudio {
+            logger.debug("Accessibility prefetch result=\(result.rawValue, privacy: .public)")
         }
+        return result == .success
     }
 
     /// Test seam: injectable version for headless tests.
