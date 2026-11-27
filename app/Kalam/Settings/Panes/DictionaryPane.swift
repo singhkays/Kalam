@@ -272,7 +272,7 @@ struct DictionaryPane: View {
                 Spacer()
                 Button("Cancel") { phase = .browsing }
                     .buttonStyle(SettingsSecondaryButtonStyle())
-                Button(isNew ? "Save replacement" : "Save") { save(isNew: isNew) }
+                Button(isNew ? "Save replacement" : "Save") { save() }
                     .buttonStyle(SettingsPrimaryButtonStyle(disabled: !canSave))
                     .disabled(!canSave)
             }
@@ -291,7 +291,7 @@ struct DictionaryPane: View {
             Button("Keep") { phase = .browsing }
                 .buttonStyle(SettingsPrimaryButtonStyle())
             Button("Remove") {
-                model.rules.removeAll { $0.id == rule.id }
+                model.removeRule(id: rule.id)
                 phase = .browsing
             }
             .buttonStyle(SettingsSecondaryButtonStyle())
@@ -367,7 +367,7 @@ struct DictionaryPane: View {
         phase = .editing(rule.id)
     }
 
-    private func save(isNew: Bool) {
+    private func save() {
         let spoken = String(draftSpoken.trimmingCharacters(in: .whitespacesAndNewlines).prefix(128))
             .replacingOccurrences(of: "\n", with: " ")
         let typed = String(draftTyped.trimmingCharacters(in: .whitespacesAndNewlines).prefix(128))
@@ -376,13 +376,9 @@ struct DictionaryPane: View {
 
         switch phase {
         case .adding:
-            model.rules.append(.init(spoken: spoken, typed: typed, mode: draftMode))
+            model.addRule(.init(spoken: spoken, typed: typed, mode: draftMode))
         case .editing(let id):
-            if let idx = model.rules.firstIndex(where: { $0.id == id }) {
-                model.rules[idx].spoken = spoken
-                model.rules[idx].typed = typed
-                model.rules[idx].mode = draftMode
-            }
+            model.updateRule(.init(id: id, spoken: spoken, typed: typed, mode: draftMode))
         default:
             break
         }

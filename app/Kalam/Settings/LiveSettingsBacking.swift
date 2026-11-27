@@ -35,12 +35,7 @@ final class LiveSettingsBacking: SettingsBacking {
         self.wakeExecutor = wakeExecutor
         self.manager = manager
         self.defaults = defaults
-        // The old settings shell seeded the dictionary on appear; the new shell owns it here
-        // (runs once per backing — the isFirstLaunch guard makes repeats no-ops).
-        if manager.isFirstLaunch {
-            manager.entries.removeAll { !$0.userAdded }
-            manager.saveImmediately()
-        }
+        DictionaryRuleMigration.runIfNeeded(manager: manager, defaults: defaults)
         refreshMicrophones()
         dictionarySink = manager.$entries.sink { [weak self] _ in
             self?.ping()
@@ -339,32 +334,41 @@ final class LiveSettingsBacking: SettingsBacking {
     // MARK: - Dictionary
 
     var rules: [ReplacementRule] {
-        get {
-            DictionaryRuleMigration.runIfNeeded(manager: manager, defaults: defaults)
-            return manager.entries.map { entry in
-                ReplacementRule(
-                    id: entry.id,
-                    spoken: entry.trigger,
-                    typed: entry.replacement,
-                    mode: (entry.caseInsensitive || entry.preserveCase) ? .smart : .literal
-                )
+        manager.entries.map { entry in
+            ReplacementRule(
+                id: entry.id,
+                spoken: entry.trigger,
+                typed: entry.replacement,
+                mode: Self.matchMode(for: entry)
+            )
+        }
+    }
+
+    func addRule(_ rule: ReplacementRule) {
+        manager.addEntry(DictionaryEntry(
+            id: rule.id,
+            trigger: Self.normalizedRuleText(rule.spoken),
+            replacement: Self.normalizedRuleText(rule.typed),
+            caseInsensitive: rule.mode == .smart,
+            preserveCase: rule.mode == .smart
+        ))
+    }
+
+    func updateRule(_ rule: ReplacementRule) {
+        manager.updateEntry(id: rule.id) { entry in
+            entry.trigger = Self.normalizedRuleText(rule.spoken)
+            entry.replacement = Self.normalizedRuleText(rule.typed)
+            if rule.mode != Self.matchMode(for: entry) {
+                entry.caseInsensitive = rule.mode == .smart
+                entry.preserveCase = rule.mode == .smart
             }
         }
-        set {
-            manager.entries = newValue.map { rule in
-                DictionaryEntry(
-                    id: rule.id,
-                    trigger: Self.normalizedRuleText(rule.spoken),
-                    replacement: Self.normalizedRuleText(rule.typed),
-                    isEnabled: true,
-                    caseInsensitive: rule.mode == .smart,
-                    preserveCase: rule.mode == .smart,
-                    userAdded: true
-                )
-            }
-            manager.entriesDidChange()
-            ping()
-        }
+    }
+
+    func removeRule(id: UUID) { manager.removeEntry(id: id) }
+
+    private static func matchMode(for entry: DictionaryEntry) -> MatchMode {
+        entry.caseInsensitive || entry.preserveCase ? .smart : .literal
     }
 
     var dictionaryLoadFailureNotice: String? { manager.loadFailureNotice }
@@ -593,18 +597,7 @@ enum DictionaryRuleMigration {
     /// gated by a persisted flag (set even when nothing was disabled).
     @MainActor
     static func runIfNeeded(manager: CustomDictionaryManager, defaults: UserDefaults = .standard) {
-        guard !defaults.bool(forKey: flagKey) else { return }
-        var changed = false
-        manager.entries = manager.entries.map { entry in
-            guard !entry.isEnabled else { return entry }
-            changed = true
-            var enabled = entry
-            enabled.isEnabled = true
-            return enabled
-        }
-        if changed {
-            manager.saveImmediately()
-        }
+        guard !defaults.bool(forKey: flagKey), manager.migrateDisabledEntries() else { return }
         defaults.set(true, forKey: flagKey)
     }
 }

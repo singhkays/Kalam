@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 import KalamTextEngine
 @testable import Kalam_test
@@ -164,55 +165,108 @@ final class LiveSettingsBackingTests: XCTestCase {
 
     // MARK: - Dictionary
 
-    func testRulesMapToEntriesAndBack() {
-        manager.entries = [
-            DictionaryEntry(trigger: "siobhan", replacement: "Siobhan", isEnabled: true, caseInsensitive: true, preserveCase: true, userAdded: true),
-            DictionaryEntry(trigger: "one on one", replacement: "1:1", isEnabled: true, caseInsensitive: false, preserveCase: false, userAdded: true),
-        ]
-        let backing = makeBacking()
-        XCTAssertEqual(backing.rules.count, 2)
-        XCTAssertEqual(backing.rules[0].mode, .smart)
-        XCTAssertEqual(backing.rules[1].mode, .literal)
+    func testOpeningSettingsKeepsValidEmptyDictionaryBytes() throws {
+        let original = Data("[\n]\n".utf8)
+        try original.write(to: dictURL)
+        manager.bootstrap()
 
-        backing.rules = [
-            ReplacementRule(spoken: "worcester", typed: "Worcester", mode: .smart),
-            ReplacementRule(spoken: "x y", typed: "xy", mode: .literal),
-        ]
-        XCTAssertEqual(manager.entries.count, 2)
-        XCTAssertEqual(manager.entries[0].trigger, "worcester")
-        XCTAssertTrue(manager.entries[0].caseInsensitive)
-        XCTAssertFalse(manager.entries[1].caseInsensitive)
-        XCTAssertTrue(manager.entries[1].userAdded)
-        XCTAssertTrue(manager.entries[1].isEnabled)
+        let backing = makeBacking()
+        XCTAssertTrue(backing.rules.isEmpty)
+        XCTAssertTrue(suite.bool(forKey: DictionaryRuleMigration.flagKey))
+        XCTAssertEqual(try Data(contentsOf: dictURL), original)
     }
 
-    func testRulesSetterTrimsAndCapsAt128Scalars() {
+    func testEditingOneRuleKeepsOtherEntriesAndPublishesAndCompilesOnce() throws {
+        let edited = DictionaryEntry(trigger: "sam", replacement: "Sam", caseInsensitive: true, preserveCase: true)
+        let legacyInsensitive = DictionaryEntry(trigger: "cal", replacement: "Cal", caseInsensitive: true, preserveCase: false)
+        let legacyCaseSensitive = DictionaryEntry(trigger: "Li", replacement: "Lee", caseInsensitive: false, preserveCase: true)
+        let original = [edited, legacyInsensitive, legacyCaseSensitive]
+        var compiles = 0
+        var savesScheduled = 0
+        manager = CustomDictionaryManager(
+            storeURL: dictURL,
+            scheduleSave: { _ in savesScheduled += 1 },
+            compileEntries: { entries in
+                compiles += 1
+                return ReplacementCompiler.compile(entries: entries)
+            }
+        )
+        try seedDictionary(original)
+        let backing = makeBacking()
+        let model = SettingsModel(store: backing)
+        var publications: [[DictionaryEntry]] = []
+        let subscription = manager.$entries.dropFirst().sink { publications.append($0) }
+        defer { subscription.cancel() }
+
+        model.updateRule(.init(id: edited.id, spoken: " sam rivera ", typed: " Sam Rivera ", mode: .literal))
+        let expected = DictionaryEntry(
+            id: edited.id, trigger: "sam rivera", replacement: "Sam Rivera", caseInsensitive: false, preserveCase: false
+        )
+        XCTAssertEqual(manager.entries, [expected, legacyInsensitive, legacyCaseSensitive])
+        XCTAssertEqual(publications, [[expected, legacyInsensitive, legacyCaseSensitive]])
+        XCTAssertEqual(compiles, 2, "bootstrap and one edit")
+        XCTAssertEqual(savesScheduled, 1)
+        XCTAssertEqual(manager.currentCompiledEngine.apply(to: "call sam rivera. CAL Li li").0, "call Sam Rivera. Cal Lee li")
+        model.updateRule(.init(id: edited.id, spoken: "sam rivera", typed: "Sam Rivera", mode: .literal))
+        model.updateRule(.init(spoken: "missing", typed: "ignored"))
+        XCTAssertEqual(publications.count, 1)
+        XCTAssertEqual(compiles, 2)
+        manager.flushPendingSave()
+    }
+
+    func testRuleAddAndRemoveApplyOnlyToTheirIDs() throws {
+        let kept = DictionaryEntry(trigger: "worcester", replacement: "Worcester", caseInsensitive: true, preserveCase: false)
+        try seedDictionary([kept])
+        let backing = makeBacking()
+        let added = ReplacementRule(spoken: "one on one", typed: "1:1", mode: .literal)
+        backing.addRule(added)
+        XCTAssertEqual(backing.rules.map(\.mode), [.smart, .literal])
+        XCTAssertTrue(manager.entries[1].userAdded)
+        XCTAssertTrue(manager.entries[1].isEnabled)
+        backing.removeRule(id: added.id)
+        XCTAssertEqual(manager.entries, [kept])
+        manager.flushPendingSave()
+    }
+
+    func testRuleAddTrimsAndCapsAt128Scalars() {
         let backing = makeBacking()
         let long = String(repeating: "a", count: 200) + "\nb"
-        backing.rules = [ReplacementRule(spoken: long, typed: " t ", mode: .smart)]
+        backing.addRule(.init(spoken: long, typed: " t ", mode: .smart))
         XCTAssertEqual(manager.entries[0].trigger.count, 128)
         XCTAssertFalse(manager.entries[0].trigger.contains("\n"))
         XCTAssertEqual(manager.entries[0].replacement, "t")
+        manager.flushPendingSave()
     }
 
-    func testDisabledRulesReEnabledOnceWithMigrationFlag() {
-        manager.entries = [
-            DictionaryEntry(trigger: "foo", replacement: "bar", isEnabled: false, caseInsensitive: true, preserveCase: true, userAdded: true),
-        ]
+    func testDisabledRulesReEnabledOnceWithMigrationFlag() throws {
+        let legacy = DictionaryEntry(trigger: "foo", replacement: "bar", isEnabled: false, caseInsensitive: false, preserveCase: true)
+        try seedDictionary([legacy])
         let backing = makeBacking()
         XCTAssertEqual(backing.rules.count, 1)
-        XCTAssertTrue(manager.entries[0].isEnabled, "disabled rules must be re-enabled once")
-        XCTAssertTrue(suite.bool(forKey: DictionaryRuleMigration.flagKey))
-
-        // Second backing: no-op (flag set).
-        let second = LiveSettingsBacking(manager: manager, defaults: suite)
-        XCTAssertEqual(second.rules.count, 1)
         XCTAssertTrue(manager.entries[0].isEnabled)
+        XCTAssertFalse(manager.entries[0].caseInsensitive)
+        XCTAssertTrue(manager.entries[0].preserveCase)
+        XCTAssertTrue(suite.bool(forKey: DictionaryRuleMigration.flagKey))
+        let persisted = try JSONDecoder().decode([DictionaryEntry].self, from: Data(contentsOf: dictURL))
+        XCTAssertEqual(persisted, manager.entries)
+
+        manager.updateEntry(id: legacy.id) { $0.isEnabled = false }
+        let second = makeBacking()
+        XCTAssertEqual(second.rules.count, 1)
+        XCTAssertFalse(manager.entries[0].isEnabled)
+        manager.flushPendingSave()
     }
 
-    func testLoadFailureNoticeIsForwarded() {
-        manager.loadFailureNotice = "Kalam couldn't read your saved dictionary."
-        XCTAssertEqual(makeBacking().dictionaryLoadFailureNotice, "Kalam couldn't read your saved dictionary.")
+    func testLoadFailureNoticeIsForwarded() throws {
+        try Data("broken".utf8).write(to: dictURL)
+        manager.bootstrap()
+        XCTAssertNotNil(manager.loadFailureNotice)
+        XCTAssertEqual(makeBacking().dictionaryLoadFailureNotice, manager.loadFailureNotice)
+    }
+
+    private func seedDictionary(_ entries: [DictionaryEntry]) throws {
+        try JSONEncoder().encode(entries).write(to: dictURL)
+        manager.bootstrap()
     }
 
     // MARK: - Microphones

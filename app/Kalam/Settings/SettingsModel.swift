@@ -151,10 +151,10 @@ final class SettingsModel {
         set { store.grammarPass = newValue }
     }
 
-    var rules: [ReplacementRule] {
-        get { _ = revision; return store.rules }
-        set { store.rules = newValue }
-    }
+    var rules: [ReplacementRule] { _ = revision; return store.rules }
+    func addRule(_ rule: ReplacementRule) { store.addRule(rule) }
+    func updateRule(_ rule: ReplacementRule) { store.updateRule(rule) }
+    func removeRule(id: UUID) { store.removeRule(id: id) }
 
     var dictionaryLoadFailureNotice: String? { _ = revision; return store.dictionaryLoadFailureNotice }
 

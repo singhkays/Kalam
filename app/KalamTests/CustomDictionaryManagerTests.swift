@@ -187,4 +187,85 @@ final class CustomDictionaryManagerTests: XCTestCase {
         XCTAssertEqual(out, "i use OpenAI daily")
         XCTAssertEqual(count, 1)
     }
+
+    func testOrderlyFlushWritesPendingChangesWithoutRecompiling() throws {
+        let (_, store) = try makeIsolatedManager()
+        defer { try? FileManager.default.removeItem(at: store.deletingLastPathComponent()) }
+        var scheduled: [DispatchWorkItem] = []
+        var compiles = 0
+        let manager = CustomDictionaryManager(storeURL: store, scheduleSave: { scheduled.append($0) }, compileEntries: {
+            compiles += 1
+            return ReplacementCompiler.compile(entries: $0)
+        })
+        manager.bootstrap()
+        let rule = DictionaryEntry(trigger: "cat", replacement: "lynx")
+        manager.addEntry(rule)
+        XCTAssertEqual(scheduled.count, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.path))
+        XCTAssertTrue(manager.flushPendingSave())
+        XCTAssertTrue(scheduled[0].isCancelled)
+        XCTAssertEqual(try JSONDecoder().decode([DictionaryEntry].self, from: Data(contentsOf: store)), [rule])
+        XCTAssertEqual(compiles, 2, "bootstrap and edit, with no compilation at persistence time")
+    }
+
+    func testOrderlyFlushLeavesCleanStoreUntouched() throws {
+        let (_, store) = try makeIsolatedManager()
+        defer { try? FileManager.default.removeItem(at: store.deletingLastPathComponent()) }
+        let clean = Data("[\n]\n".utf8)
+        try clean.write(to: store)
+        let manager = CustomDictionaryManager(storeURL: store, scheduleSave: { _ in XCTFail("Unexpected save scheduled") })
+        manager.bootstrap()
+        XCTAssertTrue(manager.flushPendingSave())
+        XCTAssertEqual(try Data(contentsOf: store), clean)
+    }
+
+    func testBackupReplacementUsesPreparedFileAndProtectsOriginalOnFailure() throws {
+        let (_, store) = try makeIsolatedManager()
+        let directory = store.deletingLastPathComponent()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let backup = store.appendingPathExtension("bak")
+        let corrupt = Data("unreadable current dictionary".utf8)
+        let prior = Data("prior backup".utf8)
+        try corrupt.write(to: store)
+        try prior.write(to: backup)
+        var attempted = 0
+        let manager = CustomDictionaryManager(
+            storeURL: store,
+            scheduleSave: { _ in XCTFail("Protected stores must not schedule writes") },
+            replaceBackup: { staged, destination in
+                attempted += 1
+                XCTAssertEqual(staged.deletingLastPathComponent(), directory)
+                XCTAssertEqual(destination, backup)
+                XCTAssertEqual(try Data(contentsOf: staged), corrupt)
+                XCTAssertEqual(try Data(contentsOf: backup), prior)
+                throw CocoaError(.fileWriteNoPermission)
+            }
+        )
+
+        manager.bootstrap()
+        XCTAssertEqual(attempted, 1)
+        XCTAssertTrue(manager.loadFailureNotice?.contains("couldn’t back up") == true)
+        manager.addEntry(DictionaryEntry(trigger: "uh", replacement: "ah"))
+        XCTAssertFalse(manager.flushPendingSave())
+        XCTAssertEqual(try Data(contentsOf: store), corrupt)
+        XCTAssertEqual(try Data(contentsOf: backup), prior)
+        XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: directory.path)), [store.lastPathComponent, backup.lastPathComponent])
+    }
+
+    func testSuccessfulRecoveryReplacesPriorBackup() throws {
+        let (manager, store) = try makeIsolatedManager()
+        defer { try? FileManager.default.removeItem(at: store.deletingLastPathComponent()) }
+        let backup = store.appendingPathExtension("bak")
+        let corrupt = Data("invalid json".utf8)
+        try corrupt.write(to: store)
+        try Data("prior backup".utf8).write(to: backup)
+        manager.bootstrap()
+        XCTAssertEqual(try Data(contentsOf: backup), corrupt)
+        XCTAssertTrue(manager.loadFailureNotice?.contains("A backup was saved") == true)
+        manager.addEntry(DictionaryEntry(trigger: "cat", replacement: "lynx"))
+        XCTAssertTrue(manager.flushPendingSave())
+        XCTAssertEqual(try Data(contentsOf: backup), corrupt)
+        XCTAssertEqual(try JSONDecoder().decode([DictionaryEntry].self, from: Data(contentsOf: store)).count, 1)
+    }
+
 }

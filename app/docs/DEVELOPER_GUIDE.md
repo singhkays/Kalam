@@ -236,6 +236,14 @@ offset-invariant, so normalization cannot change its verdict.
 ## Dictionary Behavior
 
 - **Storage**: `~/Library/Application Support/Kalam/user_dictionary.json`
+- Settings edits one entry by ID. Each edit compiles one replacement snapshot and
+  schedules a save. Pending edits flush during orderly termination and before
+  the replacement process starts on relaunch.
+- Opening Settings leaves a valid empty dictionary on disk. The one-time
+  migration still enables legacy disabled rules.
+- Recovery prepares a sibling backup and installs it atomically. If the backup
+  fails, the current process preserves the original file and keeps subsequent
+  dictionary edits in memory.
 - **Smart Match (Default)**: Automatically handles capitalization mimicry, plurals, and possessives.
 - **Rules Pipeline**:
   - Phrase rules first (longest trigger first)

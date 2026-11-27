@@ -519,6 +519,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        CustomDictionaryManager.shared.flushPendingSave()
+
         // Abandon any pending bounded start FIRST so an in-flight (possibly
         // HAL-wedged) attempt can never commit or surface UI during teardown.
         // Deliberately no engine.stop() here: the audio stack is the one thing

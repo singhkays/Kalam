@@ -24,6 +24,7 @@ enum AppRelauncher {
         var launchNewInstance: @Sendable (URL, @escaping @Sendable (NSError?) -> Void) -> Void
         /// Orderly termination of the current instance.
         var terminate: @Sendable () -> Void
+        var prepareForLaunch: @MainActor @Sendable () -> Void = {}
     }
 
     private static let logger = Logger(subsystem: "singhkays.Kalam", category: "AppRelauncher")
@@ -43,10 +44,15 @@ enum AppRelauncher {
         },
         terminate: {
             NSApp.terminate(nil)
+        },
+        prepareForLaunch: {
+            CustomDictionaryManager.shared.flushPendingSave()
         }
     )
 
+    @MainActor
     static func relaunch(strategy: Strategy = AppRelauncher.live) {
+        strategy.prepareForLaunch()
         let bundleURL = Bundle.main.bundleURL
         strategy.launchNewInstance(bundleURL) { error in
             if let error {
