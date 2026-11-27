@@ -1,3 +1,4 @@
+import KalamTextEngine
 import XCTest
 @testable import Kalam_test
 
@@ -16,6 +17,31 @@ import XCTest
 /// `PasteService.PasteStrategies`, clipboard restore on failed paste) — no real processes are spawned.
 @MainActor
 final class AppRelauncherTests: XCTestCase {
+
+    func testPendingDictionaryIsOnDiskBeforeLaunchingReplacementProcess() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("KalamRelaunch-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = directory.appendingPathComponent("dictionary.json")
+        let manager = CustomDictionaryManager(storeURL: store, scheduleSave: { _ in })
+        manager.bootstrap()
+        let rule = DictionaryEntry(trigger: "sam", replacement: "Sam")
+        manager.addEntry(rule)
+        let launched = expectation(description: "launch is called with completed persistence")
+
+        AppRelauncher.relaunch(strategy: .init(
+            launchNewInstance: { _, complete in
+                let persisted = try? Data(contentsOf: store)
+                let entries = persisted.flatMap { try? JSONDecoder().decode([DictionaryEntry].self, from: $0) }
+                XCTAssertEqual(entries, [rule])
+                launched.fulfill()
+                complete(nil)
+            },
+            terminate: {},
+            prepareForLaunch: { manager.flushPendingSave() }
+        ))
+        wait(for: [launched], timeout: 2)
+    }
 
     func testRelaunchTerminatesAfterSuccessfulLaunch() {
         let terminated = expectation(description: "terminate called")

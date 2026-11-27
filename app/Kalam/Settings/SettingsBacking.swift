@@ -41,7 +41,10 @@ protocol SettingsBacking: AnyObject {
     var grammarPass: GrammarPass { get set }
 
     // Dictionary — same store the recognizer reads
-    var rules: [ReplacementRule] { get set }
+    var rules: [ReplacementRule] { get }
+    func addRule(_ rule: ReplacementRule)
+    func updateRule(_ rule: ReplacementRule)
+    func removeRule(id: UUID)
     /// dictionary data-loss edge cases corrupt-store notice (quiet ink-3 line in the dictionary pane). Nil = store healthy.
     var dictionaryLoadFailureNotice: String? { get }
 

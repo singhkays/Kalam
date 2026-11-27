@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import OSLog
 import KalamTextEngine
@@ -11,52 +12,54 @@ private func privacySafeErrorSummary(_ error: Error) -> String {
 final class CustomDictionaryManager: ObservableObject {
     static let shared = CustomDictionaryManager()
 
-    @Published var entries: [DictionaryEntry] = []
-
-    /// Set when `user_dictionary.json` exists but fails to decode; the corrupt
-    /// file is preserved as `user_dictionary.json.bak` before the store resets.
-    @Published var loadFailureNotice: String?
+    @Published private(set) var entries: [DictionaryEntry] = []
+    @Published private(set) var loadFailureNotice: String?
 
     private let logger = Logger(subsystem: "singhkays.Kalam", category: "CustomDictionary")
     private let storeURLOverride: URL?
+    private let scheduleSave: (DispatchWorkItem) -> Void
+    private let compileEntries: ([DictionaryEntry]) -> CompiledReplacementEngine
+    private let replaceBackup: (URL, URL) throws -> Void
     private let fileName = "user_dictionary.json"
 
-    init(storeURL: URL? = nil) {
-        self.storeURLOverride = storeURL
+    private var compiled: CompiledReplacementEngine = .empty
+    private var debounceWork: DispatchWorkItem?
+    private var hasPendingSave = false
+    private var protectsOriginal = false
+
+    init(
+        storeURL: URL? = nil,
+        scheduleSave: @escaping (DispatchWorkItem) -> Void = { work in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+        },
+        compileEntries: @escaping ([DictionaryEntry]) -> CompiledReplacementEngine = ReplacementCompiler.compile,
+        replaceBackup: @escaping (URL, URL) throws -> Void = CustomDictionaryManager.installBackup
+    ) {
+        storeURLOverride = storeURL
+        self.scheduleSave = scheduleSave
+        self.compileEntries = compileEntries
+        self.replaceBackup = replaceBackup
     }
 
     private var appSupportURL: URL {
         if let storeURLOverride { return storeURLOverride }
         let fm = FileManager.default
-        let appName = "Kalam"
         let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = base.appendingPathComponent(appName, isDirectory: true)
+        let dir = base.appendingPathComponent("Kalam", isDirectory: true)
         if !fm.fileExists(atPath: dir.path) {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
         return dir.appendingPathComponent(fileName)
     }
 
-    private var compiled: CompiledReplacementEngine = .empty
-
-    /// Read-only snapshot of the current compiled engine for the off-main
-    /// post-processor to apply directly instead of recompiling per
-    /// transcription. Snapshot on the main actor alongside the other
-    /// pipeline inputs; the engine itself is Sendable.
+    /// The postprocessor snapshots the compiled dictionary on the main actor.
     var currentCompiledEngine: CompiledReplacementEngine { compiled }
 
-    private var debounceWork: DispatchWorkItem?
-
-    var isFirstLaunch: Bool {
-        guard FileManager.default.fileExists(atPath: appSupportURL.path) else { return true }
-        return entries.isEmpty || !entries.contains(where: { $0.userAdded })
-    }
-
     func bootstrap() {
-        logger.info("Custom dictionary bootstrap started")
-        load()
-        recompile()
-        logger.info("Custom dictionary bootstrap complete: entries=\(self.entries.count), firstLaunch=\(self.isFirstLaunch)")
+        let loaded = load()
+        compiled = compileEntries(loaded)
+        entries = loaded
+        logger.info("Custom dictionary loaded entries=\(self.entries.count, privacy: .public)")
     }
 
     func apply(to text: String) -> (String, Int) {
@@ -68,119 +71,133 @@ final class CustomDictionaryManager: ObservableObject {
     }
 
     func addEntry(_ entry: DictionaryEntry) {
-        logger.info("Custom dictionary adding entry; previousCount=\(self.entries.count)")
-        entries.append(entry)
-        logger.info("Custom dictionary entry added; count=\(self.entries.count)")
-        entriesDidChange()
+        stage(entries + [entry])
     }
 
-    func removeEntries(withIds ids: [UUID]) {
-        guard !ids.isEmpty else { return }
-        logger.info("Custom dictionary removing entries=\(ids.count), previousCount=\(self.entries.count)")
-        let beforeCount = entries.count
-        entries.removeAll { ids.contains($0.id) }
-        logger.info("Custom dictionary removed entries; count=\(self.entries.count), removed=\(beforeCount - self.entries.count)")
-        entriesDidChange()
+    func updateEntry(id: UUID, edit: (inout DictionaryEntry) -> Void) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        var next = entries
+        edit(&next[index])
+        next[index].id = id
+        stage(next)
     }
 
-    func sortEntriesByTrigger() {
-        logger.info("Custom dictionary sorting entries=\(self.entries.count)")
-        entries.sort { $0.trigger.localizedCaseInsensitiveCompare($1.trigger) == .orderedAscending }
-        entriesDidChange()
+    func removeEntry(id: UUID) {
+        stage(entries.filter { $0.id != id })
+    }
+
+    /// The one-time Settings migration re-enables legacy disabled rules.
+    func migrateDisabledEntries() -> Bool {
+        guard !protectsOriginal else { return false }
+        let enabled = entries.map { entry in
+            var result = entry
+            result.isEnabled = true
+            return result
+        }
+        if replaceEntries(with: enabled) {
+            return flushPendingSave()
+        }
+        return !hasPendingSave
     }
 
     func importJSON(from url: URL) throws {
-        logger.info("Custom dictionary import started")
         let data = try Data(contentsOf: url)
         let decoded = try JSONDecoder().decode([DictionaryEntry].self, from: data)
-        // An explicit import is a user action: imported entries are user-owned,
-        // so they must survive the `userAdded` filter on the next launch.
-        entries = decoded.map { entry in
+        // An explicit import makes the entries user-owned.
+        let imported = decoded.map { entry in
             var owned = entry
             owned.userAdded = true
             return owned
         }
-        logger.info("Custom dictionary import complete; count=\(self.entries.count)")
-        save()
-        recompile()
+        if replaceEntries(with: imported) {
+            flushPendingSave()
+        }
     }
 
     func exportJSON(to url: URL) throws {
-        logger.info("Custom dictionary export started; count=\(self.entries.count)")
         let data = try JSONEncoder().encode(entries)
         try data.write(to: url, options: .atomic)
-        logger.info("Custom dictionary export complete")
     }
 
-    private func load() {
+    private func load() -> [DictionaryEntry] {
         let url = appSupportURL
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            entries = []
-            loadFailureNotice = nil
-            logger.info("Custom dictionary file missing; starting empty")
-            return
-        }
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+
+        var original: Data?
         do {
             let data = try Data(contentsOf: url)
-            let decoded = try JSONDecoder().decode([DictionaryEntry].self, from: data)
-            entries = decoded.filter { $0.userAdded }
-            loadFailureNotice = nil
-            logger.info("Custom dictionary loaded entries=\(decoded.count), userEntries=\(self.entries.count)")
+            original = data
+            return try JSONDecoder().decode([DictionaryEntry].self, from: data).filter(\.userAdded)
         } catch {
             logger.warning("Custom dictionary load failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
-            preserveCorruptFile(at: url)
-            entries = []
-            loadFailureNotice = "Kalam couldn't read your saved dictionary. A backup was kept next to the original file."
+            if let original, preserveCorruptFile(original, at: url) {
+                loadFailureNotice = "Kalam couldn’t read your dictionary. A backup was saved beside the original."
+            } else {
+                protectsOriginal = true
+                loadFailureNotice = "Kalam couldn’t back up your dictionary. The original was kept, and changes are temporary in this session."
+            }
+            return []
         }
     }
 
-    private func preserveCorruptFile(at url: URL) {
-        let backupURL = url.deletingPathExtension().appendingPathExtension("json.bak")
+    private func preserveCorruptFile(_ original: Data, at url: URL) -> Bool {
+        let backup = url.appendingPathExtension("bak")
+        let staged = url.deletingLastPathComponent().appendingPathComponent(".dictionary-\(UUID()).tmp")
+        defer { try? FileManager.default.removeItem(at: staged) }
         do {
-            if FileManager.default.fileExists(atPath: backupURL.path) {
-                try FileManager.default.removeItem(at: backupURL)
-            }
-            try FileManager.default.copyItem(at: url, to: backupURL)
-            logger.info("Custom dictionary corrupt file preserved as \(backupURL.lastPathComponent, privacy: .public)")
+            try original.write(to: staged, options: .withoutOverwriting)
+            try replaceBackup(staged, backup)
+            return true
         } catch {
             logger.warning("Custom dictionary backup failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
+            return false
         }
     }
 
-    private func save() {
+    /// Both files are siblings. Rename atomically replaces the old backup
+    /// after the new file is ready and preserves it if replacement fails.
+    nonisolated private static func installBackup(_ staged: URL, _ backup: URL) throws {
+        if rename(staged.path, backup.path) != 0 {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+
+    /// Used by debounce, orderly termination, and relaunch before the next
+    /// process can load the store. A clean dictionary requires no I/O.
+    @discardableResult
+    func flushPendingSave() -> Bool {
+        debounceWork?.cancel()
+        debounceWork = nil
+        guard !protectsOriginal else { return false }
+        guard hasPendingSave else { return true }
         do {
             let data = try JSONEncoder().encode(entries)
             try data.write(to: appSupportURL, options: .atomic)
-            logger.info("Custom dictionary saved entries=\(self.entries.count)")
+            hasPendingSave = false
+            logger.info("Custom dictionary saved entries=\(self.entries.count, privacy: .public)")
+            return true
         } catch {
             logger.warning("Custom dictionary save failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
+            return false
         }
     }
 
-    func saveImmediately() {
+    private func stage(_ next: [DictionaryEntry]) {
+        guard replaceEntries(with: next), !protectsOriginal else { return }
         debounceWork?.cancel()
-        debounceWork = nil
-        save()
-        recompile()
-        logger.debug("Custom dictionary immediate save triggered")
-    }
-
-    func entriesDidChange() {
-        debounceWork?.cancel()
-        recompile()
         let work = DispatchWorkItem { [weak self] in
-            self?.save()
+            self?.flushPendingSave()
         }
         debounceWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+        scheduleSave(work)
     }
 
-    private func recompile() {
-        compiled = ReplacementCompiler.compile(entries: entries)
-    }
-
-    func reloadFromDisk() {
-        load()
-        recompile()
+    @discardableResult
+    private func replaceEntries(with next: [DictionaryEntry]) -> Bool {
+        guard entries != next else { return false }
+        compiled = compileEntries(next)
+        hasPendingSave = true
+        entries = next
+        return true
     }
 }

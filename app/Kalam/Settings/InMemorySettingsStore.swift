@@ -40,6 +40,19 @@ final class InMemorySettingsStore: SettingsBacking {
 
     var rules: [ReplacementRule] = [] { didSet { ping() } }
 
+    func addRule(_ rule: ReplacementRule) { rules.append(rule) }
+
+    func updateRule(_ rule: ReplacementRule) {
+        guard let index = rules.firstIndex(where: { $0.id == rule.id }), rules[index] != rule else { return }
+        rules[index] = rule
+    }
+
+    func removeRule(id: UUID) {
+        guard rules.contains(where: { $0.id == id }) else { return }
+        rules.removeAll { $0.id == id }
+    }
+
+
     // MARK: - Engine wizard (Option D Setup) mirrors
 
     var hasConfirmedHFCLIInstall: Bool = false { didSet { ping() } }
