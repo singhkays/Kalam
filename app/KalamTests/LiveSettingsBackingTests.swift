@@ -456,6 +456,34 @@ final class LiveSettingsBackingTests: XCTestCase {
         XCTAssertTrue(manifest.contains { $0.name.localizedCaseInsensitiveContains("vocab") })
     }
 
+    func testPartialManifestUsesSelectedLibraryEvenWithCompleteDecoySibling() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KalamPartial-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = root.appendingPathComponent("Selected", isDirectory: true)
+        let version = ASRModelVersion.v2
+        let selected = library.appendingPathComponent(version.repositoryFolderName, isDirectory: true)
+        let decoy = root.appendingPathComponent(version.repositoryFolderName, isDirectory: true)
+        let files = ModelSetupSupport.requiredModelFiles(for: version)
+        for directory in [selected, decoy] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        // The selected model has the first required file. The sibling has
+        // every required file and must be ignored by both readers.
+        let first = try XCTUnwrap(files.first)
+        try Data().write(to: selected.appendingPathComponent(first))
+        for name in files { try Data().write(to: decoy.appendingPathComponent(name)) }
+
+        var config = ModelsConfiguration.load(from: suite)
+        config.asrVersion = version
+        try config.setModelLibraryURL(library)
+        config.save(to: suite)
+
+        XCTAssertEqual(makeBacking().modelFileManifest(for: version).filter(\.isPresent).map(\.name), [first])
+        XCTAssertEqual(config.availability(for: version),
+                       .partial(expectedPath: selected.path, missing: Array(files.dropFirst()), total: files.count))
+    }
+
     func testEngineFolderFreeBytesForExistingFolder() throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("KalamFreeBytesTests-\(UUID().uuidString)", isDirectory: true)

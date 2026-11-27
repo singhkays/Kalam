@@ -85,18 +85,31 @@ actor ASRService {
         #endif
     }
 
+    private struct PendingLoad {
+        let selection: ASRModelSelection
+        let task: Task<Void, Error>
+    }
+
     private var asrManager: AsrManager?
-    private var initialized = false
-    private var currentModelVersion: ASRModelVersion?
-    private var currentModelDirectoryPath: String?
+    private var currentSelection: ASRModelSelection?
+    private var pendingLoad: PendingLoad?
+    private var loadGeneration = 0
+    var currentModelVersion: ASRModelVersion? { currentSelection?.version }
     private(set) var lastInitializationErrorDescription: String?
     private(set) var isSetupIssue = false
     private var lastASRError: ASRError?
     private var warmupTask: Task<Void, Never>?
     
+    typealias ModelLoader = @Sendable (URL, URL, ASRModelVersion) async throws -> AsrManager
+    private let loadModel: ModelLoader
+
+    init(loadModel: @escaping ModelLoader = ASRService.loadFromDisk) {
+        self.loadModel = loadModel
+    }
+
     // Public read-only property for readiness check
     var isReady: Bool {
-        asrManager != nil && initialized
+        asrManager != nil
     }
 
     var recordingBlockMessage: String {
@@ -131,15 +144,51 @@ actor ASRService {
         try await initialize(using: config)
     }
 
-    private func initialize(using config: ModelsConfiguration) async throws {
-        Self.enforceOfflineMode()
-        do {
-            let version = config.asrVersion
-            let availability = config.availability(for: version)
-            let modelDirectory: URL
-            let modelLibraryURL: URL
+    func initialize(using config: ModelsConfiguration) async throws {
+        let selection = config.asrSelection
+        if currentSelection == selection, isReady { return }
 
-            switch availability {
+        if let pendingLoad, pendingLoad.selection == selection {
+            try await waitForLoad(pendingLoad.task, generation: loadGeneration)
+            return
+        }
+
+        pendingLoad?.task.cancel()
+        warmupTask?.cancel()
+        warmupTask = nil
+        asrManager = nil
+        currentSelection = nil
+        lastInitializationErrorDescription = nil
+        isSetupIssue = false
+        lastASRError = nil
+        loadGeneration += 1
+        let generation = loadGeneration
+        let task = Task {
+            try await self.loadAndActivate(using: config, selection: selection, generation: generation)
+        }
+        pendingLoad = PendingLoad(selection: selection, task: task)
+        try await waitForLoad(task, generation: generation)
+    }
+
+    private func waitForLoad(_ task: Task<Void, Error>, generation: Int) async throws {
+        let result = await task.result
+        try Task.checkCancellation()
+        guard generation == loadGeneration else { throw CancellationError() }
+        try result.get()
+    }
+
+    private func loadAndActivate(
+        using config: ModelsConfiguration, selection: ASRModelSelection, generation: Int
+    ) async throws {
+        defer {
+            if generation == loadGeneration { pendingLoad = nil }
+        }
+        do {
+            try Task.checkCancellation()
+            Self.enforceOfflineMode()
+            let version = selection.version
+            let modelDirectory: URL
+            switch config.availability(for: version) {
             case .modelLibraryNotConfigured:
                 throw ASRError.modelLibraryNotConfigured
             case .missingModelFolder(let expectedPath):
@@ -147,96 +196,57 @@ actor ASRService {
             case .invalidModelFolder(let expectedPath):
                 throw ASRError.invalidModelFiles(version: version, expectedPath: expectedPath)
             case .partial(let expectedPath, let missing, _):
-                // A partial download cannot load; surface as invalid files with a
-                // precise reason (the manifest names the missing files).
-                throw ASRError.invalidModelFiles(version: version, expectedPath: expectedPath + missing.map { "\nmissing: \($0)" }.joined())
+                throw ASRError.invalidModelFiles(
+                    version: version, expectedPath: expectedPath + missing.map { "\nmissing: \($0)" }.joined()
+                )
             case .installed(let path):
                 modelDirectory = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
-                guard let libraryURL = config.modelLibraryURL else {
-                    throw ASRError.modelLibraryNotConfigured
-                }
-                modelLibraryURL = libraryURL.standardizedFileURL
             }
+            guard let library = selection.library else { throw ASRError.modelLibraryNotConfigured }
 
-            if initialized && currentModelVersion == version && currentModelDirectoryPath == modelDirectory.path {
-                return
-            }
-
-            let models = try await ModelsConfiguration.withSecurityScopedAccess(to: modelLibraryURL) {
-                try await AsrModels.load(
-                    from: modelDirectory,
-                    version: version.fluidAudioVersion,
-                    encoderComputeUnits: Self.encoderComputeUnits(for: version)
-                )
-            }
-            
-            var asrConfig = ASRConfig.default
-            asrConfig = ASRConfig(
-                sampleRate: asrConfig.sampleRate,
-                tdtConfig: asrConfig.tdtConfig,
-                encoderHiddenSize: asrConfig.encoderHiddenSize,
-                parallelChunkConcurrency: 4, 
-                streamingEnabled: asrConfig.streamingEnabled,
-                streamingThreshold: asrConfig.streamingThreshold
-            )
-            
-            let manager = AsrManager(config: asrConfig, models: models)
-            warmupTask?.cancel()
-            self.asrManager = manager
-            self.initialized = true
-            self.currentModelVersion = version
-            self.currentModelDirectoryPath = modelDirectory.path
-            self.lastInitializationErrorDescription = nil
-            self.isSetupIssue = false
-            self.lastASRError = nil
-            
+            let manager = try await loadModel(modelDirectory, library, version)
+            guard generation == loadGeneration else { throw CancellationError() }
+            asrManager = manager
+            currentSelection = selection
             logger.info("ASR initialized with model=\(version.displayName, privacy: .public)")
-            
-            // Warm-up: actor-owned task avoids detached captures of non-Sendable ASR state.
-            warmupTask = Task(priority: .utility) { [modelPath = modelDirectory.path] in
-                await self.warmUpCurrentManager(expectedModelDirectoryPath: modelPath)
+            warmupTask = Task(priority: .utility) {
+                await self.warmUpCurrentManager(generation: generation)
             }
         } catch {
-            warmupTask?.cancel()
-            warmupTask = nil
-            self.asrManager = nil
-            self.initialized = false
-            self.currentModelVersion = nil
-            self.currentModelDirectoryPath = nil
-            self.lastInitializationErrorDescription = error.localizedDescription
-            if let asrError = error as? ASRError {
-                self.isSetupIssue = asrError.isSetupRelated
-                self.lastASRError = asrError
-            } else {
-                self.isSetupIssue = true
-                self.lastASRError = nil
-            }
+            guard generation == loadGeneration else { throw CancellationError() }
+            lastInitializationErrorDescription = error.localizedDescription
+            lastASRError = error as? ASRError
+            isSetupIssue = lastASRError?.isSetupRelated ?? true
             throw error
         }
     }
-    
-    func reinitializeIfNeeded() async throws {
-        let config = ModelsConfiguration.load()
-        let version = config.asrVersion
-        let targetPath = config.modelDirectoryURL(for: version)?.standardizedFileURL.path
 
-        if !initialized || currentModelVersion != version || currentModelDirectoryPath != targetPath {
-            logger.info("ASR model configuration changed; reinitializing")
-            warmupTask?.cancel()
-            warmupTask = nil
-            asrManager = nil
-            initialized = false
-            try await initialize(using: config)
+    private static func loadFromDisk(
+        _ modelDirectory: URL, _ modelLibraryURL: URL, _ version: ASRModelVersion
+    ) async throws -> AsrManager {
+        let models = try await ModelsConfiguration.withSecurityScopedAccess(to: modelLibraryURL) {
+            try await AsrModels.load(
+                from: modelDirectory,
+                version: version.fluidAudioVersion,
+                encoderComputeUnits: Self.encoderComputeUnits(for: version)
+            )
         }
+
+        var asrConfig = ASRConfig.default
+        asrConfig = ASRConfig(
+            sampleRate: asrConfig.sampleRate,
+            tdtConfig: asrConfig.tdtConfig,
+            encoderHiddenSize: asrConfig.encoderHiddenSize,
+            parallelChunkConcurrency: 4,
+            streamingEnabled: asrConfig.streamingEnabled,
+            streamingThreshold: asrConfig.streamingThreshold
+        )
+
+        return AsrManager(config: asrConfig, models: models)
     }
-    
-    private func warmUpCurrentManager(expectedModelDirectoryPath: String) async {
-        guard currentModelDirectoryPath == expectedModelDirectoryPath,
-              let asrManager,
-              initialized
-        else {
-            return
-        }
+
+    private func warmUpCurrentManager(generation: Int) async {
+        guard loadGeneration == generation, let asrManager else { return }
 
         do {
             let warm = [Float](repeating: 0.0, count: 240_000)  // 15s at 16kHz to match [1, 240000] shape and min requirements
@@ -255,12 +265,8 @@ actor ASRService {
         var pcm = consume samples
         defer { pcm.secureZero() }
         let config = ModelsConfiguration.load()
-        let targetPath = config.modelDirectoryURL(for: config.asrVersion)?.standardizedFileURL.path
-        if !initialized || currentModelVersion != config.asrVersion || currentModelDirectoryPath != targetPath {
-            try await reinitializeIfNeeded()
-        }
-        
-        guard let asrManager = asrManager, initialized else {
+        try await initialize(using: config)
+        guard currentSelection == config.asrSelection, let asrManager else {
             throw ASRError.notInitialized
         }
         // Parakeet TDT expects 16kHz mono Float32

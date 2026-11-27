@@ -95,26 +95,22 @@ enum ModelSetupSupport {
         return files.sorted()
     }
 
-    /// Per-file presence for the selected model inside the library. Mirrors
-    /// FluidAudio's repo-path resolution (`library.parent / version.repo.folderName`)
-    /// and runs inside the same security scope as the availability check.
-    /// `fileExists` is injectable for tests.
+    /// Inspect the same model directory the loader uses, inside the selected
+    /// library's security scope.
     static func modelFileManifest(
         for version: ASRModelVersion,
         libraryURL: URL?,
-        fileExists: @escaping (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
     ) -> [ASRModelFileEntry] {
         guard let libraryURL else { return [] }
-        // FluidAudio's modelsExist resolves `directory.parent / repo.folderName`;
-        // for Kalam installs that folder is exactly `repositoryFolderName` (the
-        // download command's --local-dir target), so use Kalam's public name.
-        let repoPath = libraryURL.deletingLastPathComponent()
-            .appendingPathComponent(version.repositoryFolderName)
-        return requiredModelFiles(for: version).map { name in
-            ASRModelFileEntry(
-                name: name,
-                isPresent: fileExists(repoPath.appendingPathComponent(name).path)
-            )
+        let directory = version.directory(in: libraryURL)
+        return ModelsConfiguration.withSecurityScopedAccess(to: libraryURL) {
+            requiredModelFiles(for: version).map { name in
+                ASRModelFileEntry(
+                    name: name,
+                    isPresent: fileExists(directory.appendingPathComponent(name).path)
+                )
+            }
         }
     }
 
