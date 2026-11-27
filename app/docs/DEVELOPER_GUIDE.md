@@ -147,7 +147,7 @@ The keydown-to-indicator path is latency-sensitive; keep it ordered mic-first:
    backstop). Anything that can change readiness MUST call
    `invalidateOnboardingSnapshot()` — the wired paths are the models/general/hotkey/
    mic-priority config notifications, app activation, wake, device change,
-   `updateASRStatus`, and `refreshOnboardingState`. New readiness inputs need a new hook.
+   ASR readiness updates, and `refreshOnboardingState`. New readiness inputs need a new hook.
 2. `prepareAudioForRecording()` normally early-returns (`AudioPrepareDecision`) because
    launch-time preparation walks the SAME priority-ordered microphone candidates.
 3. `startCollecting()` (engine start) -> PTT state sync -> overlay shown with a fast
