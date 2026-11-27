@@ -395,6 +395,40 @@ final class OnboardingFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testRepeatedCopyRestartsEachConfirmationIndependently() {
+        var scheduled: [@MainActor () -> Void] = []
+        var copied: [String] = []
+        let controller = makeController(
+            copyFeedbackScheduler: { delay, action in
+                XCTAssertEqual(delay, 2)
+                scheduled.append(action)
+            },
+            copyCommand: { copied.append($0) }
+        )
+
+        controller.copyInstallCommand()
+        controller.copyDownloadCommand()
+        controller.copyInstallCommand()
+        controller.copyDownloadCommand()
+
+        XCTAssertEqual(copied, [
+            ModelSetupSupport.huggingFaceInstallCommand, controller.downloadCommand,
+            ModelSetupSupport.huggingFaceInstallCommand, controller.downloadCommand
+        ])
+        XCTAssertEqual(scheduled.count, 4)
+        scheduled[0]()
+        scheduled[1]()
+        XCTAssertTrue(controller.installCommandCopied)
+        XCTAssertTrue(controller.downloadCommandCopied)
+
+        scheduled[2]()
+        XCTAssertFalse(controller.installCommandCopied)
+        XCTAssertTrue(controller.downloadCommandCopied)
+        scheduled[3]()
+        XCTAssertFalse(controller.downloadCommandCopied)
+    }
+
+    @MainActor
     private func makeController(
         snapshot: OnboardingStatusSnapshot? = nil,
         accessibilityTrustCheck: @escaping () -> Bool = { false },
@@ -404,7 +438,9 @@ final class OnboardingFlowTests: XCTestCase {
         selectMicrophoneAction: @escaping (MicrophoneDeviceDescriptor) -> Void = { _ in },
         availableMicrophoneDevicesAction: @escaping () -> [MicrophoneDeviceDescriptor] = { [] },
         loadHotkeyConfiguration: @escaping () -> PTTHotkeyConfiguration = { .defaults },
-        saveHotkeyConfiguration: @escaping (PTTHotkeyConfiguration) -> Void = { _ in }
+        saveHotkeyConfiguration: @escaping (PTTHotkeyConfiguration) -> Void = { _ in },
+        copyFeedbackScheduler: @escaping OnboardingFlowController.CopyFeedbackScheduler = { _, _ in },
+        copyCommand: @escaping @MainActor (String) -> Void = { _ in }
     ) -> OnboardingFlowController {
         OnboardingFlowController(
             snapshot: snapshot ?? baseSnapshot(),
@@ -421,6 +457,8 @@ final class OnboardingFlowTests: XCTestCase {
             availableMicrophoneDevicesAction: availableMicrophoneDevicesAction,
             loadHotkeyConfiguration: loadHotkeyConfiguration,
             saveHotkeyConfiguration: saveHotkeyConfiguration,
+            copyFeedbackScheduler: copyFeedbackScheduler,
+            copyCommand: copyCommand,
             startDictationAction: {}
         )
     }
