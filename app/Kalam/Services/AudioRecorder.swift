@@ -242,6 +242,14 @@ final class AudioRecorder: @unchecked Sendable {
     private var engine = AVAudioEngine()
     private var isPrepared = false
     private var tapInstalled = false
+    private var boundCaptureDeviceID: AudioDeviceID?
+
+    @MainActor
+    var captureInputDeviceID: AudioDeviceID? { boundCaptureDeviceID }
+
+    @MainActor
+    var captureEngineIsRunning: Bool { !isStartInFlight && engine.isRunning }
+
     private var preparedInputDeviceID: AudioDeviceID?
     private var preparedStateInvalidated = false
 
@@ -566,6 +574,18 @@ final class AudioRecorder: @unchecked Sendable {
                 inputChannelCount: tapFormat.channelCount
             )
             if KalamDiagnosticFlags.verboseAudio { logger.debug("Converter pre-built ok=\(prebuilt, privacy: .public) inputSampleRate=\(tapFormat.sampleRate, privacy: .public)") }
+        }
+
+        // Read the device bound to this graph on the same worker that starts it.
+        boundCaptureDeviceID = preparedInputDeviceID
+        if let audioUnit = engine.inputNode.audioUnit {
+            var device: AudioDeviceID = kAudioObjectUnknown
+            var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+            if AudioUnitGetProperty(audioUnit, kAudioOutputUnitProperty_CurrentDevice,
+                                    kAudioUnitScope_Global, 0, &device, &size) == noErr,
+               device != kAudioObjectUnknown {
+                boundCaptureDeviceID = device
+            }
         }
 
         if KalamDiagnosticFlags.verboseAudio { logger.debug("Started collecting audio samples") }

@@ -46,6 +46,29 @@ final class AudioCaptureExchangeTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testTopologyLossFinishesWithAudioCapturedBeforeTheChange() {
+        let recorder = AudioRecorder()
+        recorder.beginCollectingForTesting()
+        let generation = recorder.captureGeneration
+        let buffer = makeSyntheticBuffer(sampleRate: 16_000, frames: 1024)
+        XCTAssertTrue(recorder.process(buffer: buffer))
+        XCTAssertEqual(AudioInputTopologyAction.afterChange(starting: false, recording: true, draining: false,
+                                                            streamIsLive: true), .deferRebuild)
+        XCTAssertTrue(recorder.process(buffer: buffer))
+
+        let action = AudioInputTopologyAction.afterChange(starting: false, recording: true, draining: false,
+                                                         streamIsLive: false)
+        XCTAssertEqual(action, .finishCapture)
+        let samples = recorder.finishStop(expectedGeneration: generation)
+        XCTAssertEqual(samples.count, 2048)
+        XCTAssertGreaterThan(recorder.lastCaptureStats.nonZeroCount, 0)
+        XCTAssertTrue(CaptureHealthGuard.assess(
+            stats: recorder.lastCaptureStats, holdMs: 5000, allowInterruptedCapture: true).healthy)
+        XCTAssertEqual(CaptureHealthGuard.assess(
+            stats: recorder.lastCaptureStats, holdMs: 5000).reason, .shortfall)
+    }
+
     func testProducerDoesNotStallWhileStopRuns() async throws {
         let recorder = AudioRecorder()
         // Activate capture state without the audio engine: the test host has no

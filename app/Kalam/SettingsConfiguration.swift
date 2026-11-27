@@ -362,6 +362,10 @@ enum AudioDeviceDebug {
         return candidates.filter { seen.insert($0).inserted }
     }
 
+    static func deviceUID(for id: AudioDeviceID) -> String? {
+        try? getCFString(id, selector: kAudioDevicePropertyDeviceUID)
+    }
+
     /// Resolves a device UID to its current `AudioDeviceID`; nil when macOS no
     /// longer knows such a device (translate fails or yields the null object).
     static func deviceID(forUID uid: String) -> AudioDeviceID? {

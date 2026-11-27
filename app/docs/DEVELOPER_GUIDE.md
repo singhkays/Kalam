@@ -80,11 +80,11 @@ Core files:
 - `Services/TranscriptPostProcessor.swift`
   - off-main post-processing: pure post-ASR stages (cleanup → ITN → dictionary), Sendable snapshots, off-main; ITN answers to the cleanup master switch (cleanup master toggle gating ITN)
 - `Services/AudioDeviceMonitor.swift`
-  - microphone recovery after sleep or device change: debounced CoreAudio device-change + wake listeners; re-prepares the engine graph after sleep/dock events
+  - CoreAudio input listeners defer graph rebuilds during recording and finish captured audio if the active input stops
 - `RecordingSessionTracker.swift`
   - stale-recording paste guard: monotonic recording generations; a stale transcription task never pastes
 - `Services/SystemAudioDucker.swift`
-  - CoreAudio virtual-main-volume ducking while recording
+  - CoreAudio virtual-main-volume ducking restores the original output only while it still has Kalam’s muted volume
 - `Services/HotkeyListener.swift`
   - Global hotkey registration (HotKey package + modifier-only side-key monitoring), PTT callbacks
 - `OnboardingFlow.swift` / `OnboardingActionStyles.swift`
@@ -156,6 +156,11 @@ The keydown-to-indicator path is latency-sensitive; keep it ordered mic-first:
 4. ONLY THEN: chime + duck scheduling, then the record-time paste-target AX capture
    (every AX reference is messaging-timeout-bounded in `AccessibilityFocusResolver`,
    including returned elements) and a silent `refinePlacementIfMoved` correction.
+
+While recording, Kalam watches the input device bound to the graph. A
+topology change leaves a live capture running. If the input stops, Kalam
+ends the capture, processes any usable audio, and refreshes the graph after
+the buffer has drained.
 
 Stage timing logs one line per successful start (`Recording start latency …`, info level,
 timings only), gated by `LatencyTuningOptions.startStageTimingKey` and now appends a
