@@ -165,6 +165,13 @@ timings only), gated by `LatencyTuningOptions.startStageTimingKey` and now appen
 (~85-110 ms measured) is HAL spin-up and stays by design: the engine stops after each
 session so the macOS mic indicator turns off.
 
+## Model selection
+
+The manifest checks the selected model directory inside the bookmarked library.
+A partial install lists the files missing from that directory. Identical load
+requests share an in-flight load. A newer selection owns readiness and errors,
+so a superseded load cannot replace the active model or clear its status.
+
 ## Stop-to-Paste Latency
 
 Three levers cut the key-up-to-paste path; the pipeline order above is untouched.

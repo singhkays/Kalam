@@ -211,7 +211,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// New recordings await its completion before collecting, so sessions never
     /// overlap in the audio layer even when the transcription task is cancelled.
     private var recordingStopTask: Task<CapturedPCM, Never>?
-    private var runtimePrepTask: Task<Void, Never>?
+    private var runtimePrepGeneration = 0
+    private var requestedASRSelection: ASRModelSelection?
     /// Bounded-start pending state (engine-start freeze hardening): a press
     /// whose engine start is still in flight off-main. Between key-down and
     /// commit the PTT machine stays idle — key-up, Esc, a superseding press,
@@ -397,6 +398,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // itself updates synchronously via store ping and never waits
                 // on this path.
                 self.invalidateOnboardingSnapshot()
+                if self.requestedASRSelection != ModelsConfiguration.load().asrSelection {
+                    self.isASRReady = false
+                }
                 self.modelsConfigCoalesceTask?.cancel()
                 let run = Task { @MainActor [weak self] in
                     guard let self else { return }
@@ -406,17 +410,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     // (availability is a fast disk check); ASR prep runs in the
                     // background, then a final refresh flips isASRReady.
                     self.refreshOnboardingState(reopenIfNeeded: false)
-                    // Picker-only browsing with no models installed changes
-                    // nothing the prep could act on (its model branch no-ops
-                    // without an installed model): skip the audio/ASR prep +
-                    // final refresh and spare ~60ms of MainActor work per
-                    // settled tap. Any installed model restores the full
-                    // sequence; rescan/folder-change paths are untouched.
-                    let installed = ModelSetupSupport.installedModelVersions(in: ModelsConfiguration.load())
-                    if !installed.isEmpty {
-                        await self.prepareRuntimeIfPossible()
-                        self.refreshOnboardingState(reopenIfNeeded: false)
-                    }
+                    await self.prepareRuntimeIfPossible()
+                    guard !Task.isCancelled else { return }
+                    self.refreshOnboardingState(reopenIfNeeded: false)
                 }
                 self.modelsConfigCoalesceTask = run
                 await run.value
@@ -967,27 +963,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func prepareRuntimeIfPossible() async {
-        // Single-flight: the modelsConfig observer, refreshAction,
-        // appDidBecomeActive and the startup task can all fire concurrently
-        // (e.g. applyModelLibraryFolder previously triggered both the
-        // notification and refreshAction). Coalesce into one in-flight
-        // preparation instead of loading/compiling the ASR model twice.
-        if let runtimePrepTask {
-            await runtimePrepTask.value
-            return
-        }
-        let task = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.performRuntimePreparation()
-        }
-        runtimePrepTask = task
-        await task.value
-        runtimePrepTask = nil
-    }
-
-    private func performRuntimePreparation() async {
+        runtimePrepGeneration += 1
+        let generation = runtimePrepGeneration
         let microphoneAuthorization = AVCaptureDevice.authorizationStatus(for: .audio)
-        if microphoneAuthorization == .authorized {
+        if microphoneAuthorization != .authorized {
+            isAudioReady = false
+        } else if !isRecording, !audio.isStartInFlight, recordingStopTask == nil {
             do {
                 // Same candidate walk as press time so preparedInputDeviceID already
                 // matches the device the first press will request (early-return path).
@@ -999,36 +980,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 isAudioReady = false
                 logger.warning("Audio prepare failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
             }
-        } else {
-            isAudioReady = false
         }
 
         let config = ModelsConfiguration.load()
-        let availability = config.availability(for: config.asrVersion)
-        switch availability {
-        case .installed:
-            do {
-                let status = await asr.status
-                if status.isReady {
-                    try await asr.reinitializeIfNeeded()
-                } else {
-                    try await asr.initialize()
-                }
-                updateASRStatus(await asr.status)
-            } catch {
-                updateASRStatus(await asr.status, forceReady: false)
-                logger.warning("ASR init failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
-            }
-        case .modelLibraryNotConfigured, .missingModelFolder, .invalidModelFolder, .partial:
+        let selection = config.asrSelection
+        if requestedASRSelection != selection {
             isASRReady = false
-            isASRSetupIssue = true
-            asrRecordingBlockMessage = "Set model folder in Settings"
+            isASRSetupIssue = false
+            asrRecordingBlockMessage = "Model loading..."
         }
-    }
-
-    private func updateASRStatus(_ status: ASRServiceStatus, forceReady: Bool? = nil) {
+        requestedASRSelection = selection
+        do {
+            try await asr.initialize(using: config)
+        } catch is CancellationError {
+            return
+        } catch {
+            logger.warning("ASR init failed errorSummary=\(privacySafeErrorSummary(error), privacy: .public)")
+        }
+        let status = await asr.status
+        guard generation == runtimePrepGeneration, selection == ModelsConfiguration.load().asrSelection else { return }
         invalidateOnboardingSnapshot()
-        isASRReady = forceReady ?? status.isReady
+        isASRReady = status.isReady
         isASRSetupIssue = status.isSetupIssue
         asrRecordingBlockMessage = status.recordingBlockMessage
     }

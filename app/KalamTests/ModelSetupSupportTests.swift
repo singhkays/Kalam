@@ -248,8 +248,7 @@ final class ModelSetupSupportTests: XCTestCase {
 
     func testManifestMapsPresencePerFile() {
         let library = URL(fileURLWithPath: "/tmp/KalamLib", isDirectory: true)
-        let repoPath = library.deletingLastPathComponent()
-            .appendingPathComponent("parakeet-tdt-0.6b-v2")
+        let repoPath = library.appendingPathComponent("parakeet-tdt-0.6b-v2")
         let files = ModelSetupSupport.requiredModelFiles(for: .v2)
         precondition(files.count >= 2)
 

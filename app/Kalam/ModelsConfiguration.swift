@@ -62,6 +62,10 @@ public enum ASRModelVersion: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    func directory(in library: URL) -> URL {
+        library.appendingPathComponent(repositoryFolderName, isDirectory: true)
+    }
+
     public var requiredModelDirectoryNames: [String] {
         switch self {
         case .v2:
@@ -127,6 +131,11 @@ struct ASRModelFileEntry: Equatable, Sendable, Identifiable {
     var id: String { name }
 }
 
+struct ASRModelSelection: Equatable, Sendable {
+    let version: ASRModelVersion
+    let library: URL?
+}
+
 // MARK: - Models Configuration
 
 struct ModelsConfiguration: Equatable, Sendable {
@@ -188,6 +197,10 @@ struct ModelsConfiguration: Equatable, Sendable {
         Self.resolveModelLibraryURL(from: modelLibraryBookmarkData)
     }
 
+    var asrSelection: ASRModelSelection {
+        ASRModelSelection(version: asrVersion, library: modelLibraryURL?.standardizedFileURL)
+    }
+
     /// Drops the stored security-scoped bookmark — the POINTER to the model
     /// library, never the files themselves (2026-08-22). Used by the DEBUG
     /// onboarding reset so a rehearsal replays the model step from scratch;
@@ -212,7 +225,7 @@ struct ModelsConfiguration: Equatable, Sendable {
 
     func modelDirectoryURL(for version: ASRModelVersion) -> URL? {
         guard let modelLibraryURL else { return nil }
-        return modelLibraryURL.appendingPathComponent(version.repositoryFolderName, isDirectory: true)
+        return version.directory(in: modelLibraryURL)
     }
 
     func availability(for version: ASRModelVersion) -> ASRModelAvailability {
@@ -221,7 +234,7 @@ struct ModelsConfiguration: Equatable, Sendable {
         }
 
         return Self.withSecurityScopedAccess(to: modelLibraryURL) {
-            let expectedDirectory = modelLibraryURL.appendingPathComponent(version.repositoryFolderName, isDirectory: true)
+            let expectedDirectory = version.directory(in: modelLibraryURL)
             var isDirectory: ObjCBool = false
             let fileExists = FileManager.default.fileExists(atPath: expectedDirectory.path, isDirectory: &isDirectory)
             if !fileExists || !isDirectory.boolValue {
