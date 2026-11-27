@@ -367,6 +367,7 @@ final class OnboardingFlowController: ObservableObject {
     @Published var selectedDownloadVersion: ASRModelVersion {
         didSet {
             if oldValue != selectedDownloadVersion {
+                downloadCopyID = nil
                 downloadCommandCopied = false
                 
                 // Update global configuration so availability checks and download 
@@ -394,6 +395,12 @@ final class OnboardingFlowController: ObservableObject {
     @Published private(set) var accessibilitySetupState: AccessibilitySetupState = .idle
     @Published private(set) var installCommandCopied = false
     @Published private(set) var downloadCommandCopied = false
+
+    typealias CopyFeedbackScheduler = (TimeInterval, @escaping @MainActor () -> Void) -> Void
+    private let copyFeedbackScheduler: CopyFeedbackScheduler
+    private let copyCommand: @MainActor (String) -> Void
+    private var installCopyID: UUID?
+    private var downloadCopyID: UUID?
 
     private let requestMicrophoneAccessAction: () -> Void
     private let refreshAction: () -> Void
@@ -471,6 +478,10 @@ final class OnboardingFlowController: ObservableObject {
             config.save()
             NotificationCenter.default.post(name: .pttHotkeyConfigurationDidChange, object: nil)
         },
+        copyFeedbackScheduler: @escaping CopyFeedbackScheduler = { delay, action in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: action)
+        },
+        copyCommand: @escaping @MainActor (String) -> Void = OnboardingFlowController.copyToPasteboard,
         startDictationAction: @escaping () -> Void
     ) {
         self.snapshot = snapshot
@@ -490,6 +501,8 @@ final class OnboardingFlowController: ObservableObject {
         self.loadHotkeyConfiguration = loadHotkeyConfiguration
         self.saveHotkeyConfiguration = saveHotkeyConfiguration
         self.startDictationAction = startDictationAction
+        self.copyFeedbackScheduler = copyFeedbackScheduler
+        self.copyCommand = copyCommand
     }
 
     func apply(snapshot: OnboardingStatusSnapshot) {
@@ -573,18 +586,26 @@ final class OnboardingFlowController: ObservableObject {
     }
 
     func copyInstallCommand() {
-        copyToPasteboard(ModelSetupSupport.huggingFaceInstallCommand)
+        copyCommand(ModelSetupSupport.huggingFaceInstallCommand)
+        let id = UUID()
+        installCopyID = id
         installCommandCopied = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            self?.installCommandCopied = false
+        copyFeedbackScheduler(2) { [weak self] in
+            guard let self, self.installCopyID == id else { return }
+            self.installCopyID = nil
+            self.installCommandCopied = false
         }
     }
 
     func copyDownloadCommand() {
-        copyToPasteboard(downloadCommand)
+        copyCommand(downloadCommand)
+        let id = UUID()
+        downloadCopyID = id
         downloadCommandCopied = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            self?.downloadCommandCopied = false
+        copyFeedbackScheduler(2) { [weak self] in
+            guard let self, self.downloadCopyID == id else { return }
+            self.downloadCopyID = nil
+            self.downloadCommandCopied = false
         }
     }
 
@@ -703,7 +724,7 @@ final class OnboardingFlowController: ObservableObject {
         }
     }
 
-    private func copyToPasteboard(_ text: String) {
+    private static func copyToPasteboard(_ text: String) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
