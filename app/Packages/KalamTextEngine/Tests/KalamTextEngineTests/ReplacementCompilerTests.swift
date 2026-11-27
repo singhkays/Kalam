@@ -139,3 +139,16 @@ import Foundation
     func assertSendable<T: Sendable>(_ value: T) {}
     assertSendable(DictionaryEntry(trigger: "x", replacement: "y"))
 }
+
+@Test func literalTriggersKeepDistinctCaseAndDoNotMatchInflections() {
+    let entries = [
+        DictionaryEntry(trigger: "US", replacement: "United States", caseInsensitive: false, preserveCase: false),
+        DictionaryEntry(trigger: "us", replacement: "our team", caseInsensitive: false, preserveCase: false),
+        DictionaryEntry(trigger: "cat", replacement: "lynx", caseInsensitive: false, preserveCase: false)
+    ]
+    let engine = ReplacementCompiler.compile(entries: entries)
+    let (text, count) = engine.apply(to: "US us Us cat cats cat's cat’s cat. 'cat' ‘cat’")
+    #expect(text == "United States our team Us lynx cats cat's cat’s lynx. 'lynx' ‘lynx’")
+    #expect(count == 6)
+    #expect(entries[2].exampleMatches == ["cat → lynx"])
+}

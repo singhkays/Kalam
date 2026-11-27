@@ -120,3 +120,13 @@ private enum GoldenCorpus {
     let b = ValidationGate.metrics(raw: "hello world", cleaned: "hello world")
     #expect(a == b)
 }
+
+@Test func shortCleanupCanLeaveFewerThanThreeWords() {
+    #expect(ValidationGate.verdict(raw: "um call sam", cleaned: "call sam") == .accept)
+    #expect(ValidationGate.metrics(raw: "um call sam", cleaned: "call sam").trigramOverlap == nil)
+    #expect(!ValidationGate.verdict(raw: "um call sam", cleaned: "ship today").isAccept)
+}
+
+@Test func tokenizerRetainsASCIIRunsAndNormalizesCase() {
+    #expect(ValidationGate.tokenize("Call Sam's café—Room 2B ✓") == ["call", "sam", "s", "caf", "room", "2b"])
+}

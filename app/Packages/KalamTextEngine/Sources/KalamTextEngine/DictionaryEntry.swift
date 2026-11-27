@@ -14,6 +14,8 @@ public struct DictionaryEntry: Identifiable, Codable, Equatable, Sendable {
         trigger.contains(where: { $0.isWhitespace })
     }
 
+    var isLiteral: Bool { !caseInsensitive && !preserveCase }
+
     public var userAdded: Bool = true
 
     public init(id: UUID = UUID(),
@@ -43,6 +45,7 @@ public struct DictionaryEntry: Identifiable, Codable, Equatable, Sendable {
 
     public var exampleMatches: [String] {
         guard !trigger.isEmpty && !replacement.isEmpty else { return [] }
+        if isLiteral { return ["\(trigger) → \(replacement)"] }
 
         func format(_ s: String) -> String {
             let r: String

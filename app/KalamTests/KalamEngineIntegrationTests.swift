@@ -12,72 +12,39 @@ final class KalamEngineIntegrationTests: XCTestCase {
         let description: String
     }
 
-    override func tearDown() {
-        super.tearDown()
-        UserDefaults.standard.removeObject(forKey: "internal.itn.enabled")
-    }
-    
-    @MainActor
     func testGoldenCases() throws {
-        let bundle = Bundle(for: type(of: self))
-        guard let url = bundle.url(forResource: "engine_golden_tests", withExtension: "json") else {
-            XCTFail("Missing engine_golden_tests.json in test bundle")
-            return
-        }
-        
-        do {
-            let data = try Data(contentsOf: url)
-            print("KalamTests: Data loaded successfully (\(data.count) bytes)")
-            
-            let cases = try JSONDecoder().decode([TestCase].self, from: data)
-            print("KalamTests: Decoded \(cases.count) test cases")
-            
-            for testCase in cases {
-                XCTContext.runActivity(named: "Running Test Case: \(testCase.name)") { _ in
-                    print("\n--- Running Test Case: \(testCase.name) ---")
-                    print("Description: \(testCase.description)")
-                    
-                    let result = KalamTestRunner.shared.runTextPipeline(testCase.input)
-                    result.printSummary()
-                    
-                    XCTAssertEqual(result.final.lowercased(), testCase.expected.lowercased(), "Test case '\(testCase.name)' failed.")
-                }
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "engine_golden_tests", withExtension: "json"))
+        let cases = try JSONDecoder().decode([TestCase].self, from: Data(contentsOf: url))
+        let processor = TranscriptPostProcessor(cleanupConfig: .defaults, dictionaryEngine: .empty)
+
+        for testCase in cases {
+            XCTContext.runActivity(named: testCase.name) { _ in
+                let result = processor.process(testCase.input)
+                XCTAssertFalse(result.gateRawFallback, testCase.description)
+                XCTAssertTrue(result.itnEnabled, testCase.description)
+                XCTAssertEqual(result.text.lowercased(), testCase.expected.lowercased(), testCase.description)
             }
-        } catch {
-            print("KalamTests: FATAL ERROR during test setup: \(error)")
-            XCTFail("Fatal error during test setup: \(error)")
         }
     }
 
-    @MainActor
-    func testITNDefaultsToEnabledWhenUnset() throws {
+    func testCleanupMasterGatesITNInProductionPipeline() throws {
         guard NemoTextProcessing.isAvailable else {
-            throw XCTSkip("NemoTextProcessing is not linked in this test environment.")
+            throw XCTSkip("NemoTextProcessing is unavailable.")
         }
 
-        let smoke = NemoTextProcessing.normalize("two hundred and five")
-        guard smoke != "two hundred and five" else {
-            throw XCTSkip("NemoTextProcessing is available but not normalizing in this test environment.")
-        }
+        var config = TextCleanupConfiguration.defaults
+        config.grammarMode = .off
+        let input = "um call sam at five"
+        let enabled = TranscriptPostProcessor(cleanupConfig: config, dictionaryEngine: .empty).process(input)
+        XCTAssertEqual(enabled.text, "call sam at 5")
+        XCTAssertTrue(enabled.itnEnabled)
+        XCTAssertTrue(enabled.itnChanged)
 
-        UserDefaults.standard.removeObject(forKey: "internal.itn.enabled")
-
-        let result = KalamTestRunner.shared.runTextPipeline(
-            "two hundred and five",
-            configuration: TextCleanupConfiguration(
-                enabled: true,
-                removeFillers: false,
-                backtrack: false,
-                listFormatting: false,
-                punctuation: true,
-                grammarMode: .off,
-                grammarTimeoutMs: 100
-            )
-        )
-
-        XCTAssertEqual(result.afterCleanup.lowercased(), "two hundred and five")
-        XCTAssertEqual(result.afterITN, "205")
-        XCTAssertEqual(result.final, "205")
+        config.enabled = false
+        let disabled = TranscriptPostProcessor(cleanupConfig: config, dictionaryEngine: .empty).process(input)
+        XCTAssertEqual(disabled.text, input)
+        XCTAssertFalse(disabled.itnEnabled)
+        XCTAssertFalse(disabled.itnChanged)
     }
 
     @MainActor
