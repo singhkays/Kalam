@@ -484,6 +484,66 @@ final class LiveSettingsBackingTests: XCTestCase {
                        .partial(expectedPath: selected.path, missing: Array(files.dropFirst()), total: files.count))
     }
 
+    func testActiveModelRowsReportOnePresentFileWithNoInstalledModels() throws {
+        let library = try configureModelLibrary(active: .v3)
+        let required = ModelSetupSupport.requiredModelFiles(for: .v3)
+        let first = try XCTUnwrap(required.first)
+        try writeModelFiles([first], for: .v3, in: library)
+
+        let model = SettingsModel(store: makeBacking())
+        let partial = try XCTUnwrap(model.activeModelRows.first { $0.status == .incomplete })
+
+        XCTAssertTrue(model.activeInstalledVersions.isEmpty)
+        XCTAssertEqual(partial.version, .v3)
+        XCTAssertEqual(partial.presentFiles, 1)
+        XCTAssertEqual(partial.totalFiles, required.count)
+        XCTAssertEqual(partial.missingFiles, Array(required.dropFirst()))
+        XCTAssertFalse(model.activeModelRows.contains { $0.status == .active })
+    }
+
+    func testActiveModelRowsKeepCompleteSelectionActiveAlongsidePartial110M() throws {
+        let library = try configureModelLibrary(active: .v2)
+        let v2Files = ModelSetupSupport.requiredModelFiles(for: .v2)
+        let compactFiles = ModelSetupSupport.requiredModelFiles(for: .tdtCtc110m)
+        let compactPresent = try XCTUnwrap(compactFiles.last)
+        try writeModelFiles(v2Files, for: .v2, in: library)
+        try writeModelFiles([compactPresent], for: .tdtCtc110m, in: library)
+
+        let model = SettingsModel(store: makeBacking())
+        let rows = model.activeModelRows
+        let active = try XCTUnwrap(rows.first { $0.version == .v2 })
+        let partial = try XCTUnwrap(rows.first { $0.version == .tdtCtc110m })
+
+        XCTAssertEqual(active.status, .active)
+        XCTAssertEqual(active.presentFiles, v2Files.count)
+        XCTAssertEqual(active.totalFiles, v2Files.count)
+        XCTAssertTrue(active.missingFiles.isEmpty)
+        XCTAssertEqual(partial.status, .incomplete)
+        XCTAssertEqual(partial.presentFiles, 1)
+        XCTAssertEqual(partial.totalFiles, compactFiles.count)
+        XCTAssertNotEqual(partial.totalFiles, active.totalFiles)
+        XCTAssertEqual(partial.missingFiles, Array(compactFiles.dropLast()))
+        XCTAssertEqual(rows.first(where: { $0.version == .v3 })?.status, .missing)
+    }
+
+    private func configureModelLibrary(active version: ASRModelVersion) throws -> URL {
+        let library = dictURL.deletingLastPathComponent().appendingPathComponent("Models", isDirectory: true)
+        try FileManager.default.createDirectory(at: library, withIntermediateDirectories: true)
+        var config = ModelsConfiguration.load(from: suite)
+        config.asrVersion = version
+        try config.setModelLibraryURL(library)
+        config.save(to: suite)
+        return library
+    }
+
+    private func writeModelFiles(_ names: [String], for version: ASRModelVersion, in library: URL) throws {
+        let directory = version.directory(in: library)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for name in names {
+            try Data().write(to: directory.appendingPathComponent(name))
+        }
+    }
+
     func testEngineFolderFreeBytesForExistingFolder() throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("KalamFreeBytesTests-\(UUID().uuidString)", isDirectory: true)

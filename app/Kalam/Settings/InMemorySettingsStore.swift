@@ -208,13 +208,15 @@ final class InMemorySettingsStore: SettingsBacking {
         let s = fixtureSettled()
         s.engine = .verified(ModelInfo(name: "Parakeet v2", detail: "English-only \u{00B7} 5 of 5"))
         s.testSetInstalledVersions([.v2, .v3])
+        for version in s.installedModelVersions {
+            s.testSetManifest(presentCount: ModelSetupSupport.requiredModelFiles(for: version).count, totalFor: version)
+        }
         return s
     }
 
     static func fixtureEngineMultipleIncomplete() -> InMemorySettingsStore {
-        let s = fixtureSettled()
-        s.engine = .incomplete
-        s.testSetInstalledVersions([.v2, .v3])
+        let s = fixtureEngineMultiple()
+        s.testSetManifest(presentCount: 1, totalFor: .tdtCtc110m)
         return s
     }
 

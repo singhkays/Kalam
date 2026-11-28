@@ -331,15 +331,11 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertFalse(m.isModelVersionInstalled(.tdtCtc110m))
     }
 
-    func testFixtureMultipleIncompleteHasTwoInstalled() {
-        let s = InMemorySettingsStore.fixtureEngineMultipleIncomplete()
-        let m = makeModel(s)
-        XCTAssertEqual(m.activeInstalledVersions.count, 2)
-        XCTAssertEqual(m.activeInstalledVersions, [.v2, .v3])
-        XCTAssertEqual(m.activeSelection, .v2)
-        XCTAssertEqual(m.engine, .incomplete)
-        XCTAssertTrue(m.isModelVersionInstalled(.v2))
-        XCTAssertTrue(m.isModelVersionInstalled(.v3))
+    func testFixtureDistinguishesActiveInstalledAndIncompleteVersions() {
+        let model = makeModel(InMemorySettingsStore.fixtureEngineMultipleIncomplete())
+
+        XCTAssertEqual(model.activeModelRows.map(\.version), [.v2, .v3, .tdtCtc110m])
+        XCTAssertEqual(model.activeModelRows.map(\.status), [.active, .installed, .incomplete])
     }
 
     func testIsModelVersionInstalledReflectsInstalled() {
