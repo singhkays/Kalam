@@ -265,6 +265,27 @@ final class IndicatorWaveformMathTests: XCTestCase {
         XCTAssertEqual(levels[2], 0.0, accuracy: 0.0001)
     }
 
+    func testShortBuffersFillOnlyTheBarsWithSamples() {
+        for count in 1...3 {
+            var glyph = IndicatorWaveformMath.GlyphEnvelope()
+            glyph.ingest(Array([Float(0.5), -0.5, 0.5].prefix(count)))
+
+            for (index, level) in glyph.smoothed.enumerated() {
+                XCTAssertEqual(level, index < count ? 0.65 : 0, accuracy: 0.001,
+                               "bar \(index) for \(count) samples")
+            }
+        }
+    }
+
+    func testOneSampleKeepsNormalReleaseForEmptySlices() {
+        var glyph = IndicatorWaveformMath.GlyphEnvelope(smoothed: [0, 0.5, 0.5])
+        glyph.ingest([0.5])
+
+        XCTAssertEqual(glyph.smoothed[0], 0.65, accuracy: 0.001)
+        XCTAssertEqual(glyph.smoothed[1], 0.39, accuracy: 0.001)
+        XCTAssertEqual(glyph.smoothed[2], 0.39, accuracy: 0.001)
+    }
+
     func testFirstLoudTickAttacksToSixtyFivePercentWithUnityGain() {
         var gain: CGFloat = 1.0
         var smoothed: [CGFloat] = [0, 0, 0]
