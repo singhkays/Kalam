@@ -174,7 +174,7 @@ enum IndicatorWaveformMath {
 
         var sliceDb: [CGFloat] = [0, 0, 0]
         for i in 0..<3 {
-            let start = i * chunkSize
+            let start = min(count, i * chunkSize)
             let end = (i == 2) ? count : min(count, (i + 1) * chunkSize)
             var sum: CGFloat = 0
             var n = 0
