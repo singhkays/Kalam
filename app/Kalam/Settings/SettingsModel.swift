@@ -37,6 +37,21 @@ struct EngineDiskSpace: Equatable, Sendable {
     var summary: String
 }
 
+/// File and selection status for one version in the Active model card.
+struct ActiveModelRow: Identifiable {
+    enum Status: Equatable {
+        case active, installed, incomplete, missing
+    }
+
+    let version: ASRModelVersion
+    let status: Status
+    let totalFiles: Int
+    let missingFiles: [String]
+
+    var id: ASRModelVersion { version }
+    var presentFiles: Int { totalFiles - missingFiles.count }
+}
+
 /// Façade over `SettingsBacking`. Map/dive read derived attention from here only.
 @Observable
 @MainActor
@@ -175,6 +190,26 @@ final class SettingsModel {
     }
 
     var activeInstalledVersions: [ASRModelVersion] { _ = revision; return store.installedModelVersions }
+
+    var activeModelRows: [ActiveModelRow] {
+        _ = revision
+        let installed = store.installedModelVersions
+        let selected = store.activeModelVersion
+        return store.availableModelVersions.map { version in
+            let manifest = store.modelFileManifest(for: version)
+            let missing = manifest.filter { !$0.isPresent }.map(\.name)
+            let status: ActiveModelRow.Status
+            if !missing.isEmpty, missing.count < manifest.count {
+                status = .incomplete
+            } else if !manifest.isEmpty, missing.isEmpty, installed.contains(version) {
+                status = version == selected ? .active : .installed
+            } else {
+                status = .missing
+            }
+            return ActiveModelRow(version: version, status: status,
+                                  totalFiles: manifest.count, missingFiles: missing)
+        }
+    }
 
     var activeSelection: ASRModelVersion {
         get { _ = revision; return store.activeModelVersion }
